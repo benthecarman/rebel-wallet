@@ -32,9 +32,9 @@ mod updates;
 
 pub use actions::AppAction;
 pub use state::{
-    ActivityIconKind, ActivityItem, AppState, CapabilityRequest, CapabilityRequestKind, Contact,
-    MainTab, NostrMessage, NostrState, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
-    SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
+    ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
+    Contact, MainTab, NostrMessage, NostrState, ReceiveMethod, ReceivePhase, ReceiveState, Router,
+    Screen, SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -185,17 +185,17 @@ impl AppCore {
         match action {
             AppAction::Bootstrap => self.bootstrap(),
             AppAction::CreateWallet => {
-                self.state.busy = true;
+                self.state.busy.opening_wallet = true;
                 let mnemonic = Mnemonic::generate(12).expect("valid mnemonic").to_string();
                 self.open_wallet(mnemonic, WalletOpenMode::Create);
             }
             AppAction::RestoreWallet { mnemonic } => {
-                self.state.busy = true;
+                self.state.busy.opening_wallet = true;
                 self.open_wallet(mnemonic.trim().to_string(), WalletOpenMode::Restore);
             }
             AppAction::ReplaceWallet { mnemonic } => {
                 self.wallet = None;
-                self.state.busy = true;
+                self.state.busy.opening_wallet = true;
                 self.state.activity.clear();
                 self.state.wallet.balance_sat = 0;
                 self.state.wallet.pending_receive_sat = 0;
@@ -396,7 +396,7 @@ impl AppCore {
     }
 
     fn handle_async(&mut self, msg: AsyncMsg) {
-        self.state.busy = false;
+        self.clear_busy_for_async(&msg);
         match msg {
             AsyncMsg::WalletReady { wallet, mnemonic } => {
                 self.wallet = Some(wallet);
@@ -516,6 +516,33 @@ impl AppCore {
         }
     }
 
+    fn clear_busy_for_async(&mut self, msg: &AsyncMsg) {
+        match msg {
+            AsyncMsg::WalletReady { .. } => {
+                self.state.busy.bootstrapping = false;
+                self.state.busy.opening_wallet = false;
+            }
+            AsyncMsg::WalletSynced { .. } => self.state.busy.syncing_wallet = false,
+            AsyncMsg::ArkAddress(_) | AsyncMsg::LightningInvoice { .. } => {
+                self.state.busy.creating_invoice = false;
+            }
+            AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
+            AsyncMsg::NostrProfilePictureUploaded(_) => {
+                self.state.busy.uploading_profile_picture = false;
+            }
+            AsyncMsg::NostrPublished(_) => self.state.busy.publishing_nostr = false,
+            AsyncMsg::NostrProfileLoaded(_) | AsyncMsg::NostrContactsLoaded(_) => {
+                self.state.busy.refreshing_contacts = false;
+            }
+            AsyncMsg::Error(_) => self.state.busy = BusyState::default(),
+            AsyncMsg::LightningReceiveStatus { .. }
+            | AsyncMsg::LightningReceiveClaimed { .. }
+            | AsyncMsg::Seed(_)
+            | AsyncMsg::DirectMessagesLoaded(_)
+            | AsyncMsg::DirectMessageSent(_) => {}
+        }
+    }
+
     fn emit(&self, shared: &Arc<RwLock<AppState>>, tx: &Sender<AppUpdate>) {
         let mut snapshot = self.state.clone();
         snapshot.refresh_derived();
@@ -530,7 +557,8 @@ impl AppCore {
         self.load_app_data();
         self.load_nostr_key();
         if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
-            self.state.busy = true;
+            self.state.busy.bootstrapping = true;
+            self.state.busy.opening_wallet = true;
             self.open_wallet(mnemonic, WalletOpenMode::Open);
         }
     }
@@ -553,10 +581,11 @@ impl AppCore {
         });
     }
 
-    fn sync_wallet(&self) {
+    fn sync_wallet(&mut self) {
         let Some(wallet) = self.wallet.clone() else {
             return;
         };
+        self.state.busy.syncing_wallet = true;
         let tx = self.tx.clone();
         let contacts = self.state.nostr.contacts.clone();
         self.rt.spawn(async move {
@@ -586,6 +615,7 @@ impl AppCore {
             return;
         };
         self.state.receive.phase = ReceivePhase::Creating;
+        self.state.busy.creating_invoice = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let msg = match wallet.new_address().await {
@@ -601,6 +631,7 @@ impl AppCore {
             return;
         };
         self.state.receive.phase = ReceivePhase::Creating;
+        self.state.busy.creating_invoice = true;
         let amount_sat = self.state.receive.amount_sat;
         let memo = self.state.receive.memo.clone();
         let tx = self.tx.clone();
@@ -706,7 +737,7 @@ impl AppCore {
             self.state.toast = Some("Wallet is not ready yet.".to_string());
             return;
         };
-        self.state.busy = true;
+        self.state.busy.sending_payment = true;
         self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
@@ -740,7 +771,7 @@ impl AppCore {
             self.state.toast = Some("Wallet is not ready yet.".to_string());
             return;
         };
-        self.state.busy = true;
+        self.state.busy.sending_payment = true;
         self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
@@ -853,7 +884,7 @@ impl AppCore {
         Keys::parse(&secret).context("invalid Nostr secret key")
     }
 
-    fn publish_nostr_profile(&self) {
+    fn publish_nostr_profile(&mut self) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -863,6 +894,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.publishing_nostr = true;
         let nostr = self.state.nostr.clone();
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -882,7 +914,7 @@ impl AppCore {
         });
     }
 
-    fn refresh_nostr_profile(&self) {
+    fn refresh_nostr_profile(&mut self) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -892,6 +924,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.refreshing_contacts = true;
         let mut nostr = self.state.nostr.clone();
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -924,7 +957,7 @@ impl AppCore {
         });
     }
 
-    fn delete_nostr_profile(&self) {
+    fn delete_nostr_profile(&mut self) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -934,6 +967,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.publishing_nostr = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let result = async {
@@ -952,7 +986,7 @@ impl AppCore {
         });
     }
 
-    fn upload_nostr_profile_picture(&self, image_base64: String) {
+    fn upload_nostr_profile_picture(&mut self, image_base64: String) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -962,6 +996,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.uploading_profile_picture = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let result = upload_profile_picture(keys, image_base64)
@@ -974,7 +1009,7 @@ impl AppCore {
         });
     }
 
-    fn publish_contact_list(&self) {
+    fn publish_contact_list(&mut self) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -984,6 +1019,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.publishing_nostr = true;
         let contacts = self.state.nostr.contacts.clone();
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -1010,7 +1046,7 @@ impl AppCore {
         });
     }
 
-    fn refresh_contact_list(&self) {
+    fn refresh_contact_list(&mut self) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -1020,6 +1056,7 @@ impl AppCore {
                 return;
             }
         };
+        self.state.busy.refreshing_contacts = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let result = async {

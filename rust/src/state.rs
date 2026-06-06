@@ -15,8 +15,20 @@ pub struct AppState {
     pub activity: Vec<ActivityItem>,
     pub recovery_phrase: Option<String>,
     pub toast: Option<String>,
-    pub busy: bool,
+    pub busy: BusyState,
     pub capability_request: Option<CapabilityRequest>,
+}
+
+#[derive(uniffi::Record, Clone, Debug, Default)]
+pub struct BusyState {
+    pub bootstrapping: bool,
+    pub opening_wallet: bool,
+    pub syncing_wallet: bool,
+    pub creating_invoice: bool,
+    pub sending_payment: bool,
+    pub uploading_profile_picture: bool,
+    pub publishing_nostr: bool,
+    pub refreshing_contacts: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
@@ -255,7 +267,7 @@ impl AppState {
             activity: vec![],
             recovery_phrase: None,
             toast: None,
-            busy: false,
+            busy: BusyState::default(),
             capability_request: None,
         }
     }

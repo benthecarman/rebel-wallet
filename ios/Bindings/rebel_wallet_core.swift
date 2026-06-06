@@ -791,12 +791,12 @@ public struct AppState: Equatable, Hashable {
     public var activity: [ActivityItem]
     public var recoveryPhrase: String?
     public var toast: String?
-    public var busy: Bool
+    public var busy: BusyState
     public var capabilityRequest: CapabilityRequest?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, setup: SetupState, wallet: WalletState, receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: Bool, capabilityRequest: CapabilityRequest?) {
+    public init(rev: UInt64, router: Router, setup: SetupState, wallet: WalletState, receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: BusyState, capabilityRequest: CapabilityRequest?) {
         self.rev = rev
         self.router = router
         self.setup = setup
@@ -839,7 +839,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
                 activity: FfiConverterSequenceTypeActivityItem.read(from: &buf), 
                 recoveryPhrase: FfiConverterOptionString.read(from: &buf), 
                 toast: FfiConverterOptionString.read(from: &buf), 
-                busy: FfiConverterBool.read(from: &buf), 
+                busy: FfiConverterTypeBusyState.read(from: &buf), 
                 capabilityRequest: FfiConverterOptionTypeCapabilityRequest.read(from: &buf)
         )
     }
@@ -856,7 +856,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterSequenceTypeActivityItem.write(value.activity, into: &buf)
         FfiConverterOptionString.write(value.recoveryPhrase, into: &buf)
         FfiConverterOptionString.write(value.toast, into: &buf)
-        FfiConverterBool.write(value.busy, into: &buf)
+        FfiConverterTypeBusyState.write(value.busy, into: &buf)
         FfiConverterOptionTypeCapabilityRequest.write(value.capabilityRequest, into: &buf)
     }
 }
@@ -874,6 +874,84 @@ public func FfiConverterTypeAppState_lift(_ buf: RustBuffer) throws -> AppState 
 #endif
 public func FfiConverterTypeAppState_lower(_ value: AppState) -> RustBuffer {
     return FfiConverterTypeAppState.lower(value)
+}
+
+
+public struct BusyState: Equatable, Hashable {
+    public var bootstrapping: Bool
+    public var openingWallet: Bool
+    public var syncingWallet: Bool
+    public var creatingInvoice: Bool
+    public var sendingPayment: Bool
+    public var uploadingProfilePicture: Bool
+    public var publishingNostr: Bool
+    public var refreshingContacts: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(bootstrapping: Bool, openingWallet: Bool, syncingWallet: Bool, creatingInvoice: Bool, sendingPayment: Bool, uploadingProfilePicture: Bool, publishingNostr: Bool, refreshingContacts: Bool) {
+        self.bootstrapping = bootstrapping
+        self.openingWallet = openingWallet
+        self.syncingWallet = syncingWallet
+        self.creatingInvoice = creatingInvoice
+        self.sendingPayment = sendingPayment
+        self.uploadingProfilePicture = uploadingProfilePicture
+        self.publishingNostr = publishingNostr
+        self.refreshingContacts = refreshingContacts
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BusyState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBusyState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BusyState {
+        return
+            try BusyState(
+                bootstrapping: FfiConverterBool.read(from: &buf), 
+                openingWallet: FfiConverterBool.read(from: &buf), 
+                syncingWallet: FfiConverterBool.read(from: &buf), 
+                creatingInvoice: FfiConverterBool.read(from: &buf), 
+                sendingPayment: FfiConverterBool.read(from: &buf), 
+                uploadingProfilePicture: FfiConverterBool.read(from: &buf), 
+                publishingNostr: FfiConverterBool.read(from: &buf), 
+                refreshingContacts: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BusyState, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.bootstrapping, into: &buf)
+        FfiConverterBool.write(value.openingWallet, into: &buf)
+        FfiConverterBool.write(value.syncingWallet, into: &buf)
+        FfiConverterBool.write(value.creatingInvoice, into: &buf)
+        FfiConverterBool.write(value.sendingPayment, into: &buf)
+        FfiConverterBool.write(value.uploadingProfilePicture, into: &buf)
+        FfiConverterBool.write(value.publishingNostr, into: &buf)
+        FfiConverterBool.write(value.refreshingContacts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBusyState_lift(_ buf: RustBuffer) throws -> BusyState {
+    return try FfiConverterTypeBusyState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBusyState_lower(_ value: BusyState) -> RustBuffer {
+    return FfiConverterTypeBusyState.lower(value)
 }
 
 

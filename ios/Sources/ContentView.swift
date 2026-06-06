@@ -142,7 +142,7 @@ struct SetupView: View {
                     .multilineTextAlignment(.center)
             }
 
-            if manager.state.busy {
+            if manager.state.busy.bootstrapping || manager.state.busy.openingWallet {
                 ProgressView()
             }
             Spacer()
@@ -1443,7 +1443,7 @@ struct RestoreWalletView: View {
     }
 
     private var canRestore: Bool {
-        wordCount >= 12 && !manager.state.busy
+        wordCount >= 12 && !manager.state.busy.openingWallet
     }
 
     var body: some View {
@@ -1483,7 +1483,7 @@ struct RestoreWalletView: View {
                     }
                 } label: {
                     HStack {
-                        if manager.state.busy {
+                        if manager.state.busy.openingWallet {
                             ProgressView()
                                 .tint(.white)
                         }

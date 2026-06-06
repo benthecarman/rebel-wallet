@@ -26,25 +26,6 @@ Suggested remediation:
 - Add actor-level tests that dispatch `AppAction` values and assert resulting `AppState`.
 - Add a small fake `SecretStore` for deterministic wallet/Nostr state tests.
 
-## 2. Busy State Is Too Coarse
-
-The bible recommends domain-specific busy flags so each UI surface can render loading state accurately. Rebel Wallet uses a single `busy: bool`.
-
-Evidence:
-
-- `AppState` has `pub busy: bool`.
-- The same flag is used across setup, sync, send, receive, Nostr upload, profile operations, and contact operations.
-
-Why it matters:
-
-A single busy flag can make unrelated screens appear blocked, can show incorrect spinners, and makes it harder for native UI to determine which controls should be disabled.
-
-Suggested remediation:
-
-- Replace `busy: bool` with a `BusyState` record.
-- Start with fields such as `bootstrapping`, `opening_wallet`, `syncing_wallet`, `creating_invoice`, `sending_payment`, `uploading_profile_picture`, `publishing_nostr`, and `refreshing_contacts`.
-- Update Swift to observe the specific flag relevant to each screen.
-
 ## Suggested Priority
 
 1. Split `rust/src/lib.rs` into RMP-style modules.
