@@ -81,6 +81,8 @@ struct ContentView: View {
             ProfileView(manager: manager)
         case .backup:
             BackupView(manager: manager)
+        case .restore:
+            RestoreWalletView(manager: manager)
         case .contactDetail(let contactId):
             ContactDetailView(manager: manager, contactId: contactId)
         }
@@ -89,7 +91,6 @@ struct ContentView: View {
 
 struct SetupView: View {
     @Bindable var manager: AppManager
-    @State private var restorePhrase = ""
 
     var body: some View {
         VStack(spacing: 22) {
@@ -112,24 +113,13 @@ struct SetupView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
 
-                SecureField("Recovery phrase", text: $restorePhrase)
-                    .textContentType(.password)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .padding(12)
-                    .foregroundStyle(primaryText)
-                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
-
                 Button {
-                    manager.dispatch(.restoreWallet(mnemonic: restorePhrase))
+                    manager.dispatch(.pushScreen(screen: .restore))
                 } label: {
                     Label("Restore wallet", systemImage: "arrow.down.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
-                .disabled(restorePhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
             if case .error(let message) = manager.state.setup {
@@ -1347,7 +1337,9 @@ struct SettingsView: View {
                         manager.dispatch(.pushScreen(screen: .backup))
                     }
                     SettingsDivider()
-                    SettingsRow(title: "Restore", caption: "Restore flow placeholder", accent: rebelRed, disabled: true) {}
+                    SettingsRow(title: "Restore", caption: "Replace this wallet from seed words", accent: rebelRed) {
+                        manager.dispatch(.pushScreen(screen: .restore))
+                    }
                     SettingsDivider()
                     SettingsRow(title: "Servers", caption: manager.state.wallet.serverAddress, disabled: true) {}
                 }
@@ -1507,6 +1499,156 @@ struct BackupView: View {
             if manager.state.recoveryPhrase == nil {
                 manager.dispatch(.showSeed)
             }
+        }
+    }
+}
+
+struct RestoreWalletView: View {
+    @Bindable var manager: AppManager
+    @State private var phrase = ""
+    @State private var confirmingReplace = false
+
+    private var normalizedPhrase: String {
+        phrase
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    private var wordCount: Int {
+        normalizedPhrase.isEmpty ? 0 : normalizedPhrase.split(separator: " ").count
+    }
+
+    private var replacingCurrentWallet: Bool {
+        if case .ready = manager.state.setup {
+            return true
+        }
+        return false
+    }
+
+    private var canRestore: Bool {
+        wordCount >= 12 && !manager.state.busy
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Restore")
+                        .font(.largeTitle.bold())
+                    Text(replacingCurrentWallet ? "Restore from seed words and replace the wallet currently on this device." : "Restore your wallet from seed words.")
+                        .font(.body)
+                        .foregroundStyle(mutedText)
+                    if replacingCurrentWallet {
+                        Text("This clears local Bark wallet data before opening the restored wallet. Your Nostr profile and contacts stay on this device.")
+                            .font(.body)
+                            .foregroundStyle(rebelRed)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Recovery phrase")
+                        .font(.headline)
+                    SecureMultilineTextView(text: $phrase)
+                        .frame(minHeight: 150)
+                        .padding(10)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                    Text("\(wordCount) words")
+                        .font(.caption)
+                        .foregroundStyle(wordCount >= 12 ? rebelGreen : mutedText)
+                }
+
+                Button {
+                    if replacingCurrentWallet {
+                        confirmingReplace = true
+                    } else {
+                        manager.dispatch(.restoreWallet(mnemonic: normalizedPhrase))
+                    }
+                } label: {
+                    HStack {
+                        if manager.state.busy {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Label(replacingCurrentWallet ? "Replace wallet" : "Restore wallet", systemImage: "arrow.down.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle(color: replacingCurrentWallet ? rebelRed : rebelGreen))
+                .disabled(!canRestore)
+
+                if case .error(let message) = manager.state.setup {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(rebelRed)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle("Restore")
+        .scrollContentBackground(.hidden)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .alert("Replace wallet?", isPresented: $confirmingReplace) {
+            Button("Replace", role: .destructive) {
+                manager.dispatch(.replaceWallet(mnemonic: normalizedPhrase))
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the local wallet database on this device and restores from the seed words you entered.")
+        }
+    }
+}
+
+struct SecureMultilineTextView: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.textColor = UIColor(primaryText)
+        textView.tintColor = UIColor(rebelRed)
+        textView.font = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.autocapitalizationType = .none
+        textView.autocorrectionType = .no
+        textView.spellCheckingType = .no
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.keyboardType = .asciiCapable
+        textView.textContentType = .password
+        textView.isSecureTextEntry = true
+        textView.returnKeyType = .done
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        DispatchQueue.main.async {
+            textView.becomeFirstResponder()
+        }
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.text != text {
+            textView.text = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            self._text = text
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text = textView.text
         }
     }
 }

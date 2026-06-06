@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bark::lock_manager::memory::MemoryLockManager;
-use bark::persist::sqlite::SqliteClient;
+use bark::persist::{sqlite::SqliteClient, BarkPersister};
 use bark::{Config, Wallet};
 use bark::ark::lightning::PaymentHash;
 use bitcoin::Amount;
@@ -77,6 +77,7 @@ pub enum Screen {
     Receive,
     Profile,
     Backup,
+    Restore,
     ContactDetail { contact_id: String },
 }
 
@@ -217,6 +218,7 @@ pub enum AppAction {
     Bootstrap,
     CreateWallet,
     RestoreWallet { mnemonic: String },
+    ReplaceWallet { mnemonic: String },
     ShowSeed,
     SyncWallet,
     SelectTab { tab: MainTab },
@@ -419,11 +421,20 @@ impl AppCore {
             AppAction::CreateWallet => {
                 self.state.busy = true;
                 let mnemonic = Mnemonic::generate(12).expect("valid mnemonic").to_string();
-                self.open_wallet(mnemonic, true);
+                self.open_wallet(mnemonic, WalletOpenMode::Create);
             }
             AppAction::RestoreWallet { mnemonic } => {
                 self.state.busy = true;
-                self.open_wallet(mnemonic.trim().to_string(), false);
+                self.open_wallet(mnemonic.trim().to_string(), WalletOpenMode::Restore);
+            }
+            AppAction::ReplaceWallet { mnemonic } => {
+                self.wallet = None;
+                self.state.busy = true;
+                self.state.activity.clear();
+                self.state.wallet.balance_sat = 0;
+                self.state.wallet.pending_receive_sat = 0;
+                self.state.wallet.pending_send_sat = 0;
+                self.open_wallet(mnemonic.trim().to_string(), WalletOpenMode::Replace);
             }
             AppAction::ShowSeed => {
                 if let Some(seed) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
@@ -540,6 +551,8 @@ impl AppCore {
                 self.wallet = Some(wallet);
                 self.state.setup = SetupState::Ready;
                 self.state.router.default_screen = Screen::Home;
+                self.state.router.selected_tab = MainTab::Home;
+                self.state.router.screen_stack.clear();
                 self.state.toast = Some("Rebel Wallet is ready.".to_string());
                 let _ = self
                     .secrets
@@ -644,17 +657,17 @@ impl AppCore {
         self.load_nostr_key();
         if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
             self.state.busy = true;
-            self.open_wallet(mnemonic, false);
+            self.open_wallet(mnemonic, WalletOpenMode::Open);
         }
     }
 
-    fn open_wallet(&self, mnemonic: String, create: bool) {
+    fn open_wallet(&self, mnemonic: String, mode: WalletOpenMode) {
         let tx = self.tx.clone();
         let data_dir = self.data_dir.clone();
         self.rt.spawn(async move {
             let result = async {
                 let mnemonic = Mnemonic::from_str(&mnemonic).context("invalid recovery phrase")?;
-                let wallet = open_bark_wallet(data_dir, &mnemonic, create).await?;
+                let wallet = open_bark_wallet(data_dir, &mnemonic, mode).await?;
                 Ok::<_, anyhow::Error>((wallet, mnemonic.to_string()))
             }
             .await;
@@ -1470,24 +1483,56 @@ struct PersistedAppData {
     receive_memo: String,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum WalletOpenMode {
+    Create,
+    Open,
+    Restore,
+    Replace,
+}
+
 async fn open_bark_wallet(
     data_dir: PathBuf,
     mnemonic: &Mnemonic,
-    create: bool,
+    mode: WalletOpenMode,
 ) -> anyhow::Result<Wallet> {
     std::fs::create_dir_all(&data_dir)?;
-    let db = Arc::new(SqliteClient::open(data_dir.join("rebel-wallet.sqlite"))?);
+    let db_path = data_dir.join("rebel-wallet.sqlite");
+    if matches!(mode, WalletOpenMode::Replace) {
+        remove_wallet_database_files(&db_path)?;
+    }
+    let db = Arc::new(SqliteClient::open(&db_path)?);
     let config = Config {
         server_address: SIGNET_SERVER.to_string(),
         esplora_address: Some(SIGNET_ESPLORA.to_string()),
         ..Config::network_default(bitcoin::Network::Signet)
     };
     let lock_manager = Box::new(MemoryLockManager::new());
-    if create {
-        Wallet::create(mnemonic, bitcoin::Network::Signet, config, db, lock_manager, false).await
-    } else {
-        Wallet::open(mnemonic, db, config, lock_manager).await
+    match mode {
+        WalletOpenMode::Create | WalletOpenMode::Replace => {
+            Wallet::create(mnemonic, bitcoin::Network::Signet, config, db, lock_manager, false).await
+        }
+        WalletOpenMode::Open => Wallet::open(mnemonic, db, config, lock_manager).await,
+        WalletOpenMode::Restore => {
+            if db.read_properties().await?.is_some() {
+                Wallet::open(mnemonic, db, config, lock_manager).await
+            } else {
+                Wallet::create(mnemonic, bitcoin::Network::Signet, config, db, lock_manager, false).await
+            }
+        }
     }
+}
+
+fn remove_wallet_database_files(db_path: &std::path::Path) -> anyhow::Result<()> {
+    for suffix in ["", "-wal", "-shm"] {
+        let path = PathBuf::from(format!("{}{}", db_path.display(), suffix));
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("failed to remove {}", path.display())),
+        }
+    }
+    Ok(())
 }
 
 async fn nostr_client() -> anyhow::Result<NostrClient> {
