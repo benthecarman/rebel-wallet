@@ -1,0 +1,15 @@
+/target
+.direnv/
+.DS_Store
+*.swp
+*.swo
+flake.lock
+staging/
+ios/.build/
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
+android/app/src/main/jniLibs/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

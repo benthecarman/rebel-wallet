@@ -1,0 +1,2432 @@
+import SwiftUI
+import AVFoundation
+import CoreImage.CIFilterBuiltins
+import PhotosUI
+import UIKit
+
+private let rebelBlue = Color(red: 0.28, green: 0.45, blue: 0.82)
+private let rebelGreen = Color(red: 0.11, green: 0.65, blue: 0.47)
+private let rebelRed = Color(red: 0.96, green: 0.14, blue: 0.39)
+private let pageBackground = Color(red: 0.05, green: 0.05, blue: 0.05)
+private let surfaceBackground = Color(red: 0.12, green: 0.12, blue: 0.12)
+private let raisedSurface = Color(red: 0.17, green: 0.17, blue: 0.17)
+private let primaryText = Color.white
+private let mutedText = Color(red: 0.64, green: 0.64, blue: 0.64)
+private let borderColor = Color.white.opacity(0.10)
+
+struct ContentView: View {
+    @Bindable var manager: AppManager
+    @State private var navPath: [Screen] = []
+
+    var body: some View {
+        NavigationStack(path: $navPath) {
+            root
+                .navigationDestination(for: Screen.self) { screen in
+                    screenView(for: screen)
+                }
+        }
+        .tint(rebelRed)
+        .foregroundStyle(primaryText)
+        .background(pageBackground.ignoresSafeArea())
+        .onChange(of: manager.state.router.screenStack) { _, new in
+            navPath = new
+        }
+        .onChange(of: navPath) { old, new in
+            guard new != manager.state.router.screenStack else { return }
+            if new.count < old.count {
+                manager.dispatch(.updateScreenStack(stack: new))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = manager.state.toast {
+                ToastView(text: toast) {
+                    manager.dispatch(.clearToast)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var root: some View {
+        switch manager.state.setup {
+        case .ready:
+            MainWalletView(manager: manager)
+        case .needsSetup, .error:
+            SetupView(manager: manager)
+        }
+    }
+
+    @ViewBuilder
+    private func screenView(for screen: Screen) -> some View {
+        switch screen {
+        case .setup:
+            SetupView(manager: manager)
+        case .home:
+            MainWalletView(manager: manager)
+        case .send:
+            SendView(manager: manager)
+        case .receive:
+            ReceiveView(manager: manager)
+        case .profile:
+            ProfileView(manager: manager)
+        case .backup:
+            BackupView(manager: manager)
+        case .contactDetail(let contactId):
+            ContactDetailView(manager: manager, contactId: contactId)
+        }
+    }
+}
+
+struct SetupView: View {
+    @Bindable var manager: AppManager
+    @State private var restorePhrase = ""
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer(minLength: 24)
+            RebelMark(size: 88)
+            VStack(spacing: 8) {
+                Text("Rebel Wallet")
+                    .font(.largeTitle.bold())
+                Text("Ark and Lightning on Signet")
+                    .font(.subheadline)
+                    .foregroundStyle(mutedText)
+            }
+
+            VStack(spacing: 12) {
+                Button {
+                    manager.dispatch(.createWallet)
+                } label: {
+                    Label("Create wallet", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+
+                SecureField("Recovery phrase", text: $restorePhrase)
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .padding(12)
+                    .foregroundStyle(primaryText)
+                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                Button {
+                    manager.dispatch(.restoreWallet(mnemonic: restorePhrase))
+                } label: {
+                    Label("Restore wallet", systemImage: "arrow.down.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
+                .disabled(restorePhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if case .error(let message) = manager.state.setup {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(rebelRed)
+                    .multilineTextAlignment(.center)
+            }
+
+            if manager.state.busy {
+                ProgressView()
+            }
+            Spacer()
+        }
+        .padding(22)
+        .foregroundStyle(primaryText)
+        .background(pageBackground.ignoresSafeArea())
+    }
+}
+
+struct MainWalletView: View {
+    @Bindable var manager: AppManager
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                switch manager.state.router.selectedTab {
+                case .home:
+                    HomeView(manager: manager)
+                case .activity:
+                    ActivityView(manager: manager)
+                case .contacts:
+                    ContactsView(manager: manager)
+                case .settings:
+                    SettingsView(manager: manager)
+                }
+            }
+            MutinyFab(manager: manager)
+        }
+        .background(pageBackground.ignoresSafeArea())
+    }
+}
+
+struct HomeView: View {
+    @Bindable var manager: AppManager
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                WalletHeader(manager: manager)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    if manager.state.activity.isEmpty {
+                        MutinyEmptyHome()
+                    } else {
+                        ForEach(manager.state.activity, id: \.id) { item in
+                            ActivityRow(item: item)
+                            Divider().overlay(borderColor)
+                        }
+                    }
+                }
+                .padding(.bottom, 88)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+        }
+        .foregroundStyle(primaryText)
+        .background(pageBackground)
+    }
+}
+
+struct WalletHeader: View {
+    @Bindable var manager: AppManager
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button {
+                manager.dispatch(.pushScreen(screen: .profile))
+            } label: {
+                ProfileAvatar(url: manager.state.nostr.picture, size: 48)
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 8)
+            MutinyBalanceButton(wallet: manager.state.wallet)
+                .frame(maxWidth: .infinity)
+            Button {
+                manager.dispatch(.selectTab(tab: .settings))
+            } label: {
+                MutinyCircle(size: 48) {
+                    RebelMark(size: 28)
+                }
+            }
+        }
+    }
+}
+
+struct MutinyBalanceButton: View {
+    let wallet: WalletState
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(wallet.balanceSat) sats")
+                .font(.system(size: 25, weight: .light, design: .default))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(wallet.network)
+                .font(.caption2)
+                .foregroundStyle(mutedText)
+        }
+        .frame(minHeight: 48)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 14)
+        .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                .mask(alignment: .top) { Rectangle().frame(height: 1) }
+        }
+        .overlay(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .mask(alignment: .bottom) { Rectangle().frame(height: 1) }
+        }
+    }
+}
+
+struct MutinyEmptyHome: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "bolt.circle")
+                .font(.system(size: 42, weight: .light))
+                .foregroundStyle(mutedText)
+            Text("No payments yet")
+                .font(.headline)
+            Text("Use the plus button to send, receive, or scan.")
+                .font(.subheadline)
+                .foregroundStyle(mutedText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 56)
+    }
+}
+
+struct MutinyFab: View {
+    @Bindable var manager: AppManager
+    @State private var open = false
+    @State private var showingScanner = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 14) {
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    FabMenuButton(title: "Send", icon: "arrow.up.right") {
+                        open = false
+                        manager.dispatch(.pushScreen(screen: .send))
+                    }
+                    Divider().overlay(borderColor)
+                    FabMenuButton(title: "Receive", icon: "arrow.down.left") {
+                        open = false
+                        manager.dispatch(.pushScreen(screen: .receive))
+                    }
+                    Divider().overlay(borderColor)
+                    FabMenuButton(title: "Scan", icon: "qrcode.viewfinder") {
+                        open = false
+                        showingScanner = true
+                    }
+                }
+                .padding(.horizontal, 8)
+                .fixedSize()
+                .background(surfaceBackground.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+            }
+            Button {
+                open.toggle()
+            } label: {
+                MutinyCircle(size: 64, color: rebelRed) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 30, weight: .semibold))
+                }
+            }
+        }
+        .padding(.trailing, 24)
+        .padding(.bottom, 26)
+        .sheet(isPresented: $showingScanner) {
+            QRScannerSheet { value in
+                manager.dispatch(.setSendDestination(destination: value))
+                manager.dispatch(.pushScreen(screen: .send))
+                showingScanner = false
+            }
+        }
+    }
+}
+
+struct FabMenuButton: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.body)
+            }
+            .foregroundStyle(primaryText)
+            .frame(width: 132, alignment: .leading)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct BalancePanel: View {
+    let wallet: WalletState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Balance")
+                .font(.subheadline)
+                .foregroundStyle(mutedText)
+            Text("\(wallet.balanceSat) sats")
+                .font(.system(size: 42, weight: .bold, design: .rounded))
+            HStack {
+                StatPill(title: "Claimable", value: "\(wallet.pendingReceiveSat) sats")
+                StatPill(title: "Sending", value: "\(wallet.pendingSendSat) sats")
+            }
+            if let lastSync = wallet.lastSync {
+                Text("Last sync \(lastSync)")
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .foregroundStyle(primaryText)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+struct ReceiveView: View {
+    @Bindable var manager: AppManager
+    @State private var method: ReceiveMethod = .lightning
+    @State private var showingResult = false
+    @State private var showingSuccess = false
+    @State private var shownSuccessId: String?
+    @State private var amountText = ""
+    @State private var didInitializeAmount = false
+    @FocusState private var amountFocused: Bool
+
+    private var receiveText: String? {
+        switch method {
+        case .lightning:
+            return manager.state.receive.lightningInvoice
+        case .ark:
+            return manager.state.receive.arkAddress
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Receive Bitcoin")
+                            .font(.largeTitle.bold())
+                    }
+                    Spacer()
+                    if showingResult {
+                        Text("Checking")
+                            .font(.caption.bold())
+                            .foregroundStyle(primaryText)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(raisedSurface, in: Capsule())
+                        Button("Edit") {
+                            showingResult = false
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if showingResult {
+                    ReceiveRequestPanel(
+                        method: method,
+                        text: receiveText,
+                        amountSat: manager.state.receive.amountSat,
+                        status: manager.state.receive.lightningStatus,
+                        paid: manager.state.receive.lightningPaid
+                    )
+                } else {
+                    Spacer(minLength: 24)
+
+                    VStack(spacing: 16) {
+                        ReceiveAmountEditor(
+                            amountText: $amountText,
+                            amountFocused: $amountFocused,
+                            onAmountChanged: { value in
+                                manager.dispatch(.setReceiveAmount(amountSat: value))
+                            }
+                        )
+                        ReceiveMethodPicker(method: $method)
+                    }
+                    .frame(maxWidth: 400)
+
+                    Spacer(minLength: 24)
+
+                    VStack(spacing: 12) {
+                        TextField("What for?", text: Binding(
+                            get: { manager.state.receive.memo },
+                            set: { manager.dispatch(.setReceiveMemo(memo: $0)) }
+                        ))
+                        .padding(14)
+                        .foregroundStyle(primaryText)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                        if method == .lightning && manager.state.receive.amountSat == 0 {
+                            HStack(spacing: 8) {
+                                Image(systemName: "info.circle")
+                                Text("Lightning invoices need an amount.")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(mutedText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            amountFocused = false
+                            switch method {
+                            case .lightning:
+                                manager.dispatch(.createLightningInvoice)
+                            case .ark:
+                                manager.dispatch(.createArkAddress)
+                            }
+                            showingResult = true
+                        } label: {
+                            Text("Continue")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
+                        .disabled(method == .lightning && manager.state.receive.amountSat == 0)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+        }
+        .navigationTitle("Receive")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            if !didInitializeAmount {
+                amountText = ""
+                manager.dispatch(.setReceiveAmount(amountSat: 0))
+                didInitializeAmount = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if !showingResult {
+                    amountFocused = true
+                }
+            }
+            showReceiveSuccessIfNeeded()
+        }
+        .onChange(of: manager.state.receive.lightningPaid) { _, paid in
+            if paid {
+                showReceiveSuccessIfNeeded()
+            }
+        }
+        .fullScreenCover(isPresented: $showingSuccess) {
+            PaymentSuccessScreen(
+                title: "Payment Received",
+                amountSat: manager.state.receive.amountSat,
+                detail: method == .lightning ? "Lightning receive claimed." : "Ark receive confirmed.",
+                confirmText: "Nice"
+            ) {
+                returnHomeFromSuccess()
+            }
+        }
+    }
+
+    private func showReceiveSuccessIfNeeded() {
+        guard manager.state.receive.lightningPaid else { return }
+        let successId = manager.state.receive.lightningPaymentHash ?? "receive-\(manager.state.receive.amountSat)"
+        guard shownSuccessId != successId else { return }
+        shownSuccessId = successId
+        showingSuccess = true
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func returnHomeFromSuccess() {
+        showingResult = false
+        amountText = ""
+        manager.dispatch(.setReceiveAmount(amountSat: 0))
+        manager.dispatch(.selectTab(tab: .home))
+        manager.dispatch(.updateScreenStack(stack: []))
+        dismissSuccessAfterHomeUpdate()
+    }
+
+    private func dismissSuccessAfterHomeUpdate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                showingSuccess = false
+            }
+        }
+    }
+}
+
+struct ReceiveAmountEditor: View {
+    @Binding var amountText: String
+    var amountFocused: FocusState<Bool>.Binding
+    let onAmountChanged: (UInt64) -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                TextField("", text: $amountText)
+                .keyboardType(.numberPad)
+                .focused(amountFocused)
+                .multilineTextAlignment(.center)
+                .font(.system(size: 58, weight: .light))
+                .foregroundStyle(primaryText)
+                .frame(minWidth: 90)
+                .onChange(of: amountText) { _, newValue in
+                    let filtered = newValue.filter(\.isNumber)
+                    if filtered != newValue {
+                        amountText = filtered
+                        return
+                    }
+                    onAmountChanged(UInt64(filtered) ?? 0)
+                }
+
+                Text("sats")
+                    .font(.title3.bold())
+                    .foregroundStyle(mutedText)
+                    .frame(width: 48, alignment: .leading)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18)))
+
+            Text("Amount")
+                .font(.caption.bold())
+                .foregroundStyle(mutedText)
+        }
+    }
+}
+
+struct ReceiveRequestPanel: View {
+    let method: ReceiveMethod
+    let text: String?
+    let amountSat: UInt64
+    let status: String
+    let paid: Bool
+
+    private var displayStatus: String {
+        if method != .lightning { return "Waiting" }
+        if paid { return "Paid" }
+        switch status {
+        case "claiming": return "Claiming"
+        case "claimable": return "Claimable"
+        case "paid": return "Paid"
+        default: return "Waiting"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: method.icon)
+                    .foregroundStyle(method == .lightning ? rebelBlue : rebelGreen)
+                Text(method.title)
+                    .font(.headline)
+                Spacer()
+                if amountSat > 0 {
+                    Text("\(amountSat) sats")
+                        .font(.caption.bold())
+                        .foregroundStyle(mutedText)
+                }
+                Text(displayStatus)
+                    .font(.caption.bold())
+                    .foregroundStyle(paid ? rebelGreen : mutedText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(raisedSurface, in: Capsule())
+            }
+
+            if let text, !text.isEmpty {
+                if paid {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Payment received")
+                    }
+                    .font(.headline)
+                    .foregroundStyle(rebelGreen)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                QRCodeView(text: text)
+                    .frame(maxWidth: .infinity)
+
+                Text(text)
+                    .font(.caption.monospaced())
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .foregroundStyle(primaryText)
+                    .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                HStack(spacing: 10) {
+                    Button {
+                        UIPasteboard.general.string = text
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+
+                    ShareLink(item: text) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            } else {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(rebelGreen)
+                    Text("Creating request...")
+                        .font(.subheadline)
+                        .foregroundStyle(mutedText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 120)
+            }
+        }
+        .padding(14)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+enum ReceiveMethod: String, CaseIterable, Identifiable {
+    case lightning
+    case ark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lightning: return "Lightning"
+        case .ark: return "Ark"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .lightning: return "Invoice for instant payments"
+        case .ark: return "Bark address"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .lightning: return "bolt.fill"
+        case .ark: return "link"
+        }
+    }
+}
+
+struct ReceiveMethodPicker: View {
+    @Binding var method: ReceiveMethod
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(ReceiveMethod.allCases) { option in
+                Button {
+                    method = option
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: option.icon)
+                            .foregroundStyle(option == .lightning ? rebelBlue : rebelGreen)
+                        Text(option.title)
+                            .font(.subheadline.bold())
+                    }
+                    .foregroundStyle(primaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(method == option ? raisedSurface : Color.clear)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+struct SendView: View {
+    @Bindable var manager: AppManager
+    @State private var showingScanner = false
+    @State private var showingSuccess = false
+    @State private var successResult = ""
+    @State private var successAmountSat: UInt64 = 0
+    @State private var draftDestination = ""
+
+    private var destination: String {
+        manager.state.send.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isLightning: Bool {
+        let lower = destination.lowercased()
+        return lower.hasPrefix("lightning:") || lower.hasPrefix("ln")
+    }
+
+    private var sendAmount: UInt64 {
+        manager.state.send.amountSat
+    }
+
+    private var hasInsufficientBalance: Bool {
+        sendAmount > manager.state.wallet.balanceSat
+    }
+
+    private var isSending: Bool {
+        manager.state.busy && !destination.isEmpty
+    }
+
+    private var canSend: Bool {
+        guard !destination.isEmpty else { return false }
+        guard !isSending else { return false }
+        guard !hasInsufficientBalance else { return false }
+        if isLightning { return true }
+        return sendAmount > 0
+    }
+
+    private var sendErrorText: String? {
+        if hasInsufficientBalance {
+            return "Insufficient balance for this send."
+        }
+        if !isLightning && sendAmount == 0 {
+            return "Enter an amount before sending to an Ark address."
+        }
+        return nil
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Send")
+                        .font(.largeTitle.bold())
+                    Text("Paste or scan an Ark address or Lightning invoice.")
+                        .font(.subheadline)
+                        .foregroundStyle(mutedText)
+                }
+
+                if destination.isEmpty {
+                    VStack(spacing: 14) {
+                        TextField("Lightning invoice or Ark address", text: $draftDestination, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .lineLimit(3...6)
+                            .padding(12)
+                            .foregroundStyle(primaryText)
+                            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                        HStack(spacing: 10) {
+                            Button {
+                                if let value = UIPasteboard.general.string {
+                                    draftDestination = value
+                                }
+                            } label: {
+                                Label("Paste", systemImage: "doc.on.clipboard")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+
+                            Button {
+                                showingScanner = true
+                            } label: {
+                                Label("Scan", systemImage: "qrcode.viewfinder")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+                        }
+
+                        Button {
+                            manager.dispatch(.setSendDestination(destination: draftDestination))
+                        } label: {
+                            Text("Continue")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                        .disabled(draftDestination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(14)
+                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+                } else {
+                    SendDestinationSummary(destination: destination, isLightning: isLightning) {
+                        draftDestination = ""
+                        manager.dispatch(.setSendDestination(destination: ""))
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Amount")
+                            .font(.headline)
+                        TextField("Sats", value: Binding(
+                            get: { manager.state.send.amountSat },
+                            set: { manager.dispatch(.setSendAmount(amountSat: $0)) }
+                        ), format: .number)
+                        .keyboardType(.numberPad)
+                        .padding(12)
+                        .foregroundStyle(primaryText)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                        Text(isLightning ? "Leave amount at 0 for invoices that already include an amount." : "Ark sends require an amount.")
+                            .font(.caption)
+                            .foregroundStyle(mutedText)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Note")
+                            .font(.headline)
+                        TextField("What for?", text: Binding(
+                            get: { manager.state.send.memo },
+                            set: { manager.dispatch(.setSendMemo(memo: $0)) }
+                        ))
+                        .padding(12)
+                        .foregroundStyle(primaryText)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                    }
+
+                    if let result = manager.state.send.lastResult {
+                        SendResultPanel(result: result)
+                    }
+
+                    Button {
+                        manager.dispatch(.payDestination)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isSending {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                            }
+                            Text(isSending ? "Sending..." : "Confirm send")
+                        }
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                    .disabled(!canSend)
+
+                    if let sendErrorText {
+                        Text(sendErrorText)
+                            .font(.caption)
+                            .foregroundStyle(rebelRed)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle("Send")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            draftDestination = manager.state.send.destination
+        }
+        .onChange(of: manager.state.send.lastResult) { _, result in
+            guard let result, !result.isEmpty else { return }
+            successResult = result
+            successAmountSat = manager.state.send.amountSat
+            showingSuccess = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+        .onDisappear {
+            guard !showingScanner else { return }
+            draftDestination = ""
+            manager.dispatch(.setSendDestination(destination: ""))
+        }
+        .sheet(isPresented: $showingScanner) {
+            QRScannerSheet { value in
+                manager.dispatch(.setSendDestination(destination: value))
+                draftDestination = value
+                showingScanner = false
+            }
+        }
+        .fullScreenCover(isPresented: $showingSuccess) {
+            PaymentSuccessScreen(
+                title: "Payment Sent",
+                amountSat: successAmountSat,
+                detail: successResult,
+                confirmText: "Nice"
+            ) {
+                returnHomeFromSuccess()
+            }
+        }
+    }
+
+    private func returnHomeFromSuccess() {
+        draftDestination = ""
+        manager.dispatch(.setSendDestination(destination: ""))
+        manager.dispatch(.selectTab(tab: .home))
+        manager.dispatch(.updateScreenStack(stack: []))
+        dismissSuccessAfterHomeUpdate()
+    }
+
+    private func dismissSuccessAfterHomeUpdate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                showingSuccess = false
+            }
+        }
+    }
+}
+
+struct SendDestinationSummary: View {
+    let destination: String
+    let isLightning: Bool
+    let clear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: isLightning ? "bolt.fill" : "link")
+                    .foregroundStyle(isLightning ? rebelBlue : rebelGreen)
+                    .frame(width: 32, height: 32)
+                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isLightning ? "Lightning invoice" : "Ark address")
+                        .font(.headline)
+                    Text(destination)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(mutedText)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button(action: clear) {
+                    Image(systemName: "xmark")
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+    }
+}
+
+struct SendResultPanel: View {
+    let result: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundStyle(rebelGreen)
+            Text(result)
+                .font(.subheadline)
+            Spacer()
+        }
+        .padding(14)
+        .background(rebelGreen.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(rebelGreen.opacity(0.35)))
+    }
+}
+
+struct PaymentSuccessScreen: View {
+    let title: String
+    let amountSat: UInt64
+    let detail: String
+    let confirmText: String
+    let onConfirm: () -> Void
+
+    var body: some View {
+        ZStack {
+            pageBackground.ignoresSafeArea()
+
+            VStack(spacing: 28) {
+                Spacer(minLength: 24)
+
+                Image("MegaCheck")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 240)
+                    .accessibilityLabel("Success")
+
+                VStack(spacing: 10) {
+                    Text(title)
+                        .font(.largeTitle.bold())
+                        .multilineTextAlignment(.center)
+
+                    if amountSat > 0 {
+                        Text("\(amountSat) sats")
+                            .font(.title2.bold())
+                            .foregroundStyle(rebelGreen)
+                    }
+
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(mutedText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+
+                Spacer(minLength: 24)
+
+                Button(action: onConfirm) {
+                    Text(confirmText)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: raisedSurface))
+                .frame(maxWidth: 300)
+            }
+            .padding(24)
+            .foregroundStyle(primaryText)
+        }
+    }
+}
+
+struct SecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(primaryText)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(raisedSurface.opacity(configuration.isPressed ? 0.75 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+struct ActivityView: View {
+    @Bindable var manager: AppManager
+    @State private var selectedActivityId: String?
+
+    private var selectedActivity: ActivityItem? {
+        manager.state.activity.first { $0.id == selectedActivityId }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Activity")
+                    .font(.largeTitle.bold())
+                VStack(spacing: 0) {
+                    if manager.state.activity.isEmpty {
+                        EmptyState(text: "No wallet activity recorded")
+                    } else {
+                        ForEach(manager.state.activity, id: \.id) { item in
+                            Button {
+                                selectedActivityId = item.id
+                            } label: {
+                                ActivityRow(item: item)
+                                    .padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+                            Divider().overlay(borderColor)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+            }
+            .padding(16)
+        }
+        .navigationTitle("Activity")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .sheet(isPresented: Binding(
+            get: { selectedActivityId != nil },
+            set: { if !$0 { selectedActivityId = nil } }
+        )) {
+            if let selectedActivity {
+                ActivityDetailSheet(item: selectedActivity)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+}
+
+struct ActivityDetailSheet: View {
+    let item: ActivityItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: item.amountSat < 0 ? "arrow.up.right" : "arrow.down.left")
+                    .font(.title2)
+                    .foregroundStyle(item.amountSat < 0 ? rebelBlue : rebelGreen)
+                    .frame(width: 44, height: 44)
+                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.title2.bold())
+                    Text(item.status)
+                        .font(.caption.bold())
+                        .foregroundStyle(mutedText)
+                }
+            }
+
+            VStack(spacing: 0) {
+                DetailLine(title: "Amount", value: "\(item.amountSat) sats")
+                SettingsDivider()
+                DetailLine(title: "Description", value: item.subtitle)
+                SettingsDivider()
+                DetailLine(title: "Time", value: item.timestamp)
+                SettingsDivider()
+                DetailLine(title: "ID", value: item.id)
+            }
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+
+            Spacer()
+        }
+        .padding(18)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+    }
+}
+
+struct DetailLine: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(mutedText)
+            Text(value)
+                .font(.subheadline)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+    }
+}
+
+struct ContactsView: View {
+    @Bindable var manager: AppManager
+    @State private var query = ""
+    @State private var npub = ""
+    @State private var name = ""
+    @State private var lightningAddress = ""
+    @State private var adding = false
+
+    private var contacts: [Contact] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return manager.state.nostr.contacts }
+        return manager.state.nostr.contacts.filter { contact in
+            contact.name.lowercased().contains(trimmed)
+                || contact.npub.lowercased().contains(trimmed)
+                || contact.lightningAddress.lowercased().contains(trimmed)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Social")
+                            .font(.largeTitle.bold())
+                        Text("Search contacts, send payments, and message over Nostr.")
+                            .font(.subheadline)
+                            .foregroundStyle(mutedText)
+                    }
+                    Spacer()
+                    Button {
+                        manager.dispatch(.refreshContactList)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        manager.dispatch(.publishContactList)
+                    } label: {
+                        Image(systemName: "paperplane")
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(mutedText)
+                    TextField("Search contacts, npub, or lightning address", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+
+                Button {
+                    adding.toggle()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: adding ? "minus" : "plus")
+                            .foregroundStyle(rebelRed)
+                            .frame(width: 28)
+                        Text(adding ? "Hide new contact" : "New contact")
+                            .font(.headline)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(14)
+                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+
+                if adding {
+                    VStack(spacing: 10) {
+                        TextField("npub", text: $npub)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .profileField()
+                        TextField("Name", text: $name)
+                            .profileField()
+                        TextField("Lightning address", text: $lightningAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .profileField()
+                        Button("Add and follow") {
+                            manager.dispatch(.addContact(npub: npub, name: name.isEmpty ? npub : name, lightningAddress: lightningAddress, lnurl: "", picture: ""))
+                            npub = ""
+                            name = ""
+                            lightningAddress = ""
+                            adding = false
+                        }
+                        .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                        .disabled(npub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(14)
+                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+                }
+
+                VStack(spacing: 0) {
+                    if contacts.isEmpty {
+                        EmptyState(text: query.isEmpty ? "No Nostr contacts yet" : "No matching contacts")
+                    } else {
+                        ForEach(contacts, id: \.id) { contact in
+                            Button {
+                                manager.dispatch(.pushScreen(screen: .contactDetail(contactId: contact.id)))
+                            } label: {
+                                ContactRow(contact: contact)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.plain)
+                            Divider().overlay(borderColor)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+            }
+            .padding(16)
+        }
+        .navigationTitle("Social")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+    }
+}
+
+struct SettingsView: View {
+    @Bindable var manager: AppManager
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Button {
+                    manager.dispatch(.selectTab(tab: .home))
+                } label: {
+                    Label("Back to wallet", systemImage: "chevron.left")
+                        .foregroundStyle(mutedText)
+                }
+                .buttonStyle(.plain)
+
+                Text("Settings")
+                    .font(.largeTitle.bold())
+
+                SettingsCard(title: "General") {
+                    SettingsRow(title: "Backup", caption: "Show recovery phrase", accent: rebelGreen) {
+                        manager.dispatch(.showSeed)
+                        manager.dispatch(.pushScreen(screen: .backup))
+                    }
+                    SettingsDivider()
+                    SettingsRow(title: "Restore", caption: "Restore flow placeholder", accent: rebelRed, disabled: true) {}
+                    SettingsDivider()
+                    SettingsRow(title: "Servers", caption: manager.state.wallet.serverAddress, disabled: true) {}
+                }
+
+                SettingsCard(title: "Appearance") {
+                    SettingsRow(title: "Currency", caption: "Sats", disabled: true) {}
+                    SettingsDivider()
+                    SettingsRow(title: "Language", caption: "English", disabled: true) {}
+                }
+
+                SettingsCard(title: "Social") {
+                    SettingsRow(title: "Nostr keys", caption: manager.state.nostr.npub ?? "No Nostr key") {
+                        manager.dispatch(.pushScreen(screen: .profile))
+                    }
+                }
+
+                Text("Secrets are stored in iOS Keychain. Wallet data uses local sqlite.")
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 24)
+            }
+            .padding(16)
+        }
+        .navigationTitle("Settings")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+    }
+}
+
+struct SettingsCard<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(mutedText)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+            content
+        }
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+    }
+}
+
+struct SettingsRow: View {
+    let title: String
+    let caption: String?
+    var accent: Color?
+    var disabled = false
+    let action: () -> Void
+
+    init(title: String, caption: String? = nil, accent: Color? = nil, disabled: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.caption = caption
+        self.accent = accent
+        self.disabled = disabled
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(accent ?? primaryText)
+                    if let caption, !caption.isEmpty {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(mutedText)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(mutedText)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .opacity(disabled ? 0.45 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+}
+
+struct SettingsDivider: View {
+    var body: some View {
+        Divider()
+            .overlay(borderColor)
+            .padding(.leading, 14)
+    }
+}
+
+struct BackupView: View {
+    @Bindable var manager: AppManager
+    @State private var revealed = false
+    @State private var copied = false
+    @State private var checkedSecure = false
+    @State private var checkedResponsibility = false
+    @State private var checkedPrivate = false
+
+    private var words: [String] {
+        (manager.state.recoveryPhrase ?? "")
+            .split(separator: " ")
+            .map(String.init)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Backup")
+                        .font(.largeTitle.bold())
+                    Text("Your recovery phrase controls your funds. Write these words down and keep them offline.")
+                        .font(.body)
+                        .foregroundStyle(mutedText)
+                    Text("Anyone with these words can restore and spend from this wallet.")
+                        .font(.body)
+                        .foregroundStyle(mutedText)
+                }
+
+                SeedWordsPanel(words: words, revealed: $revealed, copied: $copied)
+
+                if revealed {
+                    VStack(alignment: .leading, spacing: 12) {
+                        BackupCheckBox(checked: $checkedSecure, text: "I wrote the words down.")
+                        BackupCheckBox(checked: $checkedResponsibility, text: "I understand Rebel cannot recover them.")
+                        BackupCheckBox(checked: $checkedPrivate, text: "I will not share them with anyone.")
+                    }
+                    .padding(14)
+                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+                }
+
+                Button {
+                    manager.dispatch(.popScreen)
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(!(revealed && checkedSecure && checkedResponsibility && checkedPrivate))
+            }
+            .padding(16)
+        }
+        .navigationTitle("Backup")
+        .scrollContentBackground(.hidden)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            if manager.state.recoveryPhrase == nil {
+                manager.dispatch(.showSeed)
+            }
+        }
+    }
+}
+
+struct SeedWordsPanel: View {
+    let words: [String]
+    @Binding var revealed: Bool
+    @Binding var copied: Bool
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Button {
+                revealed.toggle()
+            } label: {
+                Text(revealed ? "Hide seed words" : "Reveal seed words")
+                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+
+            if revealed {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                        HStack(spacing: 8) {
+                            Text("\(index + 1).")
+                                .foregroundStyle(primaryText.opacity(0.65))
+                                .frame(width: 28, alignment: .trailing)
+                            Text(word)
+                                .font(.system(.body, design: .monospaced).weight(.medium))
+                            Spacer()
+                        }
+                    }
+                }
+
+                Button {
+                    UIPasteboard.general.string = words.joined(separator: " ")
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: "doc.on.doc")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .padding(16)
+        .background(rebelRed, in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(primaryText)
+    }
+}
+
+struct BackupCheckBox: View {
+    @Binding var checked: Bool
+    let text: String
+
+    var body: some View {
+        Button {
+            checked.toggle()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                    .font(.title3)
+                    .foregroundStyle(checked ? rebelRed : mutedText)
+                Text(text)
+                    .foregroundStyle(primaryText)
+                Spacer()
+            }
+        }
+    }
+}
+
+struct ProfileView: View {
+    @Bindable var manager: AppManager
+    @State private var mode: ProfileMode = .summary
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                switch mode {
+                case .summary:
+                    ProfileSummaryPanel(manager: manager, mode: $mode)
+                case .edit:
+                    EditProfilePanel(manager: manager) {
+                        mode = .summary
+                    }
+                case .keys:
+                    NostrKeysPanel(manager: manager) {
+                        mode = .summary
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle(mode.title)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+    }
+}
+
+enum ProfileMode {
+    case summary
+    case edit
+    case keys
+
+    var title: String {
+        switch self {
+        case .summary: return "Profile"
+        case .edit: return "Edit Profile"
+        case .keys: return "Nostr Keys"
+        }
+    }
+}
+
+struct ProfileSummaryPanel: View {
+    @Bindable var manager: AppManager
+    @Binding var mode: ProfileMode
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 12) {
+                ProfileAvatar(url: manager.state.nostr.picture, size: 128)
+                Text(manager.state.nostr.name.isEmpty ? "Rebel" : manager.state.nostr.name)
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
+                if !manager.state.nostr.lud16.isEmpty {
+                    Text(manager.state.nostr.lud16)
+                        .font(.subheadline)
+                        .foregroundStyle(rebelGreen)
+                }
+                if !manager.state.nostr.about.isEmpty {
+                    Text(manager.state.nostr.about)
+                        .font(.body)
+                        .foregroundStyle(mutedText)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+
+            VStack(spacing: 10) {
+                ProfileActionRow(icon: "pencil", title: "Edit Profile", color: rebelRed) {
+                    mode = .edit
+                }
+                ProfileActionRow(icon: "key.fill", title: "Nostr Keys", color: rebelBlue) {
+                    mode = .keys
+                }
+            }
+
+            BalancePanel(wallet: manager.state.wallet)
+        }
+    }
+}
+
+struct EditProfilePanel: View {
+    @Bindable var manager: AppManager
+    let done: () -> Void
+    @State private var name = ""
+    @State private var about = ""
+    @State private var picture = ""
+    @State private var lud16 = ""
+    @State private var nip05 = ""
+    @State private var selectedPhoto: PhotosPickerItem?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button(action: done) {
+                Label("Profile", systemImage: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(mutedText)
+
+            VStack(spacing: 14) {
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    ZStack(alignment: .bottomTrailing) {
+                        ProfileAvatar(url: picture, size: 128)
+                        Image(systemName: "pencil")
+                            .font(.headline)
+                            .padding(10)
+                            .background(rebelRed, in: Circle())
+                    }
+                }
+
+                TextField("Name", text: $name)
+                    .profileField()
+                TextField("About", text: $about, axis: .vertical)
+                    .lineLimit(3...6)
+                    .profileField()
+                TextField("Picture URL", text: $picture)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .profileField()
+                TextField("Lightning address", text: $lud16)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .profileField()
+                TextField("NIP-05", text: $nip05)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .profileField()
+
+                Button {
+                    manager.dispatch(.editNostrProfile(name: name, about: about, picture: picture, lud16: lud16, nip05: nip05))
+                    manager.dispatch(.publishNostrProfile)
+                    done()
+                } label: {
+                    Text("Save")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+            }
+            .padding(14)
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+        }
+        .onAppear {
+            name = manager.state.nostr.name
+            about = manager.state.nostr.about
+            picture = manager.state.nostr.picture
+            lud16 = manager.state.nostr.lud16
+            nip05 = manager.state.nostr.nip05
+        }
+        .onChange(of: manager.state.nostr.picture) { _, newValue in
+            picture = newValue
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    manager.dispatch(.uploadNostrProfilePicture(imageBase64: data.base64EncodedString()))
+                }
+                selectedPhoto = nil
+            }
+        }
+    }
+}
+
+struct NostrKeysPanel: View {
+    @Bindable var manager: AppManager
+    let done: () -> Void
+    @State private var secret = ""
+    @State private var confirmDelete = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button(action: done) {
+                Label("Profile", systemImage: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(mutedText)
+
+            VStack(spacing: 14) {
+                if let npub = manager.state.nostr.npub {
+                    QRCodeView(text: npub)
+                        .frame(maxWidth: .infinity)
+                    KeyValueBlock(title: "Public Key", value: npub, hidden: false)
+                } else {
+                    EmptyState(text: "No Nostr key")
+                }
+
+                SecureField("Nostr private key (starts with nsec)", text: $secret)
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .profileField()
+
+                Button {
+                    manager.dispatch(.importNostrSecret(nsecOrHex: secret))
+                    secret = ""
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                HStack(spacing: 10) {
+                    Button {
+                        manager.dispatch(.generateNostrKey)
+                    } label: {
+                        Label("Generate", systemImage: "plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+
+                    Button {
+                        manager.dispatch(.exportNostrSecret)
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(manager.state.nostr.npub == nil)
+                }
+
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Label("Delete published profile", systemImage: "person.crop.circle.badge.xmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(manager.state.nostr.npub == nil)
+
+                Button(role: .destructive) {
+                    manager.dispatch(.clearNostrKey)
+                } label: {
+                    Label("Unlink key", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(manager.state.nostr.npub == nil)
+            }
+            .padding(14)
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+        }
+        .confirmationDialog("Delete published Nostr profile?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete published profile", role: .destructive) {
+                manager.dispatch(.deleteNostrProfile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This publishes a deletion event to configured relays.")
+        }
+    }
+}
+
+struct ProfileAvatar: View {
+    let url: String
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(raisedSurface)
+            if let parsed = URL(string: url), !url.isEmpty {
+                AsyncImage(url: parsed) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    ProgressView()
+                }
+            } else {
+                Text("R")
+                    .font(.system(size: size * 0.42, weight: .bold))
+                    .foregroundStyle(primaryText)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.20)))
+    }
+}
+
+struct ProfileActionRow: View {
+    let icon: String
+    let title: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                    .frame(width: 28)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(mutedText)
+            }
+            .padding(14)
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct KeyValueBlock: View {
+    let title: String
+    let value: String
+    let hidden: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(mutedText)
+            Text(hidden ? String(repeating: "*", count: min(value.count, 32)) : value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}
+
+extension View {
+    func profileField() -> some View {
+        self
+            .padding(12)
+            .foregroundStyle(primaryText)
+            .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+struct ContactDetailView: View {
+    @Bindable var manager: AppManager
+    let contactId: String
+    @State private var message = ""
+
+    var contact: Contact? {
+        manager.state.nostr.contacts.first { $0.id == contactId }
+    }
+
+    var messages: [NostrMessage] {
+        manager.state.directMessages.filter { $0.contactId == contactId }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let contact {
+                ContactChatHeader(manager: manager, contact: contact)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
+                    .background(pageBackground.opacity(0.92))
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        if messages.isEmpty {
+                            Button {
+                                manager.dispatch(.pushScreen(screen: .receive))
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: "message.badge")
+                                        .foregroundStyle(rebelRed)
+                                    Text("Send a message or request a payment to start this chat.")
+                                        .font(.subheadline)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer()
+                                }
+                                .padding(14)
+                                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ForEach(messages, id: \.id) { msg in
+                                DirectMessageRow(message: msg)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        if !contact.lightningAddress.isEmpty {
+                            manager.dispatch(.setSendDestination(destination: contact.lightningAddress))
+                            manager.dispatch(.pushScreen(screen: .send))
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.title3)
+                            .foregroundStyle(rebelRed)
+                            .frame(width: 36, height: 36)
+                    }
+                    .disabled(contact.lightningAddress.isEmpty)
+
+                    TextField("Message", text: $message, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(12)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+
+                    Button {
+                        manager.dispatch(.sendDirectMessage(contactId: contact.id, message: message))
+                        message = ""
+                    } label: {
+                        Text("Send")
+                    }
+                    .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                    .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(12)
+                .background(pageBackground.opacity(0.94))
+            } else {
+                EmptyState(text: "Contact not found")
+            }
+        }
+        .navigationTitle(contact?.name ?? "Contact")
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            manager.dispatch(.loadDirectMessages(contactId: contactId))
+        }
+    }
+}
+
+struct ContactChatHeader: View {
+    @Bindable var manager: AppManager
+    let contact: Contact
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ContactRow(contact: contact)
+                Button {
+                    manager.dispatch(.loadDirectMessages(contactId: contact.id))
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 16) {
+                Button {
+                    if !contact.lightningAddress.isEmpty {
+                        manager.dispatch(.setSendDestination(destination: contact.lightningAddress))
+                        manager.dispatch(.pushScreen(screen: .send))
+                    }
+                } label: {
+                    Label("Send", systemImage: "arrow.up.right")
+                }
+                .foregroundStyle(rebelGreen)
+                .disabled(contact.lightningAddress.isEmpty)
+
+                Button {
+                    manager.dispatch(.pushScreen(screen: .receive))
+                } label: {
+                    Label("Request", systemImage: "arrow.down.left")
+                }
+                .foregroundStyle(rebelBlue)
+
+                Button {
+                    if contact.followed {
+                        manager.dispatch(.unfollowContact(contactId: contact.id))
+                    } else {
+                        manager.dispatch(.followContact(contactId: contact.id))
+                    }
+                } label: {
+                    Label(contact.followed ? "Unfollow" : "Follow", systemImage: contact.followed ? "xmark" : "checkmark")
+                }
+                .foregroundStyle(contact.followed ? rebelRed : primaryText)
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    manager.dispatch(.deleteContact(contactId: contact.id))
+                    manager.dispatch(.popScreen)
+                } label: {
+                    Image(systemName: "trash")
+                }
+            }
+            .font(.subheadline.bold())
+        }
+    }
+}
+
+struct RebelMark: View {
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(rebelRed)
+            Text("R")
+                .font(.system(size: size * 0.55, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+struct MutinyCircle<Content: View>: View {
+    let size: CGFloat
+    var color: Color = raisedSurface
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color)
+            content
+                .foregroundStyle(primaryText)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+    }
+}
+
+struct NavAction: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title)
+                Text(title)
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+        }
+        .buttonStyle(PrimaryButtonStyle(color: color))
+    }
+}
+
+struct PrimaryButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(.white)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .background(color.opacity(configuration.isPressed ? 0.82 : 1), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct StatPill: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(mutedText)
+            Text(value)
+                .font(.subheadline.bold())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .foregroundStyle(primaryText)
+        .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct ActivityRow: View {
+    let item: ActivityItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.amountSat < 0 ? "arrow.up.right" : "arrow.down.left")
+                .foregroundStyle(item.amountSat < 0 ? rebelBlue : rebelGreen)
+                .frame(width: 32, height: 32)
+                .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.subheadline.bold())
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .lineLimit(2)
+                Text(item.timestamp)
+                    .font(.caption2)
+                    .foregroundStyle(mutedText)
+            }
+            Spacer()
+            Text("\(item.amountSat) sats")
+                .font(.caption.bold())
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+struct ContactRow: View {
+    let contact: Contact
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(rebelBlue.opacity(0.28))
+                .frame(width: 42, height: 42)
+                .overlay(Text(String(contact.name.prefix(1))).font(.headline).foregroundStyle(primaryText))
+            VStack(alignment: .leading) {
+                Text(contact.name)
+                    .font(.subheadline.bold())
+                Text(contact.lightningAddress.isEmpty ? (contact.followed ? "Following" : "Not following") : contact.lightningAddress)
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+            }
+            Spacer()
+        }
+    }
+}
+
+struct DirectMessageRow: View {
+    let message: NostrMessage
+
+    var body: some View {
+        HStack {
+            if !message.inbound { Spacer(minLength: 48) }
+            VStack(alignment: message.inbound ? .leading : .trailing, spacing: 4) {
+                Text(message.body)
+                    .font(.subheadline)
+                    .foregroundStyle(primaryText)
+                    .padding(10)
+                    .background(message.inbound ? raisedSurface : rebelBlue.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+                Text(message.timestamp)
+                    .font(.caption2)
+                    .foregroundStyle(mutedText)
+            }
+            if message.inbound { Spacer(minLength: 48) }
+        }
+    }
+}
+
+struct ReceiveStringBox: View {
+    let text: String?
+    let placeholder: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let text, !text.isEmpty {
+                QRCodeView(text: text)
+                    .frame(maxWidth: .infinity)
+                Text(text)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .foregroundStyle(primaryText)
+                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    Button {
+                        UIPasteboard.general.string = text
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    ShareLink(item: text) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Text(placeholder)
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+            }
+        }
+    }
+}
+
+struct QRCodeView: View {
+    let text: String
+    private let context = CIContext()
+    private let filter = CIFilter.qrCodeGenerator()
+
+    var body: some View {
+        if let image = makeImage() {
+            Image(uiImage: image)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 220, height: 220)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func makeImage() -> UIImage? {
+        filter.message = Data(text.utf8)
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+struct QRScannerSheet: View {
+    let onScan: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            QRScannerView(onScan: onScan)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Scan payment")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct QRScannerView: UIViewControllerRepresentable {
+    let onScan: (String) -> Void
+
+    func makeUIViewController(context: Context) -> QRScannerViewController {
+        let controller = QRScannerViewController()
+        controller.onScan = onScan
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: QRScannerViewController, context: Context) {}
+}
+
+final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onScan: ((String) -> Void)?
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didScan = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        configureSession()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        didScan = false
+        if !session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async { [session] in
+                session.startRunning()
+            }
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async { [session] in
+                session.stopRunning()
+            }
+        }
+    }
+
+    private func configureSession() {
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else {
+            showUnavailable()
+            return
+        }
+        session.addInput(input)
+
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else {
+            showUnavailable()
+            return
+        }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(self, queue: .main)
+        output.metadataObjectTypes = [.qr]
+
+        let layer = AVCaptureVideoPreviewLayer(session: session)
+        layer.videoGravity = .resizeAspectFill
+        view.layer.insertSublayer(layer, at: 0)
+        previewLayer = layer
+    }
+
+    private func showUnavailable() {
+        let label = UILabel()
+        label.text = "Camera unavailable"
+        label.textColor = .white
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didScan,
+              let readable = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let value = readable.stringValue else {
+            return
+        }
+        didScan = true
+        onScan?(value)
+    }
+}
+
+struct EmptyState: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(mutedText)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 24)
+    }
+}
+
+struct ToastView: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(text)
+                .font(.footnote)
+                .lineLimit(4)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+            }
+        }
+        .padding(12)
+        .background(.black.opacity(0.86), in: RoundedRectangle(cornerRadius: 8))
+        .foregroundStyle(.white)
+        .padding()
+    }
+}

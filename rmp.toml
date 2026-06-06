@@ -1,0 +1,10 @@
+[project]
+name = "rebel-wallet"
+org = "com.rebelwallet"
+
+[core]
+crate = "rebel-wallet_core"
+bindings = "uniffi"
+
+[ios]
+bundle_id = "com.rebelwallet.app"
