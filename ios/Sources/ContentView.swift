@@ -14,16 +14,6 @@ private let primaryText = Color.white
 private let mutedText = Color(red: 0.64, green: 0.64, blue: 0.64)
 private let borderColor = Color.white.opacity(0.10)
 
-private func formatSats(_ amount: UInt64) -> String {
-    "\(amount.formatted(.number.grouping(.automatic))) sats"
-}
-
-private func formatSats(_ amount: Int64, signed: Bool = false) -> String {
-    let magnitude = amount < 0 ? UInt64(amount.magnitude) : UInt64(amount)
-    let prefix = amount < 0 ? "-" : (signed && amount > 0 ? "+" : "")
-    return "\(prefix)\(magnitude.formatted(.number.grouping(.automatic))) sats"
-}
-
 struct ContentView: View {
     @Bindable var manager: AppManager
     @State private var navPath: [Screen] = []
@@ -221,7 +211,7 @@ struct MutinyBalanceButton: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(formatSats(wallet.balanceSat))
+            Text(wallet.balanceDisplay)
                 .font(.system(size: 25, weight: .light, design: .default))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -345,11 +335,11 @@ struct BalancePanel: View {
             Text("Balance")
                 .font(.subheadline)
                 .foregroundStyle(mutedText)
-            Text(formatSats(wallet.balanceSat))
+            Text(wallet.balanceDisplay)
                 .font(.system(size: 42, weight: .bold, design: .rounded))
             HStack {
-                StatPill(title: "Claimable", value: formatSats(wallet.pendingReceiveSat))
-                StatPill(title: "Sending", value: formatSats(wallet.pendingSendSat))
+                StatPill(title: "Claimable", value: wallet.pendingReceiveDisplay)
+                StatPill(title: "Sending", value: wallet.pendingSendDisplay)
             }
             if let lastSync = wallet.lastSync {
                 Text("Last sync \(lastSync)")
@@ -412,8 +402,8 @@ struct ReceiveView: View {
                     ReceiveRequestPanel(
                         method: method,
                         text: receiveText,
-                        amountSat: manager.state.receive.amountSat,
-                        status: manager.state.receive.lightningStatus,
+                        amountText: manager.state.receive.amountDisplay,
+                        statusText: manager.state.receive.lightningStatusDisplay,
                         paid: manager.state.receive.lightningPaid
                     )
                 } else {
@@ -498,7 +488,7 @@ struct ReceiveView: View {
         .fullScreenCover(isPresented: $showingSuccess) {
             PaymentSuccessScreen(
                 title: "Payment Received",
-                amountSat: manager.state.receive.amountSat,
+                amountText: manager.state.receive.amountDisplay,
                 detail: method == .lightning ? "Lightning receive claimed." : "Ark receive confirmed.",
                 confirmText: "Nice"
             ) {
@@ -580,20 +570,9 @@ struct ReceiveAmountEditor: View {
 struct ReceiveRequestPanel: View {
     let method: ReceiveMethod
     let text: String?
-    let amountSat: UInt64
-    let status: String
+    let amountText: String
+    let statusText: String
     let paid: Bool
-
-    private var displayStatus: String {
-        if method != .lightning { return "Waiting" }
-        if paid { return "Paid" }
-        switch status {
-        case "claiming": return "Claiming"
-        case "claimable": return "Claimable"
-        case "paid": return "Paid"
-        default: return "Waiting"
-        }
-    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -603,12 +582,12 @@ struct ReceiveRequestPanel: View {
                 Text(method.title)
                     .font(.headline)
                 Spacer()
-                if amountSat > 0 {
-                    Text(formatSats(amountSat))
+                if amountText != "0 sats" {
+                    Text(amountText)
                         .font(.caption.bold())
                         .foregroundStyle(mutedText)
                 }
-                Text(displayStatus)
+                Text(method == .lightning ? statusText : "Waiting")
                     .font(.caption.bold())
                     .foregroundStyle(paid ? rebelGreen : mutedText)
                     .padding(.horizontal, 8)
@@ -734,46 +713,15 @@ struct SendView: View {
     @State private var showingScanner = false
     @State private var showingSuccess = false
     @State private var successResult = ""
-    @State private var successAmountSat: UInt64 = 0
+    @State private var successAmountText = ""
     @State private var draftDestination = ""
 
     private var destination: String {
         manager.state.send.destination.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var isLightning: Bool {
-        let lower = destination.lowercased()
-        return lower.hasPrefix("lightning:") || lower.hasPrefix("ln")
-    }
-
-    private var sendAmount: UInt64 {
-        manager.state.send.amountSat
-    }
-
-    private var hasInsufficientBalance: Bool {
-        sendAmount > manager.state.wallet.balanceSat
-    }
-
     private var isSending: Bool {
         manager.state.busy && !destination.isEmpty
-    }
-
-    private var canSend: Bool {
-        guard !destination.isEmpty else { return false }
-        guard !isSending else { return false }
-        guard !hasInsufficientBalance else { return false }
-        if isLightning { return true }
-        return sendAmount > 0
-    }
-
-    private var sendErrorText: String? {
-        if hasInsufficientBalance {
-            return "Insufficient balance for this send."
-        }
-        if !isLightning && sendAmount == 0 {
-            return "Enter an amount before sending to an Ark address."
-        }
-        return nil
     }
 
     var body: some View {
@@ -831,7 +779,7 @@ struct SendView: View {
                     .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
                 } else {
-                    SendDestinationSummary(destination: destination, isLightning: isLightning) {
+                    SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
                         draftDestination = ""
                         manager.dispatch(.setSendDestination(destination: ""))
                     }
@@ -849,7 +797,7 @@ struct SendView: View {
                         .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
 
-                        Text(isLightning ? "Leave amount at 0 for invoices that already include an amount." : "Ark sends require an amount.")
+                        Text(manager.state.send.destinationKind == .lightning ? "Leave amount at 0 for invoices that already include an amount." : "Ark sends require an amount.")
                             .font(.caption)
                             .foregroundStyle(mutedText)
                     }
@@ -886,10 +834,10 @@ struct SendView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
-                    .disabled(!canSend)
+                    .disabled(!manager.state.send.canSubmit)
 
-                    if let sendErrorText {
-                        Text(sendErrorText)
+                    if let errorText = manager.state.send.errorText {
+                        Text(errorText)
                             .font(.caption)
                             .foregroundStyle(rebelRed)
                     }
@@ -906,7 +854,7 @@ struct SendView: View {
         .onChange(of: manager.state.send.lastResult) { _, result in
             guard let result, !result.isEmpty else { return }
             successResult = result
-            successAmountSat = manager.state.send.amountSat
+            successAmountText = manager.state.send.amountDisplay
             showingSuccess = true
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
@@ -925,7 +873,7 @@ struct SendView: View {
         .fullScreenCover(isPresented: $showingSuccess) {
             PaymentSuccessScreen(
                 title: "Payment Sent",
-                amountSat: successAmountSat,
+                amountText: successAmountText,
                 detail: successResult,
                 confirmText: "Nice"
             ) {
@@ -955,8 +903,12 @@ struct SendView: View {
 
 struct SendDestinationSummary: View {
     let destination: String
-    let isLightning: Bool
+    let kind: SendDestinationKind
     let clear: () -> Void
+
+    private var isLightning: Bool {
+        kind == .lightning
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1008,7 +960,7 @@ struct SendResultPanel: View {
 
 struct PaymentSuccessScreen: View {
     let title: String
-    let amountSat: UInt64
+    let amountText: String?
     let detail: String
     let confirmText: String
     let onConfirm: () -> Void
@@ -1031,8 +983,8 @@ struct PaymentSuccessScreen: View {
                         .font(.largeTitle.bold())
                         .multilineTextAlignment(.center)
 
-                    if amountSat > 0 {
-                        Text(formatSats(amountSat))
+                    if let amountText, amountText != "0 sats" {
+                        Text(amountText)
                             .font(.title2.bold())
                             .foregroundStyle(rebelGreen)
                     }
@@ -1123,9 +1075,9 @@ struct ActivityDetailSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                Image(systemName: item.amountSat < 0 ? "arrow.up.right" : "arrow.down.left")
+                Image(systemName: item.iconKind == .sent ? "arrow.up.right" : "arrow.down.left")
                     .font(.title2)
-                    .foregroundStyle(item.amountSat < 0 ? rebelBlue : rebelGreen)
+                    .foregroundStyle(item.iconKind == .sent ? rebelBlue : rebelGreen)
                     .frame(width: 44, height: 44)
                     .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
@@ -1138,7 +1090,7 @@ struct ActivityDetailSheet: View {
             }
 
             VStack(spacing: 0) {
-                DetailLine(title: "Amount", value: formatSats(item.amountSat, signed: true))
+                DetailLine(title: "Amount", value: item.signedAmountDisplay)
                 if !item.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     SettingsDivider()
                     DetailLine(title: "Description", value: item.subtitle)
@@ -2307,23 +2259,15 @@ struct ActivityRow: View {
     let item: ActivityItem
 
     private var inbound: Bool {
-        item.amountSat >= 0
-    }
-
-    private var amountText: String {
-        formatSats(item.amountSat < 0 ? -item.amountSat : item.amountSat)
+        item.iconKind == .received
     }
 
     private var primaryName: String {
-        inbound ? counterpartyName : "You"
+        item.displayPrimaryName
     }
 
     private var secondaryName: String {
-        inbound ? "you" : counterpartyName
-    }
-
-    private var counterpartyName: String {
-        item.counterpartyKnown && !item.counterpartyName.isEmpty ? item.counterpartyName : "Unknown"
+        item.displaySecondaryName
     }
 
     private var counterpartyHasPicture: Bool {
@@ -2331,29 +2275,15 @@ struct ActivityRow: View {
     }
 
     private var verb: String {
-        inbound ? "sent" : "sent"
+        item.displayVerb
     }
 
     private var methodIcon: String {
-        let lower = (item.title + " " + item.subtitle).lowercased()
-        if lower.contains("lightning") || lower.contains("invoice") {
-            return "bolt.fill"
-        }
-        if lower.contains("ark") {
-            return "link"
-        }
-        return inbound ? "arrow.down.left" : "arrow.up.right"
+        item.methodIcon
     }
 
     private var methodColor: Color {
         inbound ? rebelGreen : rebelBlue
-    }
-
-    private var messageText: String? {
-        let trimmed = item.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard trimmed.lowercased() != "lightning" && trimmed.lowercased() != "ark" else { return nil }
-        return trimmed
     }
 
     var body: some View {
@@ -2377,13 +2307,13 @@ struct ActivityRow: View {
                 HStack(spacing: 0) {
                     Text(primaryName)
                         .font(.subheadline.bold())
-                        .foregroundStyle(item.counterpartyKnown || primaryName == "You" ? primaryText : mutedText)
+                    .foregroundStyle(item.counterpartyKnown || primaryName == "You" ? primaryText : mutedText)
                     Text(" \(verb) ")
                         .font(.subheadline.weight(.light))
                         .foregroundStyle(primaryText)
                     Text(secondaryName)
                         .font(.subheadline.bold())
-                        .foregroundStyle(item.counterpartyKnown || secondaryName == "you" ? primaryText : mutedText)
+                    .foregroundStyle(item.counterpartyKnown || secondaryName == "you" ? primaryText : mutedText)
                 }
                 .lineLimit(1)
 
@@ -2391,7 +2321,7 @@ struct ActivityRow: View {
                     HStack(spacing: 4) {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 10, weight: .bold))
-                        Text(amountText)
+                        Text(item.amountDisplay)
                             .font(.caption.bold())
                     }
                     .foregroundStyle(primaryText)
@@ -2399,7 +2329,7 @@ struct ActivityRow: View {
                     .padding(.vertical, 5)
                     .background(inbound ? rebelGreen.opacity(0.38) : raisedSurface, in: Capsule())
 
-                    if let messageText {
+                    if let messageText = item.messageText {
                         Text(messageText)
                             .font(.caption)
                             .foregroundStyle(primaryText)

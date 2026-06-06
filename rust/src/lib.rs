@@ -32,8 +32,8 @@ mod updates;
 
 pub use actions::AppAction;
 pub use state::{
-    ActivityItem, AppState, Contact, MainTab, NostrMessage, NostrState, ReceiveState, Router,
-    Screen, SendState, SetupState, WalletState,
+    ActivityIconKind, ActivityItem, AppState, Contact, MainTab, NostrMessage, NostrState,
+    ReceiveState, Router, Screen, SendDestinationKind, SendState, SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -174,9 +174,11 @@ impl AppCore {
         }
         self.rev += 1;
         self.state.rev = self.rev;
+        self.state.refresh_derived();
     }
 
     fn handle_action(&mut self, action: AppAction) {
+        self.state.refresh_derived();
         match action {
             AppAction::Bootstrap => self.bootstrap(),
             AppAction::CreateWallet => {
@@ -456,7 +458,8 @@ impl AppCore {
     }
 
     fn emit(&self, shared: &Arc<RwLock<AppState>>, tx: &Sender<AppUpdate>) {
-        let snapshot = self.state.clone();
+        let mut snapshot = self.state.clone();
+        snapshot.refresh_derived();
         match shared.write() {
             Ok(mut g) => *g = snapshot.clone(),
             Err(poison) => *poison.into_inner() = snapshot.clone(),
@@ -1580,6 +1583,15 @@ fn activity_from_movement(movement: Movement, contacts: &[Contact]) -> ActivityI
     } else {
         String::new()
     };
+    let counterparty_name = contact.map(|c| c.name.clone()).unwrap_or_default();
+    let counterparty_known = contact.is_some();
+    let display_counterparty = if counterparty_known && !counterparty_name.is_empty() {
+        counterparty_name.clone()
+    } else {
+        "Unknown".to_string()
+    };
+    let method_icon = activity_method_icon(&method, inbound).to_string();
+    let message_text = activity_message_text(&subtitle);
     let timestamp = movement
         .time
         .completed_at
@@ -1591,12 +1603,57 @@ fn activity_from_movement(movement: Movement, contacts: &[Contact]) -> ActivityI
         id: movement.id.to_string(),
         title,
         subtitle,
+        display_primary_name: if inbound {
+            display_counterparty.clone()
+        } else {
+            "You".to_string()
+        },
+        display_verb: "sent".to_string(),
+        display_secondary_name: if inbound {
+            "you".to_string()
+        } else {
+            display_counterparty
+        },
+        message_text,
+        method_icon,
         amount_sat,
+        amount_display: state::format_sats(amount_sat.unsigned_abs()),
+        signed_amount_display: state::format_signed_sats(amount_sat, true),
+        icon_kind: if inbound {
+            ActivityIconKind::Received
+        } else {
+            ActivityIconKind::Sent
+        },
         status: movement.status.to_string(),
         timestamp,
-        counterparty_name: contact.map(|c| c.name.clone()).unwrap_or_default(),
+        counterparty_name,
         counterparty_picture: contact.map(|c| c.picture.clone()).unwrap_or_default(),
-        counterparty_known: contact.is_some(),
+        counterparty_known,
+    }
+}
+
+fn activity_method_icon(method: &str, inbound: bool) -> &'static str {
+    let lower = method.to_ascii_lowercase();
+    if lower.contains("lightning") || lower.contains("invoice") {
+        "bolt.fill"
+    } else if lower.contains("ark") {
+        "link"
+    } else if inbound {
+        "arrow.down.left"
+    } else {
+        "arrow.up.right"
+    }
+}
+
+fn activity_message_text(subtitle: &str) -> Option<String> {
+    let trimmed = subtitle.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("lightning")
+        || trimmed.eq_ignore_ascii_case("ark")
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 

@@ -57,8 +57,11 @@ pub struct WalletState {
     pub network: String,
     pub server_address: String,
     pub balance_sat: u64,
+    pub balance_display: String,
     pub pending_receive_sat: u64,
+    pub pending_receive_display: String,
     pub pending_send_sat: u64,
+    pub pending_send_display: String,
     pub last_sync: Option<String>,
 }
 
@@ -68,17 +71,30 @@ pub struct ReceiveState {
     pub lightning_invoice: Option<String>,
     pub lightning_payment_hash: Option<String>,
     pub lightning_status: String,
+    pub lightning_status_display: String,
     pub lightning_paid: bool,
     pub amount_sat: u64,
+    pub amount_display: String,
     pub memo: String,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct SendState {
     pub destination: String,
+    pub destination_kind: SendDestinationKind,
     pub amount_sat: u64,
+    pub amount_display: String,
     pub memo: String,
     pub last_result: Option<String>,
+    pub can_submit: bool,
+    pub error_text: Option<String>,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum SendDestinationKind {
+    Unknown,
+    Lightning,
+    Ark,
 }
 
 #[derive(uniffi::Record, Clone, Debug, Serialize, Deserialize)]
@@ -118,12 +134,26 @@ pub struct ActivityItem {
     pub id: String,
     pub title: String,
     pub subtitle: String,
+    pub display_primary_name: String,
+    pub display_verb: String,
+    pub display_secondary_name: String,
+    pub message_text: Option<String>,
+    pub method_icon: String,
     pub amount_sat: i64,
+    pub amount_display: String,
+    pub signed_amount_display: String,
+    pub icon_kind: ActivityIconKind,
     pub status: String,
     pub timestamp: String,
     pub counterparty_name: String,
     pub counterparty_picture: String,
     pub counterparty_known: bool,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum ActivityIconKind {
+    Sent,
+    Received,
 }
 
 impl AppState {
@@ -140,8 +170,11 @@ impl AppState {
                 network: "Signet".to_string(),
                 server_address: SIGNET_SERVER.to_string(),
                 balance_sat: 0,
+                balance_display: format_sats(0),
                 pending_receive_sat: 0,
+                pending_receive_display: format_sats(0),
                 pending_send_sat: 0,
+                pending_send_display: format_sats(0),
                 last_sync: None,
             },
             receive: ReceiveState {
@@ -149,15 +182,21 @@ impl AppState {
                 lightning_invoice: None,
                 lightning_payment_hash: None,
                 lightning_status: "idle".to_string(),
+                lightning_status_display: "Waiting".to_string(),
                 lightning_paid: false,
                 amount_sat: 10_000,
+                amount_display: format_sats(10_000),
                 memo: "Rebel Wallet".to_string(),
             },
             send: SendState {
                 destination: String::new(),
+                destination_kind: SendDestinationKind::Unknown,
                 amount_sat: 0,
+                amount_display: format_sats(0),
                 memo: String::new(),
                 last_result: None,
+                can_submit: false,
+                error_text: None,
             },
             nostr: NostrState {
                 npub: None,
@@ -175,4 +214,94 @@ impl AppState {
             busy: false,
         }
     }
+
+    pub(crate) fn refresh_derived(&mut self) {
+        self.wallet.balance_display = format_sats(self.wallet.balance_sat);
+        self.wallet.pending_receive_display = format_sats(self.wallet.pending_receive_sat);
+        self.wallet.pending_send_display = format_sats(self.wallet.pending_send_sat);
+
+        self.receive.amount_display = format_sats(self.receive.amount_sat);
+        self.receive.lightning_status_display = if self.receive.lightning_paid {
+            "Paid".to_string()
+        } else {
+            match self.receive.lightning_status.as_str() {
+                "claiming" => "Claiming".to_string(),
+                "claimable" => "Claimable".to_string(),
+                "paid" => "Paid".to_string(),
+                _ => "Waiting".to_string(),
+            }
+        };
+
+        self.send.amount_display = format_sats(self.send.amount_sat);
+        self.send.destination_kind = send_destination_kind(&self.send.destination);
+        self.send.error_text = send_error_text(
+            self.send.destination_kind.clone(),
+            self.send.amount_sat,
+            self.wallet.balance_sat,
+        );
+        self.send.can_submit = !self.send.destination.trim().is_empty()
+            && !self.busy
+            && self.send.error_text.is_none()
+            && (self.send.destination_kind == SendDestinationKind::Lightning
+                || self.send.amount_sat > 0);
+    }
+}
+
+pub(crate) fn format_sats(amount: u64) -> String {
+    format!("{} sats", grouped_digits(amount))
+}
+
+pub(crate) fn format_signed_sats(amount: i64, signed: bool) -> String {
+    let magnitude = amount.unsigned_abs();
+    let prefix = if amount < 0 {
+        "-"
+    } else if signed && amount > 0 {
+        "+"
+    } else {
+        ""
+    };
+    format!("{prefix}{} sats", grouped_digits(magnitude))
+}
+
+pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
+    let lower = destination.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        SendDestinationKind::Unknown
+    } else if lower.starts_with("lightning:") || lower.starts_with("ln") {
+        SendDestinationKind::Lightning
+    } else {
+        SendDestinationKind::Ark
+    }
+}
+
+fn send_error_text(
+    destination_kind: SendDestinationKind,
+    amount_sat: u64,
+    balance_sat: u64,
+) -> Option<String> {
+    if amount_sat > balance_sat {
+        return Some("Insufficient balance for this send.".to_string());
+    }
+    if destination_kind == SendDestinationKind::Ark && amount_sat == 0 {
+        return Some("Enter an amount before sending to an Ark address.".to_string());
+    }
+    None
+}
+
+fn grouped_digits(amount: u64) -> String {
+    let digits = amount.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    let first_group_len = digits.len() % 3;
+
+    for (idx, ch) in digits.chars().enumerate() {
+        if idx > 0
+            && (idx == first_group_len
+                || (idx > first_group_len && (idx - first_group_len) % 3 == 0))
+        {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+
+    out
 }

@@ -669,7 +669,15 @@ public struct ActivityItem: Equatable, Hashable {
     public var id: String
     public var title: String
     public var subtitle: String
+    public var displayPrimaryName: String
+    public var displayVerb: String
+    public var displaySecondaryName: String
+    public var messageText: String?
+    public var methodIcon: String
     public var amountSat: Int64
+    public var amountDisplay: String
+    public var signedAmountDisplay: String
+    public var iconKind: ActivityIconKind
     public var status: String
     public var timestamp: String
     public var counterpartyName: String
@@ -678,11 +686,19 @@ public struct ActivityItem: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, subtitle: String, amountSat: Int64, status: String, timestamp: String, counterpartyName: String, counterpartyPicture: String, counterpartyKnown: Bool) {
+    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, amountSat: Int64, amountDisplay: String, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, counterpartyName: String, counterpartyPicture: String, counterpartyKnown: Bool) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
+        self.displayPrimaryName = displayPrimaryName
+        self.displayVerb = displayVerb
+        self.displaySecondaryName = displaySecondaryName
+        self.messageText = messageText
+        self.methodIcon = methodIcon
         self.amountSat = amountSat
+        self.amountDisplay = amountDisplay
+        self.signedAmountDisplay = signedAmountDisplay
+        self.iconKind = iconKind
         self.status = status
         self.timestamp = timestamp
         self.counterpartyName = counterpartyName
@@ -709,7 +725,15 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 subtitle: FfiConverterString.read(from: &buf), 
+                displayPrimaryName: FfiConverterString.read(from: &buf), 
+                displayVerb: FfiConverterString.read(from: &buf), 
+                displaySecondaryName: FfiConverterString.read(from: &buf), 
+                messageText: FfiConverterOptionString.read(from: &buf), 
+                methodIcon: FfiConverterString.read(from: &buf), 
                 amountSat: FfiConverterInt64.read(from: &buf), 
+                amountDisplay: FfiConverterString.read(from: &buf), 
+                signedAmountDisplay: FfiConverterString.read(from: &buf), 
+                iconKind: FfiConverterTypeActivityIconKind.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
                 timestamp: FfiConverterString.read(from: &buf), 
                 counterpartyName: FfiConverterString.read(from: &buf), 
@@ -722,7 +746,15 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.subtitle, into: &buf)
+        FfiConverterString.write(value.displayPrimaryName, into: &buf)
+        FfiConverterString.write(value.displayVerb, into: &buf)
+        FfiConverterString.write(value.displaySecondaryName, into: &buf)
+        FfiConverterOptionString.write(value.messageText, into: &buf)
+        FfiConverterString.write(value.methodIcon, into: &buf)
         FfiConverterInt64.write(value.amountSat, into: &buf)
+        FfiConverterString.write(value.amountDisplay, into: &buf)
+        FfiConverterString.write(value.signedAmountDisplay, into: &buf)
+        FfiConverterTypeActivityIconKind.write(value.iconKind, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterString.write(value.timestamp, into: &buf)
         FfiConverterString.write(value.counterpartyName, into: &buf)
@@ -1064,19 +1096,23 @@ public struct ReceiveState: Equatable, Hashable {
     public var lightningInvoice: String?
     public var lightningPaymentHash: String?
     public var lightningStatus: String
+    public var lightningStatusDisplay: String
     public var lightningPaid: Bool
     public var amountSat: UInt64
+    public var amountDisplay: String
     public var memo: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningStatus: String, lightningPaid: Bool, amountSat: UInt64, memo: String) {
+    public init(arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningStatus: String, lightningStatusDisplay: String, lightningPaid: Bool, amountSat: UInt64, amountDisplay: String, memo: String) {
         self.arkAddress = arkAddress
         self.lightningInvoice = lightningInvoice
         self.lightningPaymentHash = lightningPaymentHash
         self.lightningStatus = lightningStatus
+        self.lightningStatusDisplay = lightningStatusDisplay
         self.lightningPaid = lightningPaid
         self.amountSat = amountSat
+        self.amountDisplay = amountDisplay
         self.memo = memo
     }
 
@@ -1100,8 +1136,10 @@ public struct FfiConverterTypeReceiveState: FfiConverterRustBuffer {
                 lightningInvoice: FfiConverterOptionString.read(from: &buf), 
                 lightningPaymentHash: FfiConverterOptionString.read(from: &buf), 
                 lightningStatus: FfiConverterString.read(from: &buf), 
+                lightningStatusDisplay: FfiConverterString.read(from: &buf), 
                 lightningPaid: FfiConverterBool.read(from: &buf), 
                 amountSat: FfiConverterUInt64.read(from: &buf), 
+                amountDisplay: FfiConverterString.read(from: &buf), 
                 memo: FfiConverterString.read(from: &buf)
         )
     }
@@ -1111,8 +1149,10 @@ public struct FfiConverterTypeReceiveState: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.lightningInvoice, into: &buf)
         FfiConverterOptionString.write(value.lightningPaymentHash, into: &buf)
         FfiConverterString.write(value.lightningStatus, into: &buf)
+        FfiConverterString.write(value.lightningStatusDisplay, into: &buf)
         FfiConverterBool.write(value.lightningPaid, into: &buf)
         FfiConverterUInt64.write(value.amountSat, into: &buf)
+        FfiConverterString.write(value.amountDisplay, into: &buf)
         FfiConverterString.write(value.memo, into: &buf)
     }
 }
@@ -1193,17 +1233,25 @@ public func FfiConverterTypeRouter_lower(_ value: Router) -> RustBuffer {
 
 public struct SendState: Equatable, Hashable {
     public var destination: String
+    public var destinationKind: SendDestinationKind
     public var amountSat: UInt64
+    public var amountDisplay: String
     public var memo: String
     public var lastResult: String?
+    public var canSubmit: Bool
+    public var errorText: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(destination: String, amountSat: UInt64, memo: String, lastResult: String?) {
+    public init(destination: String, destinationKind: SendDestinationKind, amountSat: UInt64, amountDisplay: String, memo: String, lastResult: String?, canSubmit: Bool, errorText: String?) {
         self.destination = destination
+        self.destinationKind = destinationKind
         self.amountSat = amountSat
+        self.amountDisplay = amountDisplay
         self.memo = memo
         self.lastResult = lastResult
+        self.canSubmit = canSubmit
+        self.errorText = errorText
     }
 
     
@@ -1223,17 +1271,25 @@ public struct FfiConverterTypeSendState: FfiConverterRustBuffer {
         return
             try SendState(
                 destination: FfiConverterString.read(from: &buf), 
+                destinationKind: FfiConverterTypeSendDestinationKind.read(from: &buf), 
                 amountSat: FfiConverterUInt64.read(from: &buf), 
+                amountDisplay: FfiConverterString.read(from: &buf), 
                 memo: FfiConverterString.read(from: &buf), 
-                lastResult: FfiConverterOptionString.read(from: &buf)
+                lastResult: FfiConverterOptionString.read(from: &buf), 
+                canSubmit: FfiConverterBool.read(from: &buf), 
+                errorText: FfiConverterOptionString.read(from: &buf)
         )
     }
 
     public static func write(_ value: SendState, into buf: inout [UInt8]) {
         FfiConverterString.write(value.destination, into: &buf)
+        FfiConverterTypeSendDestinationKind.write(value.destinationKind, into: &buf)
         FfiConverterUInt64.write(value.amountSat, into: &buf)
+        FfiConverterString.write(value.amountDisplay, into: &buf)
         FfiConverterString.write(value.memo, into: &buf)
         FfiConverterOptionString.write(value.lastResult, into: &buf)
+        FfiConverterBool.write(value.canSubmit, into: &buf)
+        FfiConverterOptionString.write(value.errorText, into: &buf)
     }
 }
 
@@ -1257,18 +1313,24 @@ public struct WalletState: Equatable, Hashable {
     public var network: String
     public var serverAddress: String
     public var balanceSat: UInt64
+    public var balanceDisplay: String
     public var pendingReceiveSat: UInt64
+    public var pendingReceiveDisplay: String
     public var pendingSendSat: UInt64
+    public var pendingSendDisplay: String
     public var lastSync: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(network: String, serverAddress: String, balanceSat: UInt64, pendingReceiveSat: UInt64, pendingSendSat: UInt64, lastSync: String?) {
+    public init(network: String, serverAddress: String, balanceSat: UInt64, balanceDisplay: String, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingSendSat: UInt64, pendingSendDisplay: String, lastSync: String?) {
         self.network = network
         self.serverAddress = serverAddress
         self.balanceSat = balanceSat
+        self.balanceDisplay = balanceDisplay
         self.pendingReceiveSat = pendingReceiveSat
+        self.pendingReceiveDisplay = pendingReceiveDisplay
         self.pendingSendSat = pendingSendSat
+        self.pendingSendDisplay = pendingSendDisplay
         self.lastSync = lastSync
     }
 
@@ -1291,8 +1353,11 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
                 network: FfiConverterString.read(from: &buf), 
                 serverAddress: FfiConverterString.read(from: &buf), 
                 balanceSat: FfiConverterUInt64.read(from: &buf), 
+                balanceDisplay: FfiConverterString.read(from: &buf), 
                 pendingReceiveSat: FfiConverterUInt64.read(from: &buf), 
+                pendingReceiveDisplay: FfiConverterString.read(from: &buf), 
                 pendingSendSat: FfiConverterUInt64.read(from: &buf), 
+                pendingSendDisplay: FfiConverterString.read(from: &buf), 
                 lastSync: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1301,8 +1366,11 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
         FfiConverterString.write(value.network, into: &buf)
         FfiConverterString.write(value.serverAddress, into: &buf)
         FfiConverterUInt64.write(value.balanceSat, into: &buf)
+        FfiConverterString.write(value.balanceDisplay, into: &buf)
         FfiConverterUInt64.write(value.pendingReceiveSat, into: &buf)
+        FfiConverterString.write(value.pendingReceiveDisplay, into: &buf)
         FfiConverterUInt64.write(value.pendingSendSat, into: &buf)
+        FfiConverterString.write(value.pendingSendDisplay, into: &buf)
         FfiConverterOptionString.write(value.lastSync, into: &buf)
     }
 }
@@ -1321,6 +1389,73 @@ public func FfiConverterTypeWalletState_lift(_ buf: RustBuffer) throws -> Wallet
 public func FfiConverterTypeWalletState_lower(_ value: WalletState) -> RustBuffer {
     return FfiConverterTypeWalletState.lower(value)
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ActivityIconKind: Equatable, Hashable {
+    
+    case sent
+    case received
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ActivityIconKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeActivityIconKind: FfiConverterRustBuffer {
+    typealias SwiftType = ActivityIconKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActivityIconKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .sent
+        
+        case 2: return .received
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ActivityIconKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .sent:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .received:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeActivityIconKind_lift(_ buf: RustBuffer) throws -> ActivityIconKind {
+    return try FfiConverterTypeActivityIconKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeActivityIconKind_lower(_ value: ActivityIconKind) -> RustBuffer {
+    return FfiConverterTypeActivityIconKind.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -1989,6 +2124,80 @@ public func FfiConverterTypeScreen_lower(_ value: Screen) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum SendDestinationKind: Equatable, Hashable {
+    
+    case unknown
+    case lightning
+    case ark
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SendDestinationKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSendDestinationKind: FfiConverterRustBuffer {
+    typealias SwiftType = SendDestinationKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendDestinationKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .unknown
+        
+        case 2: return .lightning
+        
+        case 3: return .ark
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SendDestinationKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .lightning:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .ark:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendDestinationKind_lift(_ buf: RustBuffer) throws -> SendDestinationKind {
+    return try FfiConverterTypeSendDestinationKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendDestinationKind_lower(_ value: SendDestinationKind) -> RustBuffer {
+    return FfiConverterTypeSendDestinationKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum SetupState: Equatable, Hashable {
     
     case needsSetup
@@ -2542,19 +2751,19 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_rebel_wallet_core_checksum_method_ffiapp_dispatch() != 30242) {
+    if (uniffi_rebel_wallet_core_checksum_method_ffiapp_dispatch() != 784) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_listen_for_updates() != 17166) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_rebel_wallet_core_checksum_method_ffiapp_state() != 63344) {
+    if (uniffi_rebel_wallet_core_checksum_method_ffiapp_state() != 28404) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_constructor_ffiapp_new() != 52392) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_rebel_wallet_core_checksum_method_appreconciler_reconcile() != 61199) {
+    if (uniffi_rebel_wallet_core_checksum_method_appreconciler_reconcile() != 39018) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_secretstore_get_secret() != 61340) {
