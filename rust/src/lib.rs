@@ -1841,3 +1841,64 @@ fn truncate_middle(value: &str, max: usize) -> String {
     let edge = max.saturating_sub(3) / 2;
     format!("{}...{}", &value[..edge], &value[value.len() - edge..])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contact(npub: &str, name: &str, followed: bool, last_used: u64) -> Contact {
+        Contact {
+            id: contact_id(npub),
+            npub: npub.to_string(),
+            name: name.to_string(),
+            followed,
+            picture: String::new(),
+            lightning_address: String::new(),
+            lnurl: String::new(),
+            last_used,
+        }
+    }
+
+    #[test]
+    fn merge_contacts_preserves_local_names_and_updates_follow_state() {
+        let mut existing = vec![contact("npub1234", "Local Alice", false, 10)];
+        let fetched = vec![
+            contact("npub1234", "Remote Alice", true, 1),
+            contact("npub9999", "Bob", true, 2),
+        ];
+
+        merge_contacts(&mut existing, fetched);
+
+        let alice = existing.iter().find(|c| c.npub == "npub1234").unwrap();
+        assert_eq!(alice.name, "Local Alice");
+        assert!(alice.followed);
+        assert_eq!(existing.len(), 2);
+    }
+
+    #[test]
+    fn activity_helpers_return_render_ready_labels() {
+        assert_eq!(
+            activity_method_icon("Lightning lnbc1...", true),
+            "bolt.fill"
+        );
+        assert_eq!(activity_method_icon("Ark address", false), "link");
+        assert_eq!(activity_method_icon("Wallet", true), "arrow.down.left");
+        assert_eq!(activity_method_icon("Wallet", false), "arrow.up.right");
+
+        assert_eq!(activity_message_text(""), None);
+        assert_eq!(activity_message_text("ark"), None);
+        assert_eq!(
+            activity_message_text("12 sats fee").as_deref(),
+            Some("12 sats fee")
+        );
+    }
+
+    #[test]
+    fn normalizes_activity_subsystem_labels() {
+        assert_eq!(truncate_middle("abcdef", 12), "abcdef");
+        assert_eq!(
+            truncate_middle("abcdefghijklmnopqrstuvwxyz", 11),
+            "abcd...wxyz"
+        );
+    }
+}

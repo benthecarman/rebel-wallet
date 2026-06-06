@@ -365,3 +365,59 @@ fn grouped_digits(amount: u64) -> String {
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_unsigned_and_signed_sats() {
+        assert_eq!(format_sats(0), "0 sats");
+        assert_eq!(format_sats(1_234_567), "1,234,567 sats");
+        assert_eq!(format_signed_sats(42, true), "+42 sats");
+        assert_eq!(format_signed_sats(-42, true), "-42 sats");
+        assert_eq!(format_signed_sats(42, false), "42 sats");
+    }
+
+    #[test]
+    fn derives_send_destination_kind_and_validation() {
+        let mut state = AppState::initial();
+        state.wallet.balance_sat = 1_000;
+
+        state.send.destination = "lightning:lnbc1example".to_string();
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(state.send.can_submit);
+        assert_eq!(state.send.error_text, None);
+
+        state.send.destination = "ark1example".to_string();
+        state.send.amount_sat = 0;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Ark);
+        assert!(!state.send.can_submit);
+        assert_eq!(
+            state.send.error_text.as_deref(),
+            Some("Enter an amount before sending to an Ark address.")
+        );
+
+        state.send.amount_sat = 2_000;
+        state.refresh_derived();
+        assert!(!state.send.can_submit);
+        assert_eq!(
+            state.send.error_text.as_deref(),
+            Some("Insufficient balance for this send.")
+        );
+    }
+
+    #[test]
+    fn derives_receive_status_display() {
+        let mut state = AppState::initial();
+        state.receive.lightning_status = "claimable".to_string();
+        state.refresh_derived();
+        assert_eq!(state.receive.lightning_status_display, "Claimable");
+
+        state.receive.lightning_paid = true;
+        state.refresh_derived();
+        assert_eq!(state.receive.lightning_status_display, "Paid");
+    }
+}
