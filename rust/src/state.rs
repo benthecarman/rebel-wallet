@@ -16,6 +16,20 @@ pub struct AppState {
     pub recovery_phrase: Option<String>,
     pub toast: Option<String>,
     pub busy: bool,
+    pub capability_request: Option<CapabilityRequest>,
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq)]
+pub struct CapabilityRequest {
+    pub id: u64,
+    pub kind: CapabilityRequestKind,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum CapabilityRequestKind {
+    QrScan,
+    ClipboardRead,
+    PhotoPick,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
@@ -242,6 +256,7 @@ impl AppState {
             recovery_phrase: None,
             toast: None,
             busy: false,
+            capability_request: None,
         }
     }
 

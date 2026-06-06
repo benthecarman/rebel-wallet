@@ -55,6 +55,19 @@ pub enum AppAction {
     },
     DismissPaymentSuccess,
     ResetSendDraft,
+    RequestQrScan,
+    RequestClipboardRead,
+    RequestPhotoPick,
+    CompleteQrScan {
+        value: Option<String>,
+    },
+    CompleteClipboardRead {
+        value: Option<String>,
+    },
+    CompletePhotoPick {
+        image_base64: Option<String>,
+    },
+    CancelCapabilityRequest,
     GenerateNostrKey,
     ImportNostrSecret {
         nsec_or_hex: String,

@@ -6,28 +6,7 @@ https://raw.githubusercontent.com/rust-multiplatform/rmp/refs/heads/master/rmp-a
 
 The project follows several core RMP ideas already: it has a Rust core, UniFFI bindings, a SwiftUI shell, Rust-owned wallet/Nostr/persistence state, a channel-based actor, full-state updates, and native Keychain storage. The items below highlight where the current implementation diverges from the stricter RMP standard.
 
-## 1. Capability Bridges Are Ad Hoc
-
-The bible describes capability bridges as typed, bounded lifecycles: Rust decides when a native capability is needed, native executes the OS API, native reports raw data, and Rust decides the outcome. Rebel Wallet currently implements several native capabilities directly in Swift views/controllers.
-
-Evidence:
-
-- QR scanning is implemented in `QRScannerViewController` using `AVCaptureSession`.
-- QR scan results are handled by Swift closures that dispatch follow-up Rust actions.
-- Photo selection and image loading are Swift-local before dispatching base64 image data to Rust.
-- Clipboard paste reads `UIPasteboard.general.string` directly from Swift.
-
-Why it matters:
-
-QR scanning, photo selection, and clipboard access are legitimate native capabilities, but without typed lifecycle contracts Rust does not fully own when they open, close, retry, or report errors.
-
-Suggested remediation:
-
-- Define callback interfaces or explicit capability request state for QR scanning, photo picking, and clipboard reads.
-- Have Rust request the capability and accept raw results or errors.
-- Keep native code limited to OS handles, lifecycle, and raw data delivery.
-
-## 2. Testing Strategy Is Missing
+## 1. Testing Strategy Is Missing
 
 The RMP standard emphasizes testing Rust core logic without platform dependencies. This repo currently has no visible Rust or Swift tests.
 
@@ -47,7 +26,7 @@ Suggested remediation:
 - Add actor-level tests that dispatch `AppAction` values and assert resulting `AppState`.
 - Add a small fake `SecretStore` for deterministic wallet/Nostr state tests.
 
-## 3. Busy State Is Too Coarse
+## 2. Busy State Is Too Coarse
 
 The bible recommends domain-specific busy flags so each UI surface can render loading state accurately. Rebel Wallet uses a single `busy: bool`.
 

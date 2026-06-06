@@ -792,10 +792,11 @@ public struct AppState: Equatable, Hashable {
     public var recoveryPhrase: String?
     public var toast: String?
     public var busy: Bool
+    public var capabilityRequest: CapabilityRequest?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, setup: SetupState, wallet: WalletState, receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: Bool) {
+    public init(rev: UInt64, router: Router, setup: SetupState, wallet: WalletState, receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: Bool, capabilityRequest: CapabilityRequest?) {
         self.rev = rev
         self.router = router
         self.setup = setup
@@ -808,6 +809,7 @@ public struct AppState: Equatable, Hashable {
         self.recoveryPhrase = recoveryPhrase
         self.toast = toast
         self.busy = busy
+        self.capabilityRequest = capabilityRequest
     }
 
     
@@ -837,7 +839,8 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
                 activity: FfiConverterSequenceTypeActivityItem.read(from: &buf), 
                 recoveryPhrase: FfiConverterOptionString.read(from: &buf), 
                 toast: FfiConverterOptionString.read(from: &buf), 
-                busy: FfiConverterBool.read(from: &buf)
+                busy: FfiConverterBool.read(from: &buf), 
+                capabilityRequest: FfiConverterOptionTypeCapabilityRequest.read(from: &buf)
         )
     }
 
@@ -854,6 +857,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.recoveryPhrase, into: &buf)
         FfiConverterOptionString.write(value.toast, into: &buf)
         FfiConverterBool.write(value.busy, into: &buf)
+        FfiConverterOptionTypeCapabilityRequest.write(value.capabilityRequest, into: &buf)
     }
 }
 
@@ -870,6 +874,60 @@ public func FfiConverterTypeAppState_lift(_ buf: RustBuffer) throws -> AppState 
 #endif
 public func FfiConverterTypeAppState_lower(_ value: AppState) -> RustBuffer {
     return FfiConverterTypeAppState.lower(value)
+}
+
+
+public struct CapabilityRequest: Equatable, Hashable {
+    public var id: UInt64
+    public var kind: CapabilityRequestKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: UInt64, kind: CapabilityRequestKind) {
+        self.id = id
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CapabilityRequest: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCapabilityRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CapabilityRequest {
+        return
+            try CapabilityRequest(
+                id: FfiConverterUInt64.read(from: &buf), 
+                kind: FfiConverterTypeCapabilityRequestKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CapabilityRequest, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.id, into: &buf)
+        FfiConverterTypeCapabilityRequestKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCapabilityRequest_lift(_ buf: RustBuffer) throws -> CapabilityRequest {
+    return try FfiConverterTypeCapabilityRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCapabilityRequest_lower(_ value: CapabilityRequest) -> RustBuffer {
+    return FfiConverterTypeCapabilityRequest.lower(value)
 }
 
 
@@ -1516,6 +1574,16 @@ public enum AppAction: Equatable, Hashable {
     )
     case dismissPaymentSuccess
     case resetSendDraft
+    case requestQrScan
+    case requestClipboardRead
+    case requestPhotoPick
+    case completeQrScan(value: String?
+    )
+    case completeClipboardRead(value: String?
+    )
+    case completePhotoPick(imageBase64: String?
+    )
+    case cancelCapabilityRequest
     case generateNostrKey
     case importNostrSecret(nsecOrHex: String
     )
@@ -1629,53 +1697,70 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         
         case 25: return .resetSendDraft
         
-        case 26: return .generateNostrKey
+        case 26: return .requestQrScan
         
-        case 27: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
+        case 27: return .requestClipboardRead
+        
+        case 28: return .requestPhotoPick
+        
+        case 29: return .completeQrScan(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 28: return .exportNostrSecret
-        
-        case 29: return .clearNostrKey
-        
-        case 30: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
+        case 30: return .completeClipboardRead(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 31: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
+        case 31: return .completePhotoPick(imageBase64: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 32: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 32: return .cancelCapabilityRequest
+        
+        case 33: return .generateNostrKey
+        
+        case 34: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
         )
         
-        case 33: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 35: return .exportNostrSecret
+        
+        case 36: return .clearNostrKey
+        
+        case 37: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
         )
         
-        case 34: return .followContact(contactId: try FfiConverterString.read(from: &buf)
+        case 38: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
         )
         
-        case 35: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
+        case 39: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
         )
         
-        case 36: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
+        case 40: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
         )
         
-        case 37: return .publishNostrProfile
-        
-        case 38: return .refreshNostrProfile
-        
-        case 39: return .deleteNostrProfile
-        
-        case 40: return .publishContactList
-        
-        case 41: return .refreshContactList
-        
-        case 42: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
+        case 41: return .followContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 43: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        case 42: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 44: return .clearToast
+        case 43: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 44: return .publishNostrProfile
+        
+        case 45: return .refreshNostrProfile
+        
+        case 46: return .deleteNostrProfile
+        
+        case 47: return .publishContactList
+        
+        case 48: return .refreshContactList
+        
+        case 49: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 50: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 51: return .clearToast
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1800,25 +1885,56 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             writeInt(&buf, Int32(25))
         
         
-        case .generateNostrKey:
+        case .requestQrScan:
             writeInt(&buf, Int32(26))
         
         
-        case let .importNostrSecret(nsecOrHex):
+        case .requestClipboardRead:
             writeInt(&buf, Int32(27))
+        
+        
+        case .requestPhotoPick:
+            writeInt(&buf, Int32(28))
+        
+        
+        case let .completeQrScan(value):
+            writeInt(&buf, Int32(29))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .completeClipboardRead(value):
+            writeInt(&buf, Int32(30))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .completePhotoPick(imageBase64):
+            writeInt(&buf, Int32(31))
+            FfiConverterOptionString.write(imageBase64, into: &buf)
+            
+        
+        case .cancelCapabilityRequest:
+            writeInt(&buf, Int32(32))
+        
+        
+        case .generateNostrKey:
+            writeInt(&buf, Int32(33))
+        
+        
+        case let .importNostrSecret(nsecOrHex):
+            writeInt(&buf, Int32(34))
             FfiConverterString.write(nsecOrHex, into: &buf)
             
         
         case .exportNostrSecret:
-            writeInt(&buf, Int32(28))
+            writeInt(&buf, Int32(35))
         
         
         case .clearNostrKey:
-            writeInt(&buf, Int32(29))
+            writeInt(&buf, Int32(36))
         
         
         case let .editNostrProfile(name,about,picture,lud16,nip05):
-            writeInt(&buf, Int32(30))
+            writeInt(&buf, Int32(37))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(about, into: &buf)
             FfiConverterString.write(picture, into: &buf)
@@ -1827,12 +1943,12 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .uploadNostrProfilePicture(imageBase64):
-            writeInt(&buf, Int32(31))
+            writeInt(&buf, Int32(38))
             FfiConverterString.write(imageBase64, into: &buf)
             
         
         case let .addContact(npub,name,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(32))
+            writeInt(&buf, Int32(39))
             FfiConverterString.write(npub, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(lightningAddress, into: &buf)
@@ -1841,7 +1957,7 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .editContact(contactId,name,npub,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(33))
+            writeInt(&buf, Int32(40))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(npub, into: &buf)
@@ -1851,53 +1967,53 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .followContact(contactId):
-            writeInt(&buf, Int32(34))
+            writeInt(&buf, Int32(41))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .unfollowContact(contactId):
-            writeInt(&buf, Int32(35))
-            FfiConverterString.write(contactId, into: &buf)
-            
-        
-        case let .deleteContact(contactId):
-            writeInt(&buf, Int32(36))
-            FfiConverterString.write(contactId, into: &buf)
-            
-        
-        case .publishNostrProfile:
-            writeInt(&buf, Int32(37))
-        
-        
-        case .refreshNostrProfile:
-            writeInt(&buf, Int32(38))
-        
-        
-        case .deleteNostrProfile:
-            writeInt(&buf, Int32(39))
-        
-        
-        case .publishContactList:
-            writeInt(&buf, Int32(40))
-        
-        
-        case .refreshContactList:
-            writeInt(&buf, Int32(41))
-        
-        
-        case let .loadDirectMessages(contactId):
             writeInt(&buf, Int32(42))
             FfiConverterString.write(contactId, into: &buf)
             
         
-        case let .sendDirectMessage(contactId,message):
+        case let .deleteContact(contactId):
             writeInt(&buf, Int32(43))
+            FfiConverterString.write(contactId, into: &buf)
+            
+        
+        case .publishNostrProfile:
+            writeInt(&buf, Int32(44))
+        
+        
+        case .refreshNostrProfile:
+            writeInt(&buf, Int32(45))
+        
+        
+        case .deleteNostrProfile:
+            writeInt(&buf, Int32(46))
+        
+        
+        case .publishContactList:
+            writeInt(&buf, Int32(47))
+        
+        
+        case .refreshContactList:
+            writeInt(&buf, Int32(48))
+        
+        
+        case let .loadDirectMessages(contactId):
+            writeInt(&buf, Int32(49))
+            FfiConverterString.write(contactId, into: &buf)
+            
+        
+        case let .sendDirectMessage(contactId,message):
+            writeInt(&buf, Int32(50))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(message, into: &buf)
             
         
         case .clearToast:
-            writeInt(&buf, Int32(44))
+            writeInt(&buf, Int32(51))
         
         }
     }
@@ -1979,6 +2095,80 @@ public func FfiConverterTypeAppUpdate_lift(_ buf: RustBuffer) throws -> AppUpdat
 #endif
 public func FfiConverterTypeAppUpdate_lower(_ value: AppUpdate) -> RustBuffer {
     return FfiConverterTypeAppUpdate.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum CapabilityRequestKind: Equatable, Hashable {
+    
+    case qrScan
+    case clipboardRead
+    case photoPick
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CapabilityRequestKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCapabilityRequestKind: FfiConverterRustBuffer {
+    typealias SwiftType = CapabilityRequestKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CapabilityRequestKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .qrScan
+        
+        case 2: return .clipboardRead
+        
+        case 3: return .photoPick
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CapabilityRequestKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .qrScan:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .clipboardRead:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .photoPick:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCapabilityRequestKind_lift(_ buf: RustBuffer) throws -> CapabilityRequestKind {
+    return try FfiConverterTypeCapabilityRequestKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCapabilityRequestKind_lower(_ value: CapabilityRequestKind) -> RustBuffer {
+    return FfiConverterTypeCapabilityRequestKind.lower(value)
 }
 
 
@@ -2914,6 +3104,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeCapabilityRequest: FfiConverterRustBuffer {
+    typealias SwiftType = CapabilityRequest?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeCapabilityRequest.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeCapabilityRequest.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -17,6 +17,7 @@ private let borderColor = Color.white.opacity(0.10)
 struct ContentView: View {
     @Bindable var manager: AppManager
     @State private var navPath: [Screen] = []
+    @State private var selectedCapabilityPhoto: PhotosPickerItem?
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -41,6 +42,30 @@ struct ContentView: View {
                     manager.dispatch(.clearToast)
                 }
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { manager.state.capabilityRequest?.kind == .qrScan },
+            set: { if !$0 { manager.dispatch(.cancelCapabilityRequest) } }
+        )) {
+            QRScannerSheet { value in
+                manager.dispatch(.completeQrScan(value: value))
+            }
+        }
+        .photosPicker(isPresented: Binding(
+            get: { manager.state.capabilityRequest?.kind == .photoPick },
+            set: { if !$0 { manager.dispatch(.cancelCapabilityRequest) } }
+        ), selection: $selectedCapabilityPhoto, matching: .images)
+        .onChange(of: selectedCapabilityPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                let data = try? await item.loadTransferable(type: Data.self)
+                manager.dispatch(.completePhotoPick(imageBase64: data?.base64EncodedString()))
+                selectedCapabilityPhoto = nil
+            }
+        }
+        .onChange(of: manager.state.capabilityRequest) { _, request in
+            guard request?.kind == .clipboardRead else { return }
+            manager.dispatch(.completeClipboardRead(value: UIPasteboard.general.string))
         }
     }
 
@@ -255,7 +280,6 @@ struct MutinyEmptyHome: View {
 struct MutinyFab: View {
     @Bindable var manager: AppManager
     @State private var open = false
-    @State private var showingScanner = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 14) {
@@ -273,7 +297,7 @@ struct MutinyFab: View {
                     Divider().overlay(borderColor)
                     FabMenuButton(title: "Scan", icon: "qrcode.viewfinder") {
                         open = false
-                        showingScanner = true
+                        manager.dispatch(.requestQrScan)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -292,13 +316,6 @@ struct MutinyFab: View {
         }
         .padding(.trailing, 24)
         .padding(.bottom, 26)
-        .sheet(isPresented: $showingScanner) {
-            QRScannerSheet { value in
-                manager.dispatch(.setSendDestination(destination: value))
-                manager.dispatch(.pushScreen(screen: .send))
-                showingScanner = false
-            }
-        }
     }
 }
 
@@ -688,7 +705,6 @@ struct ReceiveMethodPicker: View {
 
 struct SendView: View {
     @Bindable var manager: AppManager
-    @State private var showingScanner = false
     @State private var draftDestination = ""
 
     private var destination: String {
@@ -723,9 +739,7 @@ struct SendView: View {
 
                         HStack(spacing: 10) {
                             Button {
-                                if let value = UIPasteboard.general.string {
-                                    draftDestination = value
-                                }
+                                manager.dispatch(.requestClipboardRead)
                             } label: {
                                 Label("Paste", systemImage: "doc.on.clipboard")
                                     .frame(maxWidth: .infinity)
@@ -733,7 +747,7 @@ struct SendView: View {
                             .buttonStyle(SecondaryButtonStyle())
 
                             Button {
-                                showingScanner = true
+                                manager.dispatch(.requestQrScan)
                             } label: {
                                 Label("Scan", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity)
@@ -827,15 +841,7 @@ struct SendView: View {
             draftDestination = manager.state.send.destination
         }
         .onDisappear {
-            guard !showingScanner else { return }
             draftDestination = ""
-        }
-        .sheet(isPresented: $showingScanner) {
-            QRScannerSheet { value in
-                manager.dispatch(.setSendDestination(destination: value))
-                draftDestination = value
-                showingScanner = false
-            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { manager.state.send.phase == .success },
@@ -1724,7 +1730,6 @@ struct EditProfilePanel: View {
     @State private var picture = ""
     @State private var lud16 = ""
     @State private var nip05 = ""
-    @State private var selectedPhoto: PhotosPickerItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1735,7 +1740,9 @@ struct EditProfilePanel: View {
             .foregroundStyle(mutedText)
 
             VStack(spacing: 14) {
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                Button {
+                    manager.dispatch(.requestPhotoPick)
+                } label: {
                     ZStack(alignment: .bottomTrailing) {
                         ProfileAvatar(url: picture, size: 128)
                         Image(systemName: "pencil")
@@ -1744,6 +1751,7 @@ struct EditProfilePanel: View {
                             .background(rebelRed, in: Circle())
                     }
                 }
+                .buttonStyle(.plain)
 
                 TextField("Name", text: $name)
                     .profileField()
@@ -1786,15 +1794,6 @@ struct EditProfilePanel: View {
         }
         .onChange(of: manager.state.nostr.picture) { _, newValue in
             picture = newValue
-        }
-        .onChange(of: selectedPhoto) { _, item in
-            guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    manager.dispatch(.uploadNostrProfilePicture(imageBase64: data.base64EncodedString()))
-                }
-                selectedPhoto = nil
-            }
         }
     }
 }

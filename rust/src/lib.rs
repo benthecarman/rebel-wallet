@@ -32,9 +32,9 @@ mod updates;
 
 pub use actions::AppAction;
 pub use state::{
-    ActivityIconKind, ActivityItem, AppState, Contact, MainTab, NostrMessage, NostrState,
-    ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen, SendDestinationKind, SendPhase,
-    SendState, SetupState, WalletState,
+    ActivityIconKind, ActivityItem, AppState, CapabilityRequest, CapabilityRequestKind, Contact,
+    MainTab, NostrMessage, NostrState, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
+    SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -147,6 +147,7 @@ struct AppCore {
     rt: Runtime,
     wallet: Option<Wallet>,
     rev: u64,
+    next_capability_id: u64,
 }
 
 impl AppCore {
@@ -165,6 +166,7 @@ impl AppCore {
             rt,
             wallet: None,
             rev: 0,
+            next_capability_id: 0,
         }
     }
 
@@ -252,6 +254,35 @@ impl AppCore {
                 }
             }
             AppAction::ResetSendDraft => self.reset_send_draft(),
+            AppAction::RequestQrScan => self.request_capability(CapabilityRequestKind::QrScan),
+            AppAction::RequestClipboardRead => {
+                self.request_capability(CapabilityRequestKind::ClipboardRead)
+            }
+            AppAction::RequestPhotoPick => {
+                self.request_capability(CapabilityRequestKind::PhotoPick)
+            }
+            AppAction::CompleteQrScan { value } => {
+                self.state.capability_request = None;
+                if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.set_send_destination(value);
+                    if self.state.router.screen_stack.last() != Some(&Screen::Send) {
+                        self.state.router.screen_stack.push(Screen::Send);
+                    }
+                }
+            }
+            AppAction::CompleteClipboardRead { value } => {
+                self.state.capability_request = None;
+                if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.set_send_destination(value);
+                }
+            }
+            AppAction::CompletePhotoPick { image_base64 } => {
+                self.state.capability_request = None;
+                if let Some(image_base64) = image_base64 {
+                    self.upload_nostr_profile_picture(image_base64);
+                }
+            }
+            AppAction::CancelCapabilityRequest => self.state.capability_request = None,
             AppAction::GenerateNostrKey => self.generate_nostr_key(),
             AppAction::ImportNostrSecret { nsec_or_hex } => self.import_nostr_secret(nsec_or_hex),
             AppAction::ExportNostrSecret => self.export_nostr_secret(),
@@ -653,6 +684,14 @@ impl AppCore {
         self.state.send.memo.clear();
         self.state.send.last_result = None;
         self.state.send.phase = SendPhase::Drafting;
+    }
+
+    fn request_capability(&mut self, kind: CapabilityRequestKind) {
+        self.next_capability_id += 1;
+        self.state.capability_request = Some(CapabilityRequest {
+            id: self.next_capability_id,
+            kind,
+        });
     }
 
     fn pay_lightning_invoice(&mut self, invoice: String, amount_sat: Option<u64>) {
