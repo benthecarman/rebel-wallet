@@ -672,16 +672,22 @@ public struct ActivityItem: Equatable, Hashable {
     public var amountSat: Int64
     public var status: String
     public var timestamp: String
+    public var counterpartyName: String
+    public var counterpartyPicture: String
+    public var counterpartyKnown: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, subtitle: String, amountSat: Int64, status: String, timestamp: String) {
+    public init(id: String, title: String, subtitle: String, amountSat: Int64, status: String, timestamp: String, counterpartyName: String, counterpartyPicture: String, counterpartyKnown: Bool) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.amountSat = amountSat
         self.status = status
         self.timestamp = timestamp
+        self.counterpartyName = counterpartyName
+        self.counterpartyPicture = counterpartyPicture
+        self.counterpartyKnown = counterpartyKnown
     }
 
     
@@ -705,7 +711,10 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 subtitle: FfiConverterString.read(from: &buf), 
                 amountSat: FfiConverterInt64.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
-                timestamp: FfiConverterString.read(from: &buf)
+                timestamp: FfiConverterString.read(from: &buf), 
+                counterpartyName: FfiConverterString.read(from: &buf), 
+                counterpartyPicture: FfiConverterString.read(from: &buf), 
+                counterpartyKnown: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -716,6 +725,9 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
         FfiConverterInt64.write(value.amountSat, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterString.write(value.timestamp, into: &buf)
+        FfiConverterString.write(value.counterpartyName, into: &buf)
+        FfiConverterString.write(value.counterpartyPicture, into: &buf)
+        FfiConverterBool.write(value.counterpartyKnown, into: &buf)
     }
 }
 

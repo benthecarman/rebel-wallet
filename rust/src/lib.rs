@@ -156,6 +156,9 @@ pub struct ActivityItem {
     pub amount_sat: i64,
     pub status: String,
     pub timestamp: String,
+    pub counterparty_name: String,
+    pub counterparty_picture: String,
+    pub counterparty_known: bool,
 }
 
 impl AppState {
@@ -599,6 +602,7 @@ impl AppCore {
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
                 self.state.toast = Some("Nostr contacts refreshed.".to_string());
                 self.save_app_data();
+                self.sync_wallet();
             }
             AsyncMsg::NostrProfilePictureUploaded(url) => {
                 self.state.nostr.picture = url;
@@ -667,12 +671,16 @@ impl AppCore {
             return;
         };
         let tx = self.tx.clone();
+        let contacts = self.state.nostr.contacts.clone();
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
                 let balance = wallet.balance().await.context("balance failed")?;
                 let history = wallet.history().await.context("history failed")?;
-                let activity = history.into_iter().map(activity_from_movement).collect();
+                let activity = history
+                    .into_iter()
+                    .map(|movement| activity_from_movement(movement, &contacts))
+                    .collect();
                 Ok::<_, anyhow::Error>(AsyncMsg::WalletSynced {
                     balance_sat: balance.spendable.to_sat(),
                     pending_receive_sat: balance.claimable_lightning_receive.to_sat(),
@@ -1606,15 +1614,24 @@ fn contact_id(input: &str) -> String {
     }
 }
 
-fn activity_from_movement(movement: Movement) -> ActivityItem {
+fn activity_from_movement(movement: Movement, contacts: &[Contact]) -> ActivityItem {
     let amount_sat = movement.effective_balance.to_sat();
     let inbound = amount_sat >= 0;
-    let method = movement
-        .received_on
-        .first()
-        .or_else(|| movement.sent_to.first())
-        .map(|d| format!("{} {}", d.destination.type_str(), truncate_middle(&d.destination.value_string(), 28)))
-        .unwrap_or_else(|| movement.subsystem.kind.clone());
+    let destination = if inbound {
+        movement.received_on.first()
+    } else {
+        movement.sent_to.first()
+    };
+    let contact = destination.and_then(|d| contact_for_payment_method(&d.destination, contacts));
+    let method = destination
+        .map(|d| {
+            format!(
+                "{} {}",
+                d.destination.type_str(),
+                truncate_middle(&d.destination.value_string(), 28)
+            )
+        })
+        .unwrap_or_else(|| activity_subsystem_label(&movement));
     let title = if inbound {
         format!("Received {}", method)
     } else {
@@ -1622,9 +1639,9 @@ fn activity_from_movement(movement: Movement) -> ActivityItem {
     };
     let fee = movement.offchain_fee.to_sat();
     let subtitle = if fee > 0 {
-        format!("{} - {} sats fee", movement.subsystem.name, fee)
+        format!("{fee} sats fee")
     } else {
-        movement.subsystem.name.clone()
+        String::new()
     };
     let timestamp = movement
         .time
@@ -1640,7 +1657,68 @@ fn activity_from_movement(movement: Movement) -> ActivityItem {
         amount_sat,
         status: movement.status.to_string(),
         timestamp,
+        counterparty_name: contact.map(|c| c.name.clone()).unwrap_or_default(),
+        counterparty_picture: contact.map(|c| c.picture.clone()).unwrap_or_default(),
+        counterparty_known: contact.is_some(),
     }
+}
+
+fn activity_subsystem_label(movement: &Movement) -> String {
+    let raw = if movement.subsystem.name.trim().is_empty() {
+        movement.subsystem.kind.as_str()
+    } else {
+        movement.subsystem.name.as_str()
+    };
+    let normalized = raw.trim().trim_start_matches("bark.").to_ascii_lowercase();
+    match normalized.as_str() {
+        "lightning_send" | "lightning_receive" => "Lightning".to_string(),
+        "onboard" | "offboard" | "ark" => "Ark".to_string(),
+        "" => "Wallet".to_string(),
+        _ => raw
+            .trim()
+            .trim_start_matches("bark.")
+            .replace('_', " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+fn contact_for_payment_method<'a>(
+    method: &BarkPaymentMethod,
+    contacts: &'a [Contact],
+) -> Option<&'a Contact> {
+    let value = normalize_contact_match_value(&method.value_string());
+    if value.is_empty() {
+        return None;
+    }
+
+    contacts
+        .iter()
+        .find(|contact| contact_matches_payment_value(contact, &value))
+}
+
+fn contact_matches_payment_value(contact: &Contact, payment_value: &str) -> bool {
+    [&contact.lightning_address, &contact.lnurl, &contact.npub, &contact.id]
+        .into_iter()
+        .map(|value| normalize_contact_match_value(value))
+        .filter(|value| !value.is_empty())
+        .any(|value| value == payment_value || payment_value.contains(&value))
+}
+
+fn normalize_contact_match_value(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches("lightning:")
+        .trim_start_matches("LIGHTNING:")
+        .to_ascii_lowercase()
 }
 
 fn truncate_middle(value: &str, max: usize) -> String {

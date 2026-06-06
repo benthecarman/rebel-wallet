@@ -14,6 +14,16 @@ private let primaryText = Color.white
 private let mutedText = Color(red: 0.64, green: 0.64, blue: 0.64)
 private let borderColor = Color.white.opacity(0.10)
 
+private func formatSats(_ amount: UInt64) -> String {
+    "\(amount.formatted(.number.grouping(.automatic))) sats"
+}
+
+private func formatSats(_ amount: Int64, signed: Bool = false) -> String {
+    let magnitude = amount < 0 ? UInt64(amount.magnitude) : UInt64(amount)
+    let prefix = amount < 0 ? "-" : (signed && amount > 0 ? "+" : "")
+    return "\(prefix)\(magnitude.formatted(.number.grouping(.automatic))) sats"
+}
+
 struct ContentView: View {
     @Bindable var manager: AppManager
     @State private var navPath: [Screen] = []
@@ -221,7 +231,7 @@ struct MutinyBalanceButton: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(wallet.balanceSat) sats")
+            Text(formatSats(wallet.balanceSat))
                 .font(.system(size: 25, weight: .light, design: .default))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -345,11 +355,11 @@ struct BalancePanel: View {
             Text("Balance")
                 .font(.subheadline)
                 .foregroundStyle(mutedText)
-            Text("\(wallet.balanceSat) sats")
+            Text(formatSats(wallet.balanceSat))
                 .font(.system(size: 42, weight: .bold, design: .rounded))
             HStack {
-                StatPill(title: "Claimable", value: "\(wallet.pendingReceiveSat) sats")
-                StatPill(title: "Sending", value: "\(wallet.pendingSendSat) sats")
+                StatPill(title: "Claimable", value: formatSats(wallet.pendingReceiveSat))
+                StatPill(title: "Sending", value: formatSats(wallet.pendingSendSat))
             }
             if let lastSync = wallet.lastSync {
                 Text("Last sync \(lastSync)")
@@ -604,7 +614,7 @@ struct ReceiveRequestPanel: View {
                     .font(.headline)
                 Spacer()
                 if amountSat > 0 {
-                    Text("\(amountSat) sats")
+                    Text(formatSats(amountSat))
                         .font(.caption.bold())
                         .foregroundStyle(mutedText)
                 }
@@ -1032,7 +1042,7 @@ struct PaymentSuccessScreen: View {
                         .multilineTextAlignment(.center)
 
                     if amountSat > 0 {
-                        Text("\(amountSat) sats")
+                        Text(formatSats(amountSat))
                             .font(.title2.bold())
                             .foregroundStyle(rebelGreen)
                     }
@@ -1093,16 +1103,11 @@ struct ActivityView: View {
                                 selectedActivityId = item.id
                             } label: {
                                 ActivityRow(item: item)
-                                    .padding(.vertical, 10)
                             }
                             .buttonStyle(.plain)
-                            Divider().overlay(borderColor)
                         }
                     }
                 }
-                .padding(.horizontal, 12)
-                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
             }
             .padding(16)
         }
@@ -1143,9 +1148,11 @@ struct ActivityDetailSheet: View {
             }
 
             VStack(spacing: 0) {
-                DetailLine(title: "Amount", value: "\(item.amountSat) sats")
-                SettingsDivider()
-                DetailLine(title: "Description", value: item.subtitle)
+                DetailLine(title: "Amount", value: formatSats(item.amountSat, signed: true))
+                if !item.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    SettingsDivider()
+                    DetailLine(title: "Description", value: item.subtitle)
+                }
                 SettingsDivider()
                 DetailLine(title: "Time", value: item.timestamp)
                 SettingsDivider()
@@ -2157,28 +2164,124 @@ struct StatPill: View {
 struct ActivityRow: View {
     let item: ActivityItem
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.amountSat < 0 ? "arrow.up.right" : "arrow.down.left")
-                .foregroundStyle(item.amountSat < 0 ? rebelBlue : rebelGreen)
-                .frame(width: 32, height: 32)
-                .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.subheadline.bold())
-                Text(item.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(mutedText)
-                    .lineLimit(2)
-                Text(item.timestamp)
-                    .font(.caption2)
-                    .foregroundStyle(mutedText)
-            }
-            Spacer()
-            Text("\(item.amountSat) sats")
-                .font(.caption.bold())
+    private var inbound: Bool {
+        item.amountSat >= 0
+    }
+
+    private var amountText: String {
+        formatSats(item.amountSat < 0 ? -item.amountSat : item.amountSat)
+    }
+
+    private var primaryName: String {
+        inbound ? counterpartyName : "You"
+    }
+
+    private var secondaryName: String {
+        inbound ? "you" : counterpartyName
+    }
+
+    private var counterpartyName: String {
+        item.counterpartyKnown && !item.counterpartyName.isEmpty ? item.counterpartyName : "Unknown"
+    }
+
+    private var counterpartyHasPicture: Bool {
+        item.counterpartyKnown && !item.counterpartyPicture.isEmpty
+    }
+
+    private var verb: String {
+        inbound ? "sent" : "sent"
+    }
+
+    private var methodIcon: String {
+        let lower = (item.title + " " + item.subtitle).lowercased()
+        if lower.contains("lightning") || lower.contains("invoice") {
+            return "bolt.fill"
         }
-        .padding(.vertical, 6)
+        if lower.contains("ark") {
+            return "link"
+        }
+        return inbound ? "arrow.down.left" : "arrow.up.right"
+    }
+
+    private var methodColor: Color {
+        inbound ? rebelGreen : rebelBlue
+    }
+
+    private var messageText: String? {
+        let trimmed = item.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard trimmed.lowercased() != "lightning" && trimmed.lowercased() != "ark" else { return nil }
+        return trimmed
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Group {
+                if counterpartyHasPicture {
+                    ProfileAvatar(url: item.counterpartyPicture, size: 48)
+                } else {
+                    ZStack {
+                        Circle()
+                            .fill(inbound ? rebelGreen.opacity(0.18) : raisedSurface)
+                        Image(systemName: methodIcon)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(methodColor)
+                    }
+                }
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 0) {
+                    Text(primaryName)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(item.counterpartyKnown || primaryName == "You" ? primaryText : mutedText)
+                    Text(" \(verb) ")
+                        .font(.subheadline.weight(.light))
+                        .foregroundStyle(primaryText)
+                    Text(secondaryName)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(item.counterpartyKnown || secondaryName == "you" ? primaryText : mutedText)
+                }
+                .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(amountText)
+                            .font(.caption.bold())
+                    }
+                    .foregroundStyle(primaryText)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(inbound ? rebelGreen.opacity(0.38) : raisedSurface, in: Capsule())
+
+                    if let messageText {
+                        Text(messageText)
+                            .font(.caption)
+                            .foregroundStyle(primaryText)
+                            .lineLimit(1)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(raisedSurface, in: Capsule())
+                    }
+                }
+
+                HStack(spacing: 5) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(item.timestamp)
+                        .font(.caption2)
+                }
+                .foregroundStyle(mutedText)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 2)
+        .contentShape(Rectangle())
     }
 }
 
