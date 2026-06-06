@@ -357,13 +357,17 @@ struct BalancePanel: View {
 
 struct ReceiveView: View {
     @Bindable var manager: AppManager
-    @State private var method: ReceiveMethod = .lightning
-    @State private var showingResult = false
-    @State private var showingSuccess = false
-    @State private var shownSuccessId: String?
     @State private var amountText = ""
     @State private var didInitializeAmount = false
     @FocusState private var amountFocused: Bool
+
+    private var method: ReceiveMethod {
+        manager.state.receive.method
+    }
+
+    private var showingResult: Bool {
+        manager.state.receive.phase == .creating || manager.state.receive.phase == .showingRequest || manager.state.receive.phase == .success
+    }
 
     private var receiveText: String? {
         switch method {
@@ -391,7 +395,7 @@ struct ReceiveView: View {
                             .padding(.vertical, 6)
                             .background(raisedSurface, in: Capsule())
                         Button("Edit") {
-                            showingResult = false
+                            manager.dispatch(.editReceiveRequest)
                         }
                         .buttonStyle(SecondaryButtonStyle())
                     }
@@ -417,7 +421,9 @@ struct ReceiveView: View {
                                 manager.dispatch(.setReceiveAmount(amountSat: value))
                             }
                         )
-                        ReceiveMethodPicker(method: $method)
+                        ReceiveMethodPicker(method: method) { method in
+                            manager.dispatch(.selectReceiveMethod(method: method))
+                        }
                     }
                     .frame(maxWidth: 400)
 
@@ -445,13 +451,7 @@ struct ReceiveView: View {
 
                         Button {
                             amountFocused = false
-                            switch method {
-                            case .lightning:
-                                manager.dispatch(.createLightningInvoice)
-                            case .ark:
-                                manager.dispatch(.createArkAddress)
-                            }
-                            showingResult = true
+                            manager.dispatch(.beginReceiveRequest)
                         } label: {
                             Text("Continue")
                                 .frame(maxWidth: .infinity)
@@ -478,14 +478,11 @@ struct ReceiveView: View {
                     amountFocused = true
                 }
             }
-            showReceiveSuccessIfNeeded()
         }
-        .onChange(of: manager.state.receive.lightningPaid) { _, paid in
-            if paid {
-                showReceiveSuccessIfNeeded()
-            }
-        }
-        .fullScreenCover(isPresented: $showingSuccess) {
+        .fullScreenCover(isPresented: Binding(
+            get: { manager.state.receive.phase == .success },
+            set: { if !$0 { manager.dispatch(.dismissPaymentSuccess) } }
+        )) {
             PaymentSuccessScreen(
                 title: "Payment Received",
                 amountText: manager.state.receive.amountDisplay,
@@ -497,32 +494,12 @@ struct ReceiveView: View {
         }
     }
 
-    private func showReceiveSuccessIfNeeded() {
-        guard manager.state.receive.lightningPaid else { return }
-        let successId = manager.state.receive.lightningPaymentHash ?? "receive-\(manager.state.receive.amountSat)"
-        guard shownSuccessId != successId else { return }
-        shownSuccessId = successId
-        showingSuccess = true
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-    }
-
     private func returnHomeFromSuccess() {
-        showingResult = false
         amountText = ""
+        manager.dispatch(.dismissPaymentSuccess)
         manager.dispatch(.setReceiveAmount(amountSat: 0))
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
-        dismissSuccessAfterHomeUpdate()
-    }
-
-    private func dismissSuccessAfterHomeUpdate() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                showingSuccess = false
-            }
-        }
     }
 }
 
@@ -651,11 +628,13 @@ struct ReceiveRequestPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
     }
 }
-enum ReceiveMethod: String, CaseIterable, Identifiable {
-    case lightning
-    case ark
-
-    var id: String { rawValue }
+extension ReceiveMethod: Identifiable {
+    public var id: String {
+        switch self {
+        case .lightning: return "lightning"
+        case .ark: return "ark"
+        }
+    }
 
     var title: String {
         switch self {
@@ -680,13 +659,14 @@ enum ReceiveMethod: String, CaseIterable, Identifiable {
 }
 
 struct ReceiveMethodPicker: View {
-    @Binding var method: ReceiveMethod
+    let method: ReceiveMethod
+    let onSelect: (ReceiveMethod) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(ReceiveMethod.allCases) { option in
+            ForEach([ReceiveMethod.lightning, ReceiveMethod.ark]) { option in
                 Button {
-                    method = option
+                    onSelect(option)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: option.icon)
@@ -711,9 +691,6 @@ struct ReceiveMethodPicker: View {
 struct SendView: View {
     @Bindable var manager: AppManager
     @State private var showingScanner = false
-    @State private var showingSuccess = false
-    @State private var successResult = ""
-    @State private var successAmountText = ""
     @State private var draftDestination = ""
 
     private var destination: String {
@@ -721,7 +698,7 @@ struct SendView: View {
     }
 
     private var isSending: Bool {
-        manager.state.busy && !destination.isEmpty
+        manager.state.send.phase == .sending
     }
 
     var body: some View {
@@ -781,7 +758,7 @@ struct SendView: View {
                 } else {
                     SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
                         draftDestination = ""
-                        manager.dispatch(.setSendDestination(destination: ""))
+                        manager.dispatch(.resetSendDraft)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -851,17 +828,9 @@ struct SendView: View {
         .onAppear {
             draftDestination = manager.state.send.destination
         }
-        .onChange(of: manager.state.send.lastResult) { _, result in
-            guard let result, !result.isEmpty else { return }
-            successResult = result
-            successAmountText = manager.state.send.amountDisplay
-            showingSuccess = true
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        }
         .onDisappear {
             guard !showingScanner else { return }
             draftDestination = ""
-            manager.dispatch(.setSendDestination(destination: ""))
         }
         .sheet(isPresented: $showingScanner) {
             QRScannerSheet { value in
@@ -870,11 +839,14 @@ struct SendView: View {
                 showingScanner = false
             }
         }
-        .fullScreenCover(isPresented: $showingSuccess) {
+        .fullScreenCover(isPresented: Binding(
+            get: { manager.state.send.phase == .success },
+            set: { if !$0 { manager.dispatch(.dismissPaymentSuccess) } }
+        )) {
             PaymentSuccessScreen(
                 title: "Payment Sent",
-                amountText: successAmountText,
-                detail: successResult,
+                amountText: manager.state.send.successAmountDisplay,
+                detail: manager.state.send.lastResult ?? "",
                 confirmText: "Nice"
             ) {
                 returnHomeFromSuccess()
@@ -884,20 +856,9 @@ struct SendView: View {
 
     private func returnHomeFromSuccess() {
         draftDestination = ""
-        manager.dispatch(.setSendDestination(destination: ""))
+        manager.dispatch(.resetSendDraft)
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
-        dismissSuccessAfterHomeUpdate()
-    }
-
-    private func dismissSuccessAfterHomeUpdate() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                showingSuccess = false
-            }
-        }
     }
 }
 

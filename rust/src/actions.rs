@@ -1,4 +1,4 @@
-use crate::{MainTab, Screen};
+use crate::{MainTab, ReceiveMethod, Screen};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppAction {
@@ -22,12 +22,17 @@ pub enum AppAction {
     UpdateScreenStack {
         stack: Vec<Screen>,
     },
+    SelectReceiveMethod {
+        method: ReceiveMethod,
+    },
     SetReceiveAmount {
         amount_sat: u64,
     },
     SetReceiveMemo {
         memo: String,
     },
+    EditReceiveRequest,
+    BeginReceiveRequest,
     CreateArkAddress,
     CreateLightningInvoice,
     SetSendDestination {
@@ -48,6 +53,8 @@ pub enum AppAction {
         address: String,
         amount_sat: u64,
     },
+    DismissPaymentSuccess,
+    ResetSendDraft,
     GenerateNostrKey,
     ImportNostrSecret {
         nsec_or_hex: String,

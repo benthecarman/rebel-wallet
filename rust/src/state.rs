@@ -67,6 +67,8 @@ pub struct WalletState {
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct ReceiveState {
+    pub method: ReceiveMethod,
+    pub phase: ReceivePhase,
     pub ark_address: Option<String>,
     pub lightning_invoice: Option<String>,
     pub lightning_payment_hash: Option<String>,
@@ -78,16 +80,40 @@ pub struct ReceiveState {
     pub memo: String,
 }
 
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum ReceiveMethod {
+    Lightning,
+    Ark,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum ReceivePhase {
+    Editing,
+    Creating,
+    ShowingRequest,
+    Success,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct SendState {
     pub destination: String,
     pub destination_kind: SendDestinationKind,
+    pub phase: SendPhase,
     pub amount_sat: u64,
     pub amount_display: String,
     pub memo: String,
     pub last_result: Option<String>,
+    pub success_amount_display: String,
     pub can_submit: bool,
     pub error_text: Option<String>,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum SendPhase {
+    Drafting,
+    Editing,
+    Sending,
+    Success,
 }
 
 #[derive(uniffi::Enum, Clone, Debug, PartialEq)]
@@ -178,6 +204,8 @@ impl AppState {
                 last_sync: None,
             },
             receive: ReceiveState {
+                method: ReceiveMethod::Lightning,
+                phase: ReceivePhase::Editing,
                 ark_address: None,
                 lightning_invoice: None,
                 lightning_payment_hash: None,
@@ -191,10 +219,12 @@ impl AppState {
             send: SendState {
                 destination: String::new(),
                 destination_kind: SendDestinationKind::Unknown,
+                phase: SendPhase::Drafting,
                 amount_sat: 0,
                 amount_display: format_sats(0),
                 memo: String::new(),
                 last_result: None,
+                success_amount_display: format_sats(0),
                 can_submit: false,
                 error_text: None,
             },
@@ -233,6 +263,9 @@ impl AppState {
         };
 
         self.send.amount_display = format_sats(self.send.amount_sat);
+        if self.send.destination.trim().is_empty() && self.send.phase == SendPhase::Editing {
+            self.send.phase = SendPhase::Drafting;
+        }
         self.send.destination_kind = send_destination_kind(&self.send.destination);
         self.send.error_text = send_error_text(
             self.send.destination_kind.clone(),
@@ -240,7 +273,7 @@ impl AppState {
             self.wallet.balance_sat,
         );
         self.send.can_submit = !self.send.destination.trim().is_empty()
-            && !self.busy
+            && self.send.phase != SendPhase::Sending
             && self.send.error_text.is_none()
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);

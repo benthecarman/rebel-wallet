@@ -33,7 +33,8 @@ mod updates;
 pub use actions::AppAction;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, Contact, MainTab, NostrMessage, NostrState,
-    ReceiveState, Router, Screen, SendDestinationKind, SendState, SetupState, WalletState,
+    ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen, SendDestinationKind, SendPhase,
+    SendState, SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -213,6 +214,7 @@ impl AppCore {
                 self.state.router.screen_stack.pop();
             }
             AppAction::UpdateScreenStack { stack } => self.state.router.screen_stack = stack,
+            AppAction::SelectReceiveMethod { method } => self.state.receive.method = method,
             AppAction::SetReceiveAmount { amount_sat } => {
                 self.state.receive.amount_sat = amount_sat;
                 self.save_app_data();
@@ -221,6 +223,11 @@ impl AppCore {
                 self.state.receive.memo = memo;
                 self.save_app_data();
             }
+            AppAction::EditReceiveRequest => self.state.receive.phase = ReceivePhase::Editing,
+            AppAction::BeginReceiveRequest => match self.state.receive.method {
+                ReceiveMethod::Lightning => self.create_lightning_invoice(),
+                ReceiveMethod::Ark => self.create_ark_address(),
+            },
             AppAction::CreateArkAddress => self.create_ark_address(),
             AppAction::CreateLightningInvoice => self.create_lightning_invoice(),
             AppAction::SetSendDestination { destination } => self.set_send_destination(destination),
@@ -235,6 +242,16 @@ impl AppCore {
                 address,
                 amount_sat,
             } => self.pay_ark_address(address, amount_sat),
+            AppAction::DismissPaymentSuccess => {
+                if self.state.receive.phase == ReceivePhase::Success {
+                    self.state.receive.phase = ReceivePhase::Editing;
+                    self.state.receive.lightning_paid = false;
+                }
+                if self.state.send.phase == SendPhase::Success {
+                    self.state.send.phase = SendPhase::Editing;
+                }
+            }
+            AppAction::ResetSendDraft => self.reset_send_draft(),
             AppAction::GenerateNostrKey => self.generate_nostr_key(),
             AppAction::ImportNostrSecret { nsec_or_hex } => self.import_nostr_secret(nsec_or_hex),
             AppAction::ExportNostrSecret => self.export_nostr_secret(),
@@ -376,6 +393,7 @@ impl AppCore {
             }
             AsyncMsg::ArkAddress(address) => {
                 self.state.receive.ark_address = Some(address);
+                self.state.receive.phase = ReceivePhase::ShowingRequest;
             }
             AsyncMsg::LightningInvoice {
                 invoice,
@@ -385,6 +403,7 @@ impl AppCore {
                 self.state.receive.lightning_payment_hash = Some(payment_hash);
                 self.state.receive.lightning_status = "waiting".to_string();
                 self.state.receive.lightning_paid = false;
+                self.state.receive.phase = ReceivePhase::ShowingRequest;
             }
             AsyncMsg::LightningReceiveStatus {
                 payment_hash,
@@ -404,11 +423,14 @@ impl AppCore {
                 {
                     self.state.receive.lightning_status = "paid".to_string();
                     self.state.receive.lightning_paid = true;
+                    self.state.receive.phase = ReceivePhase::Success;
                 }
                 self.state.toast = Some("Lightning receive claimed.".to_string());
                 self.sync_wallet();
             }
             AsyncMsg::Paid(result) => {
+                self.state.send.phase = SendPhase::Success;
+                self.state.send.success_amount_display = self.state.send.amount_display.clone();
                 self.state.send.last_result = Some(result.clone());
                 self.state.toast = Some(result);
                 self.sync_wallet();
@@ -447,6 +469,12 @@ impl AppCore {
                 self.state.toast = Some("Message sent.".to_string());
             }
             AsyncMsg::Error(message) => {
+                if self.state.receive.phase == ReceivePhase::Creating {
+                    self.state.receive.phase = ReceivePhase::Editing;
+                }
+                if self.state.send.phase == SendPhase::Sending {
+                    self.state.send.phase = SendPhase::Editing;
+                }
                 if matches!(self.state.setup, SetupState::NeedsSetup) {
                     self.state.setup = SetupState::Error {
                         message: message.clone(),
@@ -522,10 +550,11 @@ impl AppCore {
         });
     }
 
-    fn create_ark_address(&self) {
+    fn create_ark_address(&mut self) {
         let Some(wallet) = self.wallet.clone() else {
             return;
         };
+        self.state.receive.phase = ReceivePhase::Creating;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let msg = match wallet.new_address().await {
@@ -536,10 +565,11 @@ impl AppCore {
         });
     }
 
-    fn create_lightning_invoice(&self) {
+    fn create_lightning_invoice(&mut self) {
         let Some(wallet) = self.wallet.clone() else {
             return;
         };
+        self.state.receive.phase = ReceivePhase::Creating;
         let amount_sat = self.state.receive.amount_sat;
         let memo = self.state.receive.memo.clone();
         let tx = self.tx.clone();
@@ -592,10 +622,7 @@ impl AppCore {
     fn set_send_destination(&mut self, destination: String) {
         let raw = destination.trim().to_string();
         if raw.is_empty() {
-            self.state.send.destination.clear();
-            self.state.send.amount_sat = 0;
-            self.state.send.memo.clear();
-            self.state.send.last_result = None;
+            self.reset_send_draft();
             return;
         }
 
@@ -617,6 +644,15 @@ impl AppCore {
         } else {
             self.state.send.destination = raw;
         }
+        self.state.send.phase = SendPhase::Editing;
+    }
+
+    fn reset_send_draft(&mut self) {
+        self.state.send.destination.clear();
+        self.state.send.amount_sat = 0;
+        self.state.send.memo.clear();
+        self.state.send.last_result = None;
+        self.state.send.phase = SendPhase::Drafting;
     }
 
     fn pay_lightning_invoice(&mut self, invoice: String, amount_sat: Option<u64>) {
@@ -632,6 +668,7 @@ impl AppCore {
             return;
         };
         self.state.busy = true;
+        self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -665,6 +702,7 @@ impl AppCore {
             return;
         };
         self.state.busy = true;
+        self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
