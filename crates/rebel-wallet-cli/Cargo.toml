@@ -1,0 +1,7 @@
+[package]
+name = "rebel-wallet-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rebel-wallet_core = { path = "../../rust" }
