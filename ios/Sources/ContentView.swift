@@ -33,9 +33,7 @@ struct ContentView: View {
         }
         .onChange(of: navPath) { old, new in
             guard new != manager.state.router.screenStack else { return }
-            if new.count < old.count {
-                manager.dispatch(.updateScreenStack(stack: new))
-            }
+            manager.dispatch(.updateScreenStack(stack: new))
         }
         .overlay(alignment: .bottom) {
             if let toast = manager.state.toast {

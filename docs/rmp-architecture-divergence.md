@@ -6,28 +6,7 @@ https://raw.githubusercontent.com/rust-multiplatform/rmp/refs/heads/master/rmp-a
 
 The project follows several core RMP ideas already: it has a Rust core, UniFFI bindings, a SwiftUI shell, Rust-owned wallet/Nostr/persistence state, a channel-based actor, full-state updates, and native Keychain storage. The items below highlight where the current implementation diverges from the stricter RMP standard.
 
-## 1. Navigation Has a Swift Shadow
-
-RMP says Rust should own navigation state through a router, with native navigation reacting to that state. Rebel Wallet has a Rust `Router`, but Swift keeps a local `navPath` and only reports pop events back to Rust.
-
-Evidence:
-
-- `ContentView` declares `@State private var navPath: [Screen] = []`.
-- Swift mirrors `manager.state.router.screenStack` into `navPath`.
-- Swift only dispatches `UpdateScreenStack` when the new path is shorter than the old path.
-
-Why it matters:
-
-Navigation can become split-brained: Rust owns the canonical router, but Swift can temporarily hold a divergent stack or make decisions Rust never sees.
-
-Suggested remediation:
-
-- Add route projection helpers in Rust for mobile navigation.
-- Treat Swift's `NavigationStack` path as a projection of Rust state.
-- Report all platform-initiated navigation changes back to Rust, not only pops.
-- Consider replacing ad hoc screen-stack mutations with domain-specific navigation actions.
-
-## 2. Capability Bridges Are Ad Hoc
+## 1. Capability Bridges Are Ad Hoc
 
 The bible describes capability bridges as typed, bounded lifecycles: Rust decides when a native capability is needed, native executes the OS API, native reports raw data, and Rust decides the outcome. Rebel Wallet currently implements several native capabilities directly in Swift views/controllers.
 
@@ -48,7 +27,7 @@ Suggested remediation:
 - Have Rust request the capability and accept raw results or errors.
 - Keep native code limited to OS handles, lifecycle, and raw data delivery.
 
-## 3. Testing Strategy Is Missing
+## 2. Testing Strategy Is Missing
 
 The RMP standard emphasizes testing Rust core logic without platform dependencies. This repo currently has no visible Rust or Swift tests.
 
@@ -68,7 +47,7 @@ Suggested remediation:
 - Add actor-level tests that dispatch `AppAction` values and assert resulting `AppState`.
 - Add a small fake `SecretStore` for deterministic wallet/Nostr state tests.
 
-## 4. Busy State Is Too Coarse
+## 3. Busy State Is Too Coarse
 
 The bible recommends domain-specific busy flags so each UI surface can render loading state accurately. Rebel Wallet uses a single `busy: bool`.
 
