@@ -6,260 +6,49 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Context;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use bark::ark::lightning::PaymentHash;
+use bark::lightning_invoice::Bolt11Invoice;
 use bark::lock_manager::memory::MemoryLockManager;
+use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
 use bark::persist::{sqlite::SqliteClient, BarkPersister};
 use bark::{Config, Wallet};
-use bark::ark::lightning::PaymentHash;
-use bitcoin::Amount;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bip39::Mnemonic;
+use bitcoin::Amount;
 use flume::{Receiver, Sender};
-use bark::lightning_invoice::Bolt11Invoice;
-use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
 use nostr_sdk::prelude::{
-    Client as NostrClient, Contact as NostrContact, ContactListBuilder, EventBuilder, Filter,
-    EventBuilderTemplate, FinalizeEvent, FromBech32, JsonUtil, Keys, Kind, Metadata, Tag,
-    PublicKey as NostrPublicKey, ToBech32, Url, nip04,
+    nip04, Client as NostrClient, Contact as NostrContact, ContactListBuilder, EventBuilder,
+    EventBuilderTemplate, Filter, FinalizeEvent, FromBech32, JsonUtil, Keys, Kind, Metadata,
+    PublicKey as NostrPublicKey, Tag, ToBech32, Url,
 };
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::runtime::Runtime;
 
+mod actions;
+mod state;
+mod updates;
+
+pub use actions::AppAction;
+pub use state::{
+    ActivityItem, AppState, Contact, MainTab, NostrMessage, NostrState, ReceiveState, Router,
+    Screen, SendState, SetupState, WalletState,
+};
+pub use updates::AppUpdate;
+pub(crate) use updates::{AsyncMsg, CoreMsg};
+
 uniffi::setup_scaffolding!();
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
-const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
+pub(crate) const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
 const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
 const NOSTR_RELAYS: [&str; 3] = [
     "wss://relay.damus.io",
     "wss://nostr.wine",
     "wss://relay.primal.net",
 ];
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct AppState {
-    pub rev: u64,
-    pub router: Router,
-    pub setup: SetupState,
-    pub wallet: WalletState,
-    pub receive: ReceiveState,
-    pub send: SendState,
-    pub nostr: NostrState,
-    pub direct_messages: Vec<NostrMessage>,
-    pub activity: Vec<ActivityItem>,
-    pub recovery_phrase: Option<String>,
-    pub toast: Option<String>,
-    pub busy: bool,
-}
-
-#[derive(uniffi::Record, Clone, Debug, PartialEq)]
-pub struct Router {
-    pub default_screen: Screen,
-    pub screen_stack: Vec<Screen>,
-    pub selected_tab: MainTab,
-}
-
-#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
-pub enum MainTab {
-    Home,
-    Activity,
-    Contacts,
-    Settings,
-}
-
-#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
-pub enum Screen {
-    Setup,
-    Home,
-    Send,
-    Receive,
-    Profile,
-    Backup,
-    Restore,
-    ContactDetail { contact_id: String },
-}
-
-#[derive(uniffi::Enum, Clone, Debug)]
-pub enum SetupState {
-    NeedsSetup,
-    Ready,
-    Error { message: String },
-}
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct WalletState {
-    pub network: String,
-    pub server_address: String,
-    pub balance_sat: u64,
-    pub pending_receive_sat: u64,
-    pub pending_send_sat: u64,
-    pub last_sync: Option<String>,
-}
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct ReceiveState {
-    pub ark_address: Option<String>,
-    pub lightning_invoice: Option<String>,
-    pub lightning_payment_hash: Option<String>,
-    pub lightning_status: String,
-    pub lightning_paid: bool,
-    pub amount_sat: u64,
-    pub memo: String,
-}
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct SendState {
-    pub destination: String,
-    pub amount_sat: u64,
-    pub memo: String,
-    pub last_result: Option<String>,
-}
-
-#[derive(uniffi::Record, Clone, Debug, Serialize, Deserialize)]
-pub struct NostrState {
-    pub npub: Option<String>,
-    pub name: String,
-    pub about: String,
-    pub picture: String,
-    pub lud16: String,
-    pub nip05: String,
-    pub contacts: Vec<Contact>,
-}
-
-#[derive(uniffi::Record, Clone, Debug, Serialize, Deserialize)]
-pub struct Contact {
-    pub id: String,
-    pub npub: String,
-    pub name: String,
-    pub followed: bool,
-    pub picture: String,
-    pub lightning_address: String,
-    pub lnurl: String,
-    pub last_used: u64,
-}
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct NostrMessage {
-    pub id: String,
-    pub contact_id: String,
-    pub body: String,
-    pub inbound: bool,
-    pub timestamp: String,
-}
-
-#[derive(uniffi::Record, Clone, Debug)]
-pub struct ActivityItem {
-    pub id: String,
-    pub title: String,
-    pub subtitle: String,
-    pub amount_sat: i64,
-    pub status: String,
-    pub timestamp: String,
-    pub counterparty_name: String,
-    pub counterparty_picture: String,
-    pub counterparty_known: bool,
-}
-
-impl AppState {
-    fn initial() -> Self {
-        Self {
-            rev: 0,
-            router: Router {
-                default_screen: Screen::Setup,
-                screen_stack: vec![],
-                selected_tab: MainTab::Home,
-            },
-            setup: SetupState::NeedsSetup,
-            wallet: WalletState {
-                network: "Signet".to_string(),
-                server_address: SIGNET_SERVER.to_string(),
-                balance_sat: 0,
-                pending_receive_sat: 0,
-                pending_send_sat: 0,
-                last_sync: None,
-            },
-            receive: ReceiveState {
-                ark_address: None,
-                lightning_invoice: None,
-                lightning_payment_hash: None,
-                lightning_status: "idle".to_string(),
-                lightning_paid: false,
-                amount_sat: 10_000,
-                memo: "Rebel Wallet".to_string(),
-            },
-            send: SendState {
-                destination: String::new(),
-                amount_sat: 0,
-                memo: String::new(),
-                last_result: None,
-            },
-            nostr: NostrState {
-                npub: None,
-                name: "Rebel".to_string(),
-                about: String::new(),
-                picture: String::new(),
-                lud16: String::new(),
-                nip05: String::new(),
-                contacts: vec![],
-            },
-            direct_messages: vec![],
-            activity: vec![],
-            recovery_phrase: None,
-            toast: None,
-            busy: false,
-        }
-    }
-}
-
-#[derive(uniffi::Enum, Clone, Debug)]
-pub enum AppAction {
-    Bootstrap,
-    CreateWallet,
-    RestoreWallet { mnemonic: String },
-    ReplaceWallet { mnemonic: String },
-    ShowSeed,
-    SyncWallet,
-    SelectTab { tab: MainTab },
-    PushScreen { screen: Screen },
-    PopScreen,
-    UpdateScreenStack { stack: Vec<Screen> },
-    SetReceiveAmount { amount_sat: u64 },
-    SetReceiveMemo { memo: String },
-    CreateArkAddress,
-    CreateLightningInvoice,
-    SetSendDestination { destination: String },
-    SetSendAmount { amount_sat: u64 },
-    SetSendMemo { memo: String },
-    PayDestination,
-    PayLightningInvoice { invoice: String, amount_sat: Option<u64> },
-    PayArkAddress { address: String, amount_sat: u64 },
-    GenerateNostrKey,
-    ImportNostrSecret { nsec_or_hex: String },
-    ExportNostrSecret,
-    ClearNostrKey,
-    EditNostrProfile { name: String, about: String, picture: String, lud16: String, nip05: String },
-    UploadNostrProfilePicture { image_base64: String },
-    AddContact { npub: String, name: String, lightning_address: String, lnurl: String, picture: String },
-    EditContact { contact_id: String, name: String, npub: String, lightning_address: String, lnurl: String, picture: String },
-    FollowContact { contact_id: String },
-    UnfollowContact { contact_id: String },
-    DeleteContact { contact_id: String },
-    PublishNostrProfile,
-    RefreshNostrProfile,
-    DeleteNostrProfile,
-    PublishContactList,
-    RefreshContactList,
-    LoadDirectMessages { contact_id: String },
-    SendDirectMessage { contact_id: String, message: String },
-    ClearToast,
-}
-
-#[derive(uniffi::Enum, Clone, Debug)]
-pub enum AppUpdate {
-    FullState(AppState),
-}
 
 #[uniffi::export(callback_interface)]
 pub trait AppReconciler: Send + Sync + 'static {
@@ -271,34 +60,6 @@ pub trait SecretStore: Send + Sync + 'static {
     fn get_secret(&self, key: String) -> Option<String>;
     fn set_secret(&self, key: String, value: String) -> bool;
     fn delete_secret(&self, key: String) -> bool;
-}
-
-enum CoreMsg {
-    Action(AppAction),
-    Async(AsyncMsg),
-}
-
-enum AsyncMsg {
-    WalletReady { wallet: Wallet, mnemonic: String },
-    WalletSynced {
-        balance_sat: u64,
-        pending_receive_sat: u64,
-        pending_send_sat: u64,
-        activity: Vec<ActivityItem>,
-    },
-    ArkAddress(String),
-    LightningInvoice { invoice: String, payment_hash: String },
-    LightningReceiveStatus { payment_hash: String, status: String, paid: bool },
-    LightningReceiveClaimed { payment_hash: String },
-    Paid(String),
-    Seed(String),
-    NostrProfileLoaded(NostrState),
-    NostrContactsLoaded(Vec<Contact>),
-    NostrProfilePictureUploaded(String),
-    NostrPublished(String),
-    DirectMessagesLoaded(Vec<NostrMessage>),
-    DirectMessageSent(NostrMessage),
-    Error(String),
 }
 
 struct ParsedSendDestination {
@@ -464,17 +225,25 @@ impl AppCore {
             AppAction::SetSendAmount { amount_sat } => self.state.send.amount_sat = amount_sat,
             AppAction::SetSendMemo { memo } => self.state.send.memo = memo,
             AppAction::PayDestination => self.pay_destination(),
-            AppAction::PayLightningInvoice { invoice, amount_sat } => {
-                self.pay_lightning_invoice(invoice, amount_sat)
-            }
-            AppAction::PayArkAddress { address, amount_sat } => {
-                self.pay_ark_address(address, amount_sat)
-            }
+            AppAction::PayLightningInvoice {
+                invoice,
+                amount_sat,
+            } => self.pay_lightning_invoice(invoice, amount_sat),
+            AppAction::PayArkAddress {
+                address,
+                amount_sat,
+            } => self.pay_ark_address(address, amount_sat),
             AppAction::GenerateNostrKey => self.generate_nostr_key(),
             AppAction::ImportNostrSecret { nsec_or_hex } => self.import_nostr_secret(nsec_or_hex),
             AppAction::ExportNostrSecret => self.export_nostr_secret(),
             AppAction::ClearNostrKey => self.clear_nostr_key(),
-            AppAction::EditNostrProfile { name, about, picture, lud16, nip05 } => {
+            AppAction::EditNostrProfile {
+                name,
+                about,
+                picture,
+                lud16,
+                nip05,
+            } => {
                 self.state.nostr.name = name;
                 self.state.nostr.about = about;
                 self.state.nostr.picture = picture;
@@ -486,7 +255,13 @@ impl AppCore {
             AppAction::UploadNostrProfilePicture { image_base64 } => {
                 self.upload_nostr_profile_picture(image_base64)
             }
-            AppAction::AddContact { npub, name, lightning_address, lnurl, picture } => {
+            AppAction::AddContact {
+                npub,
+                name,
+                lightning_address,
+                lnurl,
+                picture,
+            } => {
                 let id = contact_id(&npub);
                 if !self.state.nostr.contacts.iter().any(|c| c.id == id) {
                     self.state.nostr.contacts.push(Contact {
@@ -502,8 +277,21 @@ impl AppCore {
                     self.save_app_data();
                 }
             }
-            AppAction::EditContact { contact_id, name, npub, lightning_address, lnurl, picture } => {
-                if let Some(c) = self.state.nostr.contacts.iter_mut().find(|c| c.id == contact_id) {
+            AppAction::EditContact {
+                contact_id,
+                name,
+                npub,
+                lightning_address,
+                lnurl,
+                picture,
+            } => {
+                if let Some(c) = self
+                    .state
+                    .nostr
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.id == contact_id)
+                {
                     c.name = name;
                     c.npub = npub;
                     c.lightning_address = lightning_address;
@@ -514,14 +302,26 @@ impl AppCore {
                 }
             }
             AppAction::FollowContact { contact_id } => {
-                if let Some(c) = self.state.nostr.contacts.iter_mut().find(|c| c.id == contact_id) {
+                if let Some(c) = self
+                    .state
+                    .nostr
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.id == contact_id)
+                {
                     c.followed = true;
                     c.last_used = now_unix();
                     self.save_app_data();
                 }
             }
             AppAction::UnfollowContact { contact_id } => {
-                if let Some(c) = self.state.nostr.contacts.iter_mut().find(|c| c.id == contact_id) {
+                if let Some(c) = self
+                    .state
+                    .nostr
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.id == contact_id)
+                {
                     c.followed = false;
                     c.last_used = now_unix();
                     self.save_app_data();
@@ -537,9 +337,10 @@ impl AppCore {
             AppAction::PublishContactList => self.publish_contact_list(),
             AppAction::RefreshContactList => self.refresh_contact_list(),
             AppAction::LoadDirectMessages { contact_id } => self.load_direct_messages(contact_id),
-            AppAction::SendDirectMessage { contact_id, message } => {
-                self.send_direct_message(contact_id, message)
-            }
+            AppAction::SendDirectMessage {
+                contact_id,
+                message,
+            } => self.send_direct_message(contact_id, message),
             AppAction::ClearToast => self.state.toast = None,
         }
     }
@@ -574,20 +375,31 @@ impl AppCore {
             AsyncMsg::ArkAddress(address) => {
                 self.state.receive.ark_address = Some(address);
             }
-            AsyncMsg::LightningInvoice { invoice, payment_hash } => {
+            AsyncMsg::LightningInvoice {
+                invoice,
+                payment_hash,
+            } => {
                 self.state.receive.lightning_invoice = Some(invoice);
                 self.state.receive.lightning_payment_hash = Some(payment_hash);
                 self.state.receive.lightning_status = "waiting".to_string();
                 self.state.receive.lightning_paid = false;
             }
-            AsyncMsg::LightningReceiveStatus { payment_hash, status, paid } => {
-                if self.state.receive.lightning_payment_hash.as_deref() == Some(payment_hash.as_str()) {
+            AsyncMsg::LightningReceiveStatus {
+                payment_hash,
+                status,
+                paid,
+            } => {
+                if self.state.receive.lightning_payment_hash.as_deref()
+                    == Some(payment_hash.as_str())
+                {
                     self.state.receive.lightning_status = status;
                     self.state.receive.lightning_paid = paid;
                 }
             }
             AsyncMsg::LightningReceiveClaimed { payment_hash } => {
-                if self.state.receive.lightning_payment_hash.as_deref() == Some(payment_hash.as_str()) {
+                if self.state.receive.lightning_payment_hash.as_deref()
+                    == Some(payment_hash.as_str())
+                {
                     self.state.receive.lightning_status = "paid".to_string();
                     self.state.receive.lightning_paid = true;
                 }
@@ -807,7 +619,8 @@ impl AppCore {
     fn pay_lightning_invoice(&mut self, invoice: String, amount_sat: Option<u64>) {
         if let Some(amount_sat) = amount_sat.filter(|amount| *amount > 0) {
             if amount_sat > self.state.wallet.balance_sat {
-                self.state.toast = Some("Insufficient balance for this Lightning payment.".to_string());
+                self.state.toast =
+                    Some("Insufficient balance for this Lightning payment.".to_string());
                 return;
             }
         }
@@ -822,7 +635,10 @@ impl AppCore {
             let user_amount = amount_sat.filter(|a| *a > 0).map(Amount::from_sat);
             let parsed = Bolt11Invoice::from_str(&invoice);
             let msg = match parsed {
-                Ok(invoice) => match wallet.pay_lightning_invoice(invoice, user_amount, true).await {
+                Ok(invoice) => match wallet
+                    .pay_lightning_invoice(invoice, user_amount, true)
+                    .await
+                {
                     Ok(_) => AsyncMsg::Paid("Lightning invoice paid.".to_string()),
                     Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
                 },
@@ -889,7 +705,8 @@ impl AppCore {
                 (Ok(nsec), Ok(npub)) => {
                     let _ = self.secrets.set_secret(NOSTR_SECRET_KEY.to_string(), nsec);
                     self.reset_nostr_identity(npub);
-                    self.state.toast = Some("Nostr key imported. Refreshing profile...".to_string());
+                    self.state.toast =
+                        Some("Nostr key imported. Refreshing profile...".to_string());
                     self.save_app_data();
                     self.refresh_nostr_profile();
                 }
@@ -960,7 +777,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -987,7 +806,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -1006,7 +827,10 @@ impl AppCore {
                     .await?;
                 if let Some(event) = events.iter().max_by_key(|event| event.created_at.as_secs()) {
                     let metadata = Metadata::from_json(event.content.clone())?;
-                    nostr.name = metadata.display_name.or(metadata.name).unwrap_or(nostr.name);
+                    nostr.name = metadata
+                        .display_name
+                        .or(metadata.name)
+                        .unwrap_or(nostr.name);
                     nostr.about = metadata.about.unwrap_or_default();
                     nostr.picture = metadata.picture.map(|u| u.to_string()).unwrap_or_default();
                     nostr.lud16 = metadata.lud16.unwrap_or_default();
@@ -1024,7 +848,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -1050,7 +876,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -1059,7 +887,9 @@ impl AppCore {
             let result = upload_profile_picture(keys, image_base64)
                 .await
                 .map(AsyncMsg::NostrProfilePictureUploaded)
-                .unwrap_or_else(|e| AsyncMsg::Error(format!("Profile picture upload failed: {e:#}")));
+                .unwrap_or_else(|e| {
+                    AsyncMsg::Error(format!("Profile picture upload failed: {e:#}"))
+                });
             let _ = tx.send(CoreMsg::Async(result));
         });
     }
@@ -1068,7 +898,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -1082,7 +914,9 @@ impl AppCore {
                     .filter_map(|c| public_key_from_npub_or_hex(&c.npub).ok())
                     .map(NostrContact::new)
                     .collect::<Vec<_>>();
-                let event = ContactListBuilder::new(nostr_contacts).build().finalize(&keys)?;
+                let event = ContactListBuilder::new(nostr_contacts)
+                    .build()
+                    .finalize(&keys)?;
                 let client = nostr_client().await?;
                 let out = client.send_event(&event).await?;
                 Ok::<_, anyhow::Error>(AsyncMsg::NostrPublished(format!(
@@ -1100,7 +934,9 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
@@ -1160,7 +996,8 @@ impl AppCore {
                             let Some(contact) = contacts.iter_mut().find(|c| c.npub == npub) else {
                                 continue;
                             };
-                            let Ok(metadata) = Metadata::from_json(metadata_event.content.clone()) else {
+                            let Ok(metadata) = Metadata::from_json(metadata_event.content.clone())
+                            else {
                                 continue;
                             };
                             contact.name = metadata
@@ -1189,11 +1026,20 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
-        let Some(contact) = self.state.nostr.contacts.iter().find(|c| c.id == contact_id).cloned() else {
+        let Some(contact) = self
+            .state
+            .nostr
+            .contacts
+            .iter()
+            .find(|c| c.id == contact_id)
+            .cloned()
+        else {
             return;
         };
         let tx = self.tx.clone();
@@ -1217,7 +1063,8 @@ impl AppCore {
                     } else {
                         event.pubkey
                     };
-                    let Ok(body) = nip04::decrypt(keys.secret_key(), &counterparty, &event.content) else {
+                    let Ok(body) = nip04::decrypt(keys.secret_key(), &counterparty, &event.content)
+                    else {
                         continue;
                     };
                     messages.push(NostrMessage {
@@ -1245,11 +1092,20 @@ impl AppCore {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
-                let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
+                let _ = self
+                    .tx
+                    .send(CoreMsg::Async(AsyncMsg::Error(format!("{e:#}"))));
                 return;
             }
         };
-        let Some(contact) = self.state.nostr.contacts.iter().find(|c| c.id == contact_id).cloned() else {
+        let Some(contact) = self
+            .state
+            .nostr
+            .contacts
+            .iter()
+            .find(|c| c.id == contact_id)
+            .cloned()
+        else {
             return;
         };
         let tx = self.tx.clone();
@@ -1311,7 +1167,11 @@ async fn parse_send_destination(wallet: Wallet, raw: &str) -> Option<ParsedSendD
     let amount_sat = request.amount.map(|amount| amount.to_sat());
     let memo = request.message.or(request.label);
 
-    for option in request.options.iter().filter(|option| option.errors.is_empty()) {
+    for option in request
+        .options
+        .iter()
+        .filter(|option| option.errors.is_empty())
+    {
         if let BarkPaymentMethod::Ark(address) = &option.method {
             return Some(ParsedSendDestination {
                 destination: address.to_string(),
@@ -1322,7 +1182,11 @@ async fn parse_send_destination(wallet: Wallet, raw: &str) -> Option<ParsedSendD
         }
     }
 
-    for option in request.options.iter().filter(|option| option.errors.is_empty()) {
+    for option in request
+        .options
+        .iter()
+        .filter(|option| option.errors.is_empty())
+    {
         if let BarkPaymentMethod::Invoice(invoice) = &option.method {
             return Some(ParsedSendDestination {
                 destination: invoice.to_string(),
@@ -1337,9 +1201,10 @@ async fn parse_send_destination(wallet: Wallet, raw: &str) -> Option<ParsedSendD
         .options
         .iter()
         .find_map(|option| match &option.method {
-            BarkPaymentMethod::Ark(_) | BarkPaymentMethod::Invoice(_) => {
-                option.errors.first().map(|e| format!("Invalid payment request: {e}"))
-            }
+            BarkPaymentMethod::Ark(_) | BarkPaymentMethod::Invoice(_) => option
+                .errors
+                .first()
+                .map(|e| format!("Invalid payment request: {e}")),
             BarkPaymentMethod::Bitcoin(_) | BarkPaymentMethod::OutputScript(_) => {
                 Some("On-chain payment QR codes are not supported yet.".to_string())
             }
@@ -1394,7 +1259,11 @@ async fn monitor_lightning_receive(wallet: Wallet, tx: Sender<CoreMsg>, payment_
                         &payment_hash_text,
                         &mut last_status,
                         &mut last_paid,
-                        if receive.htlc_vtxos.is_empty() { "waiting" } else { "claiming" },
+                        if receive.htlc_vtxos.is_empty() {
+                            "waiting"
+                        } else {
+                            "claiming"
+                        },
                         false,
                     );
 
@@ -1510,14 +1379,30 @@ async fn open_bark_wallet(
     let lock_manager = Box::new(MemoryLockManager::new());
     match mode {
         WalletOpenMode::Create | WalletOpenMode::Replace => {
-            Wallet::create(mnemonic, bitcoin::Network::Signet, config, db, lock_manager, false).await
+            Wallet::create(
+                mnemonic,
+                bitcoin::Network::Signet,
+                config,
+                db,
+                lock_manager,
+                false,
+            )
+            .await
         }
         WalletOpenMode::Open => Wallet::open(mnemonic, db, config, lock_manager).await,
         WalletOpenMode::Restore => {
             if db.read_properties().await?.is_some() {
                 Wallet::open(mnemonic, db, config, lock_manager).await
             } else {
-                Wallet::create(mnemonic, bitcoin::Network::Signet, config, db, lock_manager, false).await
+                Wallet::create(
+                    mnemonic,
+                    bitcoin::Network::Signet,
+                    config,
+                    db,
+                    lock_manager,
+                    false,
+                )
+                .await
             }
         }
     }
@@ -1529,7 +1414,9 @@ fn remove_wallet_database_files(db_path: &std::path::Path) -> anyhow::Result<()>
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).with_context(|| format!("failed to remove {}", path.display())),
+            Err(e) => {
+                return Err(e).with_context(|| format!("failed to remove {}", path.display()))
+            }
         }
     }
     Ok(())
@@ -1578,7 +1465,8 @@ async fn upload_profile_picture(keys: Keys, image_base64: String) -> anyhow::Res
     if body.status.as_deref() != Some("success") {
         anyhow::bail!(
             "{}",
-            body.message.unwrap_or_else(|| "nostr.build upload failed".to_string())
+            body.message
+                .unwrap_or_else(|| "nostr.build upload failed".to_string())
         );
     }
     body.data
@@ -1651,7 +1539,11 @@ fn now_unix() -> u64 {
 }
 
 fn contact_id(input: &str) -> String {
-    let hex = input.chars().filter(|c| c.is_ascii_hexdigit()).take(16).collect::<String>();
+    let hex = input
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .take(16)
+        .collect::<String>();
     if hex.is_empty() {
         format!("contact-{}", now_unix())
     } else {
@@ -1751,11 +1643,16 @@ fn contact_for_payment_method<'a>(
 }
 
 fn contact_matches_payment_value(contact: &Contact, payment_value: &str) -> bool {
-    [&contact.lightning_address, &contact.lnurl, &contact.npub, &contact.id]
-        .into_iter()
-        .map(|value| normalize_contact_match_value(value))
-        .filter(|value| !value.is_empty())
-        .any(|value| value == payment_value || payment_value.contains(&value))
+    [
+        &contact.lightning_address,
+        &contact.lnurl,
+        &contact.npub,
+        &contact.id,
+    ]
+    .into_iter()
+    .map(|value| normalize_contact_match_value(value))
+    .filter(|value| !value.is_empty())
+    .any(|value| value == payment_value || payment_value.contains(&value))
 }
 
 fn normalize_contact_match_value(value: &str) -> String {

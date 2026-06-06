@@ -6,28 +6,7 @@ https://raw.githubusercontent.com/rust-multiplatform/rmp/refs/heads/master/rmp-a
 
 The project follows several core RMP ideas already: it has a Rust core, UniFFI bindings, a SwiftUI shell, Rust-owned wallet/Nostr/persistence state, a channel-based actor, full-state updates, and native Keychain storage. The items below highlight where the current implementation diverges from the stricter RMP standard.
 
-## 1. Rust Core Is a God File
-
-The bible recommends a top-level FFI layer plus domain-oriented modules such as `state.rs`, `actions.rs`, `updates.rs`, and `core/` submodules. Rebel Wallet currently places FFI types, actor logic, persistence, wallet operations, Nostr operations, upload logic, payment parsing, formatting, and helpers in `rust/src/lib.rs`.
-
-Evidence:
-
-- `rust/src/lib.rs` is 1,775 lines.
-- `AppState`, `AppAction`, `AppUpdate`, `FfiApp`, `AppCore`, storage helpers, Nostr helpers, Bark wallet helpers, and display helpers all live in the same file.
-
-Why it matters:
-
-Large single-file cores become harder to test, harder to split by responsibility, and easier to accidentally expose internal implementation details through the FFI boundary.
-
-Suggested remediation:
-
-- Move FFI-visible state types to `rust/src/state.rs`.
-- Move `AppAction` to `rust/src/actions.rs`.
-- Move `AppUpdate`, `CoreMsg`, and `AsyncMsg` to `rust/src/updates.rs`.
-- Move actor implementation into `rust/src/core/mod.rs`.
-- Split wallet, Nostr, contacts, activity, receive, send, and persistence helpers into focused `core/` modules.
-
-## 2. Swift Duplicates Business and Display Logic
+## 1. Swift Duplicates Business and Display Logic
 
 RMP's golden rule is that native UI renders data and dispatches intents; Rust owns business logic, formatting, validation, and derived display fields. The SwiftUI layer currently derives several values that should be Rust-owned.
 
@@ -48,7 +27,7 @@ Suggested remediation:
 - Keep raw values available for copy/share/debug flows, but render Rust-computed display fields in Swift.
 - Add Rust tests for send validation and activity display derivation.
 
-## 3. Native Owns Too Much View-State Derivation
+## 2. Native Owns Too Much View-State Derivation
 
 RMP allows native UI state for purely visual concerns, but flow state and user-visible outcomes should generally be represented by Rust state and actions. Some current receive/send flow state lives entirely in Swift.
 
@@ -68,7 +47,7 @@ Suggested remediation:
 - Model payment success as Rust state or a dedicated side-effect update with a revision.
 - Dispatch explicit actions such as `SelectReceiveMethod`, `BeginReceiveRequest`, `DismissPaymentSuccess`, and `ResetSendDraft`.
 
-## 4. Navigation Has a Swift Shadow
+## 3. Navigation Has a Swift Shadow
 
 RMP says Rust should own navigation state through a router, with native navigation reacting to that state. Rebel Wallet has a Rust `Router`, but Swift keeps a local `navPath` and only reports pop events back to Rust.
 
@@ -89,7 +68,7 @@ Suggested remediation:
 - Report all platform-initiated navigation changes back to Rust, not only pops.
 - Consider replacing ad hoc screen-stack mutations with domain-specific navigation actions.
 
-## 5. Capability Bridges Are Ad Hoc
+## 4. Capability Bridges Are Ad Hoc
 
 The bible describes capability bridges as typed, bounded lifecycles: Rust decides when a native capability is needed, native executes the OS API, native reports raw data, and Rust decides the outcome. Rebel Wallet currently implements several native capabilities directly in Swift views/controllers.
 
@@ -110,7 +89,7 @@ Suggested remediation:
 - Have Rust request the capability and accept raw results or errors.
 - Keep native code limited to OS handles, lifecycle, and raw data delivery.
 
-## 6. Testing Strategy Is Missing
+## 5. Testing Strategy Is Missing
 
 The RMP standard emphasizes testing Rust core logic without platform dependencies. This repo currently has no visible Rust or Swift tests.
 
@@ -130,7 +109,7 @@ Suggested remediation:
 - Add actor-level tests that dispatch `AppAction` values and assert resulting `AppState`.
 - Add a small fake `SecretStore` for deterministic wallet/Nostr state tests.
 
-## 7. Busy State Is Too Coarse
+## 6. Busy State Is Too Coarse
 
 The bible recommends domain-specific busy flags so each UI surface can render loading state accurately. Rebel Wallet uses a single `busy: bool`.
 
