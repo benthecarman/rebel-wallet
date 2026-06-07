@@ -651,13 +651,9 @@ struct ReceiveView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Receive Bitcoin")
-                            .font(.largeTitle.bold())
-                    }
-                    Spacer()
-                    if showingResult {
+                if showingResult {
+                    HStack(alignment: .center) {
+                        Spacer()
                         Text("Checking")
                             .font(.caption.bold())
                             .foregroundStyle(primaryText)
@@ -669,8 +665,8 @@ struct ReceiveView: View {
                         }
                         .buttonStyle(SecondaryButtonStyle())
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if showingResult {
                     ReceiveRequestPanel(
@@ -973,13 +969,9 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Send")
-                        .font(.largeTitle.bold())
-                    Text("Paste or scan an Ark address or Lightning invoice.")
-                        .font(.subheadline)
-                        .foregroundStyle(mutedText)
-                }
+                Text("Paste or scan an Ark address or Lightning invoice.")
+                    .font(.subheadline)
+                    .foregroundStyle(mutedText)
 
                 if destination.isEmpty {
                     VStack(spacing: 14) {
