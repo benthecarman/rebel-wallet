@@ -7,13 +7,26 @@ final class ProfileImageLoader: ObservableObject {
     @Published private(set) var image: UIImage?
     @Published private(set) var isLoading = false
 
+    private nonisolated static let maxImageBytes = 5_000_000
     private static let cache = NSCache<NSURL, UIImage>()
     private static var inFlight: [URL: Task<UIImage?, Never>] = [:]
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(configuration: configuration)
+    }()
 
     private var url: URL?
     private var loadTask: Task<Void, Never>?
 
     func load(_ nextURL: URL) {
+        guard Self.canLoad(nextURL) else {
+            reset()
+            return
+        }
         guard url != nextURL || image == nil else { return }
 
         loadTask?.cancel()
@@ -45,6 +58,8 @@ final class ProfileImageLoader: ObservableObject {
     }
 
     private static func image(for url: URL) async -> UIImage? {
+        guard canLoad(url) else { return nil }
+
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
         }
@@ -55,12 +70,13 @@ final class ProfileImageLoader: ObservableObject {
 
         let task = Task.detached(priority: .utility) { () -> UIImage? in
             var request = URLRequest(url: url)
-            request.cachePolicy = .returnCacheDataElseLoad
+            request.cachePolicy = .reloadIgnoringLocalCacheData
 
             guard
-                let (data, response) = try? await URLSession.shared.data(for: request),
+                let (data, response) = try? await session.data(for: request),
                 let httpResponse = response as? HTTPURLResponse,
                 200..<300 ~= httpResponse.statusCode,
+                data.count <= maxImageBytes,
                 let image = UIImage(data: data)
             else {
                 return nil
@@ -76,6 +92,11 @@ final class ProfileImageLoader: ObservableObject {
         }
         inFlight[url] = nil
         return loaded
+    }
+
+    private static func canLoad(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "https" || scheme == "http"
     }
 
     deinit {

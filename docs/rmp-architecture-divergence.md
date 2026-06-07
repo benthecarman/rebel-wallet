@@ -111,7 +111,7 @@ Suggested direction:
 - Rust owns navigation state through `Router`.
 - iOS reports platform pops back to Rust via `UpdateScreenStack`.
 - iOS Keychain is kept native, which is consistent with the bible's secure credential storage guidance.
-- iOS profile image fetching and `NSCache` storage are an intentional native cache exception. Rust owns profile metadata and image URLs, while Swift owns UIKit image decoding, coalesced URL loading, and memory-pressure-aware image caching for display.
+- iOS profile image rendering uses a bounded native display adapter. Rust owns Nostr profile metadata, picture URLs, upload networking, contact refresh networking, and user-visible outcomes. Swift only fetches `http`/`https` profile image bytes through an ephemeral `URLSession`, decodes them into `UIImage`, coalesces duplicate loads, and keeps a memory-pressure-aware decoded-image `NSCache` for rendering.
 - QR scan, clipboard read, and photo pick are bounded capability requests where Rust opens/closes the request and native reports raw data back.
 - iOS SwiftUI source is split into root, screen, component, service, capability, and theme files rather than one large `ContentView.swift`.
 - Generated Swift UniFFI bindings and the xcframework are checked in.
