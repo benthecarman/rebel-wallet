@@ -373,7 +373,6 @@ impl AppCore {
                 self.state.router.default_screen = Screen::Home;
                 self.state.router.selected_tab = MainTab::Home;
                 self.state.router.screen_stack.clear();
-                self.state.toast = Some("Rebel Wallet is ready.".to_string());
                 let _ = self
                     .secrets
                     .set_secret(WALLET_SEED_KEY.to_string(), mnemonic);
@@ -425,14 +424,12 @@ impl AppCore {
                     self.state.receive.lightning_paid = true;
                     self.state.receive.phase = ReceivePhase::Success;
                 }
-                self.state.toast = Some("Lightning receive claimed.".to_string());
                 self.sync_wallet();
             }
             AsyncMsg::Paid(result) => {
                 self.state.send.phase = SendPhase::Success;
                 self.state.send.success_amount_display = self.state.send.amount_display.clone();
-                self.state.send.last_result = Some(result.clone());
-                self.state.toast = Some(result);
+                self.state.send.last_result = Some(result);
                 self.sync_wallet();
             }
             AsyncMsg::Seed(seed) => {
@@ -444,7 +441,6 @@ impl AppCore {
                 self.state.nostr.picture = nostr.picture;
                 self.state.nostr.lud16 = nostr.lud16;
                 self.state.nostr.nip05 = nostr.nip05;
-                self.state.toast = Some("Nostr profile refreshed.".to_string());
                 self.save_app_data();
             }
             AsyncMsg::NostrContactsLoaded(contacts) => {

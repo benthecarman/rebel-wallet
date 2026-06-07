@@ -314,5 +314,10 @@ struct ToastView: View {
         .background(.black.opacity(0.86), in: RoundedRectangle(cornerRadius: 8))
         .foregroundStyle(.white)
         .padding()
+        .task(id: text) {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            dismiss()
+        }
     }
 }
