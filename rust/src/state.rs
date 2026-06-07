@@ -197,6 +197,10 @@ pub struct SendState {
     pub destination: String,
     pub destination_kind: SendDestinationKind,
     pub phase: SendPhase,
+    pub search_query: String,
+    pub search_results: Vec<Contact>,
+    pub global_search_results: Vec<Contact>,
+    pub can_continue_search: bool,
     pub amount_sat: u64,
     pub amount_display: String,
     pub memo: String,
@@ -329,6 +333,10 @@ impl AppState {
                 destination: String::new(),
                 destination_kind: SendDestinationKind::Unknown,
                 phase: SendPhase::Drafting,
+                search_query: String::new(),
+                search_results: vec![],
+                global_search_results: vec![],
+                can_continue_search: false,
                 amount_sat: 0,
                 amount_display: format_sats(0),
                 memo: String::new(),
@@ -393,6 +401,13 @@ impl AppState {
         };
 
         self.send.amount_display = format_sats(self.send.amount_sat);
+        self.send.search_results = send_search_results(
+            &self.send.search_query,
+            &self.nostr.contacts,
+            &self.send.global_search_results,
+            self.nostr.npub.as_deref(),
+        );
+        self.send.can_continue_search = is_sendable_search_query(&self.send.search_query);
         if self.send.destination.trim().is_empty() && self.send.phase == SendPhase::Editing {
             self.send.phase = SendPhase::Drafting;
         }
@@ -484,11 +499,112 @@ pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
     let lower = destination.trim().to_ascii_lowercase();
     if lower.is_empty() {
         SendDestinationKind::Unknown
-    } else if lower.starts_with("lightning:") || lower.starts_with("ln") {
+    } else if lower.starts_with("lightning:")
+        || lower.starts_with("ln")
+        || is_valid_lightning_address(destination)
+    {
         SendDestinationKind::Lightning
     } else {
         SendDestinationKind::Ark
     }
+}
+
+fn send_search_results(
+    query: &str,
+    contacts: &[Contact],
+    global_results: &[Contact],
+    own_npub: Option<&str>,
+) -> Vec<Contact> {
+    let needle = normalize_search(query);
+    let own_npub = own_npub.map(normalize_search);
+    let mut contacts = contacts
+        .iter()
+        .cloned()
+        .chain(global_results.iter().cloned())
+        .map(|mut contact| {
+            contact.name = contact.name.trim().to_string();
+            contact
+        })
+        .fold(Vec::<Contact>::new(), |mut out, contact| {
+            if !out.iter().any(|c| c.npub == contact.npub) {
+                out.push(contact);
+            }
+            out
+        });
+    contacts.sort_by(|a, b| {
+        contact_has_lightning_address(b)
+            .cmp(&contact_has_lightning_address(a))
+            .then_with(|| b.last_used.cmp(&a.last_used))
+            .then_with(|| normalize_search(&a.name).cmp(&normalize_search(&b.name)))
+            .then_with(|| a.npub.cmp(&b.npub))
+    });
+
+    contacts
+        .into_iter()
+        .filter(|contact| {
+            if let Some(own_npub) = &own_npub {
+                if normalize_search(&contact.npub) == *own_npub {
+                    return false;
+                }
+            }
+            contact_has_lightning_address(contact)
+        })
+        .filter(|contact| {
+            needle.is_empty()
+                || normalize_search(&contact.name).contains(&needle)
+                || normalize_search(&contact.npub).contains(&needle)
+                || normalize_search(&contact.lightning_address).contains(&needle)
+                || normalize_search(&contact.lnurl).contains(&needle)
+        })
+        .collect()
+}
+
+fn contact_has_lightning_address(contact: &Contact) -> bool {
+    is_valid_lightning_address(&contact.lightning_address)
+}
+
+fn is_valid_lightning_address(address: &str) -> bool {
+    let address = address.trim();
+    let Some((local, domain)) = address.split_once('@') else {
+        return false;
+    };
+    if local.is_empty() || domain.is_empty() || domain.contains('@') {
+        return false;
+    }
+    if !local
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
+    {
+        return false;
+    }
+    let domain = domain.to_ascii_lowercase();
+    if !domain.contains('.') || domain.starts_with('.') || domain.ends_with('.') {
+        return false;
+    }
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
+}
+
+fn is_sendable_search_query(query: &str) -> bool {
+    let trimmed = query.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    trimmed.len() >= 6
+        && (lower.starts_with("ark")
+            || lower.starts_with("lightning:")
+            || lower.starts_with("lnbc")
+            || lower.starts_with("lntb")
+            || lower.starts_with("lnurl")
+            || trimmed.contains('@')
+            || lower.starts_with("http://")
+            || lower.starts_with("https://"))
+}
+
+fn normalize_search(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 fn send_error_text(
@@ -564,6 +680,12 @@ mod tests {
             state.send.error_text.as_deref(),
             Some("Insufficient balance for this send.")
         );
+
+        state.send.destination = " Alice@Example.com ".to_string();
+        state.send.amount_sat = 1;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(state.send.can_submit);
     }
 
     #[test]
@@ -596,5 +718,162 @@ mod tests {
         state.wallet.last_sync = None;
         state.refresh_derived();
         assert!(state.show_launch_splash);
+    }
+
+    #[test]
+    fn derives_send_search_results_from_contacts() {
+        let mut state = AppState::initial();
+        state.nostr.contacts = vec![
+            Contact {
+                id: "1".to_string(),
+                npub: "npubalice".to_string(),
+                name: "Alice".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "alice@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 10,
+            },
+            Contact {
+                id: "2".to_string(),
+                npub: "npubbob".to_string(),
+                name: "Bob".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: String::new(),
+                lnurl: "lnurl1bob".to_string(),
+                last_used: 20,
+            },
+            Contact {
+                id: "4".to_string(),
+                npub: "npubdave".to_string(),
+                name: "dave".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "not-a-lightning-address".to_string(),
+                lnurl: String::new(),
+                last_used: 30,
+            },
+        ];
+        state.send.global_search_results = vec![Contact {
+            id: "3".to_string(),
+            npub: "npubcarol".to_string(),
+            name: "Carol".to_string(),
+            followed: false,
+            picture: String::new(),
+            lightning_address: "carol@example.com".to_string(),
+            lnurl: String::new(),
+            last_used: 0,
+        }];
+        state.send.search_query = "ali".to_string();
+        state.refresh_derived();
+
+        assert_eq!(state.send.search_results.len(), 1);
+        assert_eq!(state.send.search_results[0].name, "Alice");
+        assert!(!state.send.can_continue_search);
+
+        state.send.search_query = "alice@example.com".to_string();
+        state.refresh_derived();
+        assert!(state.send.can_continue_search);
+
+        state.send.search_query = "car".to_string();
+        state.refresh_derived();
+        assert_eq!(state.send.search_results.len(), 1);
+        assert_eq!(state.send.search_results[0].name, "Carol");
+
+        state.send.search_query = "bob".to_string();
+        state.refresh_derived();
+        assert!(state.send.search_results.is_empty());
+
+        state.send.search_query = "dave".to_string();
+        state.refresh_derived();
+        assert!(state.send.search_results.is_empty());
+    }
+
+    #[test]
+    fn send_search_results_include_full_contact_list() {
+        let mut state = AppState::initial();
+        state.nostr.contacts = (0..75)
+            .map(|idx| Contact {
+                id: format!("contact-{idx}"),
+                npub: format!("npub{idx}"),
+                name: format!("Contact {idx}"),
+                followed: true,
+                picture: String::new(),
+                lightning_address: format!("contact{idx}@example.com"),
+                lnurl: String::new(),
+                last_used: idx,
+            })
+            .collect();
+
+        state.refresh_derived();
+
+        assert_eq!(state.send.search_results.len(), 75);
+    }
+
+    #[test]
+    fn send_search_results_sort_names_ignoring_case() {
+        let mut state = AppState::initial();
+        state.nostr.contacts = vec![
+            Contact {
+                id: "1".to_string(),
+                npub: "npub1".to_string(),
+                name: "bravo".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "bravo@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+            Contact {
+                id: "2".to_string(),
+                npub: "npub2".to_string(),
+                name: "Alpha".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "alpha@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+        ];
+
+        state.refresh_derived();
+
+        assert_eq!(state.send.search_results[0].name, "Alpha");
+        assert_eq!(state.send.search_results[1].name, "bravo");
+    }
+
+    #[test]
+    fn send_search_results_trim_names_and_finalize_sort_by_npub() {
+        let mut state = AppState::initial();
+        state.nostr.contacts = vec![
+            Contact {
+                id: "1".to_string(),
+                npub: "npub-b".to_string(),
+                name: "  Same  ".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "b@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+            Contact {
+                id: "2".to_string(),
+                npub: "npub-a".to_string(),
+                name: "same".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "a@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+        ];
+
+        state.refresh_derived();
+
+        assert_eq!(state.send.search_results[0].npub, "npub-a");
+        assert_eq!(state.send.search_results[0].name, "same");
+        assert_eq!(state.send.search_results[1].npub, "npub-b");
+        assert_eq!(state.send.search_results[1].name, "Same");
     }
 }

@@ -163,6 +163,7 @@ struct NostrKeysPanel: View {
     let done: () -> Void
     @State private var secret = ""
     @State private var confirmDelete = false
+    @State private var confirmClearCache = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -227,6 +228,14 @@ struct NostrKeysPanel: View {
                 .disabled(manager.state.nostr.npub == nil)
 
                 Button(role: .destructive) {
+                    confirmClearCache = true
+                } label: {
+                    Label("Clear profile cache", systemImage: "xmark.bin")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+
+                Button(role: .destructive) {
                     manager.dispatch(.clearNostrKey)
                 } label: {
                     Label("Unlink key", systemImage: "trash")
@@ -247,12 +256,21 @@ struct NostrKeysPanel: View {
         } message: {
             Text("This publishes a deletion event to configured relays.")
         }
+        .confirmationDialog("Clear cached Nostr profiles?", isPresented: $confirmClearCache, titleVisibility: .visible) {
+            Button("Clear profile cache", role: .destructive) {
+                manager.dispatch(.clearNostrProfileCache)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes cached profile metadata and downloaded profile pictures from this device. Your key and contacts stay linked.")
+        }
     }
 }
 
 struct ProfileAvatar: View {
     let url: String
     let size: CGFloat
+    var initial: String = "R"
 
     @StateObject private var loader = ProfileImageLoader()
 
@@ -267,7 +285,7 @@ struct ProfileAvatar: View {
             } else if loader.isLoading {
                 ProgressView()
             } else {
-                Text("R")
+                Text(initial.isEmpty ? "R" : initial)
                     .font(.system(size: size * 0.42, weight: .bold))
                     .foregroundStyle(primaryText)
             }

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SendView: View {
     @Bindable var manager: AppManager
-    @State private var draftDestination = ""
 
     private var destination: String {
         manager.state.send.destination.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -20,49 +19,9 @@ struct SendView: View {
                     .foregroundStyle(mutedText)
 
                 if destination.isEmpty {
-                    VStack(spacing: 14) {
-                        TextField("Lightning invoice or Ark address", text: $draftDestination, axis: .vertical)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .lineLimit(3...6)
-                            .padding(12)
-                            .foregroundStyle(primaryText)
-                            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
-
-                        HStack(spacing: 10) {
-                            Button {
-                                manager.dispatch(.requestClipboardRead)
-                            } label: {
-                                Label("Paste", systemImage: "doc.on.clipboard")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(SecondaryButtonStyle())
-
-                            Button {
-                                manager.dispatch(.requestQrScan)
-                            } label: {
-                                Label("Scan", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(SecondaryButtonStyle())
-                        }
-
-                        Button {
-                            manager.dispatch(.setSendDestination(destination: draftDestination))
-                        } label: {
-                            Text("Continue")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
-                        .disabled(draftDestination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .padding(14)
-                    .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+                    SendSearchPanel(manager: manager)
                 } else {
                     SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
-                        draftDestination = ""
                         manager.dispatch(.resetSendDraft)
                     }
 
@@ -130,12 +89,6 @@ struct SendView: View {
         .navigationTitle("Send")
         .background(pageBackground)
         .foregroundStyle(primaryText)
-        .onAppear {
-            draftDestination = manager.state.send.destination
-        }
-        .onDisappear {
-            draftDestination = ""
-        }
         .fullScreenCover(isPresented: Binding(
             get: { manager.state.send.phase == .success },
             set: { if !$0 { manager.dispatch(.dismissPaymentSuccess) } }
@@ -152,10 +105,118 @@ struct SendView: View {
     }
 
     private func returnHomeFromSuccess() {
-        draftDestination = ""
         manager.dispatch(.resetSendDraft)
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
+    }
+}
+
+struct SendSearchPanel: View {
+    @Bindable var manager: AppManager
+    @State private var prefetchedProfilePicturesOnOpen = false
+
+    private let profilePicturePrefetchCount = 80
+
+    private var searchBinding: Binding<String> {
+        Binding(
+            get: { manager.state.send.searchQuery },
+            set: { manager.dispatch(.setSendSearchQuery(query: $0)) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(mutedText)
+                TextField("Search contacts, paste invoice, or enter address", text: searchBinding, axis: .vertical)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .lineLimit(1...4)
+                    .submitLabel(.go)
+                    .onSubmit {
+                        if manager.state.send.canContinueSearch {
+                            manager.dispatch(.continueSendSearch)
+                        }
+                    }
+                if manager.state.send.searchQuery.isEmpty {
+                    Button {
+                        manager.dispatch(.requestClipboardRead)
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        manager.dispatch(.setSendSearchQuery(query: ""))
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+            .foregroundStyle(primaryText)
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+
+            HStack(spacing: 10) {
+                Button {
+                    manager.dispatch(.requestQrScan)
+                } label: {
+                    Label("Scan", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+
+                Button {
+                    manager.dispatch(.continueSendSearch)
+                } label: {
+                    Label("Continue", systemImage: "arrow.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(!manager.state.send.canContinueSearch)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Contacts")
+                    .font(.headline)
+
+                LazyVStack(spacing: 0) {
+                    if manager.state.send.searchResults.isEmpty {
+                        EmptyState(text: manager.state.send.searchQuery.isEmpty ? "No sendable contacts yet" : "No matching contacts")
+                    } else {
+                        ForEach(manager.state.send.searchResults, id: \.id) { contact in
+                            Button {
+                                manager.dispatch(.selectSendContact(contactId: contact.id))
+                            } label: {
+                                ContactRow(contact: contact)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.plain)
+                            Divider().overlay(borderColor)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+            }
+        }
+        .onAppear {
+            prefetchProfilePicturesOnceOnOpen()
+        }
+    }
+
+    private func prefetchProfilePicturesOnceOnOpen() {
+        guard !prefetchedProfilePicturesOnOpen else { return }
+        let ids = Array(manager.state.send.searchResults.prefix(profilePicturePrefetchCount).map(\.id))
+        guard !ids.isEmpty else { return }
+        prefetchedProfilePicturesOnOpen = true
+        manager.dispatch(.prefetchProfilePictures(contactIds: ids))
     }
 }
 

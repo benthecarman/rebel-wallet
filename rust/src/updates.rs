@@ -1,5 +1,6 @@
 use bark::Wallet;
 
+use crate::nostr_support::PrimalProfileContact;
 use crate::{ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency};
 
 #[derive(uniffi::Enum, Clone, Debug)]
@@ -40,6 +41,28 @@ pub(crate) enum AsyncMsg {
     Seed(String),
     NostrProfileLoaded(NostrState),
     NostrContactsLoaded(Vec<Contact>),
+    PrimalContactsLoaded {
+        records: Vec<PrimalProfileContact>,
+        show_toast: bool,
+    },
+    NostrSearchLoaded {
+        query: String,
+        contacts: Vec<PrimalProfileContact>,
+    },
+    PrimalProfilesLoaded {
+        records: Vec<PrimalProfileContact>,
+    },
+    PrimalProfilesFailed {
+        pubkeys: Vec<String>,
+    },
+    ProfilePictureCached {
+        pubkey: String,
+        remote_url: String,
+    },
+    ProfilePictureCacheFailed {
+        pubkey: String,
+        remote_url: String,
+    },
     NostrProfilePictureUploaded(String),
     NostrPublished(String),
     DirectMessagesLoaded(Vec<NostrMessage>),

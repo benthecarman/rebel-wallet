@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use anyhow::{anyhow, bail, Context};
 use bark::ark::lightning::PaymentHash;
 use bark::movement::PaymentMethod as BarkPaymentMethod;
 use bark::Wallet;
 use flume::Sender;
+use serde::Deserialize;
 
 use crate::{AsyncMsg, CoreMsg};
 
@@ -52,6 +54,21 @@ pub(crate) async fn parse_send_destination(
         }
     }
 
+    for option in request
+        .options
+        .iter()
+        .filter(|option| option.errors.is_empty())
+    {
+        if let BarkPaymentMethod::LightningAddress(address) = &option.method {
+            return Some(ParsedSendDestination {
+                destination: address.to_string(),
+                amount_sat,
+                memo,
+                toast: None,
+            });
+        }
+    }
+
     let toast = request
         .options
         .iter()
@@ -80,6 +97,179 @@ pub(crate) async fn parse_send_destination(
         memo,
         toast,
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct LnurlPayParams {
+    tag: Option<String>,
+    callback: String,
+    #[serde(rename = "minSendable")]
+    min_sendable: u64,
+    #[serde(rename = "maxSendable")]
+    max_sendable: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct LnurlPayInvoice {
+    pr: Option<String>,
+    status: Option<String>,
+    reason: Option<String>,
+}
+
+pub(crate) fn is_lnurl_pay_destination(destination: &str) -> bool {
+    let destination = strip_lightning_prefix(destination.trim());
+    let lower = destination.to_ascii_lowercase();
+    lower.starts_with("lnurl") || is_valid_lightning_address(destination)
+}
+
+pub(crate) async fn resolve_lnurl_pay_invoice(
+    destination: &str,
+    amount_sat: u64,
+) -> anyhow::Result<String> {
+    if amount_sat == 0 {
+        bail!("Enter an amount before sending to this Lightning address.");
+    }
+
+    let lnurl = lnurl_pay_url(destination)?;
+    let amount_msat = amount_sat
+        .checked_mul(1_000)
+        .ok_or_else(|| anyhow!("send amount is too large"))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .context("failed to build LNURL client")?;
+
+    let params = client
+        .get(lnurl)
+        .send()
+        .await
+        .context("failed to fetch LNURL pay request")?
+        .error_for_status()
+        .context("LNURL pay request returned an error")?
+        .json::<LnurlPayParams>()
+        .await
+        .context("failed to parse LNURL pay request")?;
+
+    if params.tag.as_deref() != Some("payRequest") {
+        bail!("LNURL endpoint is not a pay request");
+    }
+    if params.min_sendable > params.max_sendable {
+        bail!("LNURL endpoint returned an invalid amount range");
+    }
+    if amount_msat < params.min_sendable || amount_msat > params.max_sendable {
+        bail!(
+            "Amount must be between {} and {} sats.",
+            msats_to_display_sats(params.min_sendable),
+            msats_to_display_sats(params.max_sendable)
+        );
+    }
+
+    let mut callback =
+        reqwest::Url::parse(&params.callback).context("LNURL callback is not a valid URL")?;
+    if callback.scheme() != "https" && callback.scheme() != "http" {
+        bail!("LNURL callback must use http or https");
+    }
+    callback
+        .query_pairs_mut()
+        .append_pair("amount", &amount_msat.to_string());
+
+    let invoice = client
+        .get(callback)
+        .send()
+        .await
+        .context("failed to fetch LNURL invoice")?
+        .error_for_status()
+        .context("LNURL invoice request returned an error")?
+        .json::<LnurlPayInvoice>()
+        .await
+        .context("failed to parse LNURL invoice response")?;
+
+    if invoice.status.as_deref() == Some("ERROR") {
+        bail!(
+            "{}",
+            invoice
+                .reason
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or_else(|| "LNURL endpoint returned an error".to_string())
+        );
+    }
+
+    invoice
+        .pr
+        .filter(|pr| !pr.trim().is_empty())
+        .ok_or_else(|| anyhow!("LNURL endpoint did not return an invoice"))
+}
+
+fn lnurl_pay_url(destination: &str) -> anyhow::Result<reqwest::Url> {
+    let destination = strip_lightning_prefix(destination.trim());
+    if is_valid_lightning_address(destination) {
+        let (local, domain) = destination
+            .split_once('@')
+            .ok_or_else(|| anyhow!("invalid Lightning address"))?;
+        let base = format!("https://{domain}");
+        let mut url = reqwest::Url::parse(&base).context("invalid Lightning address domain")?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("invalid Lightning address domain"))?
+            .extend([".well-known", "lnurlp", local]);
+        return Ok(url);
+    }
+
+    let lower = destination.to_ascii_lowercase();
+    if lower.starts_with("lnurl") {
+        let (hrp, bytes) = bech32::decode(destination).context("invalid LNURL")?;
+        if hrp.to_string().to_ascii_lowercase() != "lnurl" {
+            bail!("invalid LNURL prefix");
+        }
+        let url = String::from_utf8(bytes).context("LNURL does not contain a valid URL")?;
+        let url = reqwest::Url::parse(&url).context("LNURL does not contain a valid URL")?;
+        if url.scheme() != "https" && url.scheme() != "http" {
+            bail!("LNURL must use http or https");
+        }
+        return Ok(url);
+    }
+
+    bail!("not a Lightning address or LNURL")
+}
+
+fn strip_lightning_prefix(destination: &str) -> &str {
+    destination
+        .strip_prefix("lightning:")
+        .or_else(|| destination.strip_prefix("LIGHTNING:"))
+        .unwrap_or(destination)
+}
+
+fn is_valid_lightning_address(address: &str) -> bool {
+    let address = address.trim();
+    let Some((local, domain)) = address.split_once('@') else {
+        return false;
+    };
+    if local.is_empty() || domain.is_empty() || domain.contains('@') {
+        return false;
+    }
+    if !local
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
+    {
+        return false;
+    }
+    let domain = domain.to_ascii_lowercase();
+    if !domain.contains('.') || domain.starts_with('.') || domain.ends_with('.') {
+        return false;
+    }
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
+}
+
+fn msats_to_display_sats(msats: u64) -> String {
+    if msats % 1_000 == 0 {
+        (msats / 1_000).to_string()
+    } else {
+        format!("{:.3}", msats as f64 / 1_000.0)
+    }
 }
 
 pub(crate) async fn monitor_lightning_receive(

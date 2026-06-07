@@ -182,22 +182,43 @@ struct ActivityRow: View {
 struct ContactRow: View {
     let contact: Contact
 
+    private var displayName: String {
+        let trimmed = contact.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? contact.name : trimmed
+    }
+
+    private var subtitle: String {
+        if contact.lightningAddress.isEmpty {
+            return contact.followed ? "Following" : "Not following"
+        }
+        return truncateMiddle(contact.lightningAddress.trimmingCharacters(in: .whitespacesAndNewlines), maxLength: 34)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(rebelBlue.opacity(0.28))
-                .frame(width: 42, height: 42)
-                .overlay(Text(String(contact.name.prefix(1))).font(.headline).foregroundStyle(primaryText))
+            ProfileAvatar(
+                url: contact.picture,
+                size: 42,
+                initial: String(displayName.prefix(1)).uppercased()
+            )
             VStack(alignment: .leading) {
-                Text(contact.name)
+                Text(displayName)
                     .font(.subheadline.bold())
-                Text(contact.lightningAddress.isEmpty ? (contact.followed ? "Following" : "Not following") : contact.lightningAddress)
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(mutedText)
             }
             Spacer()
         }
     }
+}
+
+private func truncateMiddle(_ value: String, maxLength: Int) -> String {
+    guard value.count > maxLength, maxLength > 3 else { return value }
+    let edgeCount = (maxLength - 3) / 2
+    let prefix = value.prefix(edgeCount)
+    let suffix = value.suffix(edgeCount)
+    return "\(prefix)...\(suffix)"
 }
 
 struct DirectMessageRow: View {

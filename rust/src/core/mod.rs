@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -19,14 +20,23 @@ use tokio::runtime::Runtime;
 
 use crate::activity::{activity_from_movement, truncate_middle};
 use crate::nostr_support::{
-    contact_id, merge_contacts, metadata_from_state, nostr_client, public_key_from_npub_or_hex,
-    upload_profile_picture,
+    contact_id, merge_contacts, metadata_from_state, nostr_client, primal_follow_contacts,
+    primal_profile_contacts, primal_search_profiles, public_key_from_npub_or_hex,
+    upload_profile_picture, PrimalProfileContact,
 };
-use crate::payments::{monitor_lightning_receive, parse_send_destination};
+use crate::payments::{
+    is_lnurl_pay_destination, monitor_lightning_receive, parse_send_destination,
+    resolve_lnurl_pay_invoice,
+};
 use crate::persistence::{
     validate_server_url, PersistedAppData, PersistedPriceCurrency, ServerConfig,
 };
 use crate::price::fetch_bitcoin_price;
+use crate::profile_cache::{
+    clear_profile_cache, clear_profile_picture_dir, download_profile_picture,
+    ensure_profile_picture_dir, load_profile, open_profile_cache, profile_picture_file_url,
+    save_profile, update_cached_picture, ProfileCacheEntry,
+};
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
@@ -38,6 +48,18 @@ use crate::{
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
+
+fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
+    format!("{pubkey}:{remote_url}")
+}
+
+fn msats_to_display_sats(msats: u64) -> String {
+    if msats % 1_000 == 0 {
+        (msats / 1_000).to_string()
+    } else {
+        format!("{:.3}", msats as f64 / 1_000.0)
+    }
+}
 
 pub(crate) fn spawn_actor(
     data_dir: PathBuf,
@@ -67,6 +89,9 @@ struct AppCore {
     tx: Sender<CoreMsg>,
     rt: Runtime,
     wallet: Option<Wallet>,
+    profile_db: Option<rusqlite::Connection>,
+    profile_picture_downloads: HashSet<String>,
+    profile_info_requests: HashSet<String>,
     rev: u64,
     next_capability_id: u64,
 }
@@ -78,14 +103,18 @@ impl AppCore {
         tx: Sender<CoreMsg>,
         rt: Runtime,
     ) -> Self {
+        ensure_profile_picture_dir(&data_dir);
         Self {
             state: AppState::initial(),
             app_data_path: data_dir.join("rebel-app-data.json"),
+            profile_db: open_profile_cache(&data_dir).ok(),
             data_dir,
             secrets,
             tx,
             rt,
             wallet: None,
+            profile_picture_downloads: HashSet::new(),
+            profile_info_requests: HashSet::new(),
             rev: 0,
             next_capability_id: 0,
         }
@@ -159,6 +188,18 @@ impl AppCore {
             },
             AppAction::CreateArkAddress => self.create_ark_address(),
             AppAction::CreateLightningInvoice => self.create_lightning_invoice(),
+            AppAction::SetSendSearchQuery { query } => {
+                self.state.send.search_query = query;
+                self.search_nostr_profiles();
+            }
+            AppAction::ContinueSendSearch => {
+                let query = self.state.send.search_query.clone();
+                self.set_send_destination(query);
+            }
+            AppAction::SelectSendContact { contact_id } => self.select_send_contact(contact_id),
+            AppAction::PrefetchProfilePictures { contact_ids } => {
+                self.prefetch_profile_pictures(contact_ids)
+            }
             AppAction::SetSendDestination { destination } => self.set_send_destination(destination),
             AppAction::SetSendAmount { amount_sat } => self.state.send.amount_sat = amount_sat,
             AppAction::SetSendMemo { memo } => self.state.send.memo = memo,
@@ -313,6 +354,7 @@ impl AppCore {
             AppAction::DeleteNostrProfile => self.delete_nostr_profile(),
             AppAction::PublishContactList => self.publish_contact_list(),
             AppAction::RefreshContactList => self.refresh_contact_list(),
+            AppAction::ClearNostrProfileCache => self.clear_nostr_profile_cache(),
             AppAction::LoadDirectMessages { contact_id } => self.load_direct_messages(contact_id),
             AppAction::SendDirectMessage {
                 contact_id,
@@ -407,9 +449,57 @@ impl AppCore {
             }
             AsyncMsg::NostrContactsLoaded(contacts) => {
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
-                self.state.toast = Some("Nostr contacts refreshed.".to_string());
+                self.state.toast = Some("Nostr contacts refreshed from Primal.".to_string());
                 self.save_app_data();
                 self.sync_wallet();
+            }
+            AsyncMsg::PrimalContactsLoaded {
+                records,
+                show_toast,
+            } => {
+                let contacts = self.cache_primal_profile_contacts(records);
+                merge_contacts(&mut self.state.nostr.contacts, contacts);
+                if show_toast {
+                    self.state.toast = Some("Nostr contacts refreshed from Primal.".to_string());
+                }
+                self.save_app_data();
+                self.sync_wallet();
+            }
+            AsyncMsg::NostrSearchLoaded { query, contacts } => {
+                if self.state.send.search_query.trim() == query {
+                    self.state.send.global_search_results =
+                        self.cache_primal_profile_contacts(contacts);
+                }
+            }
+            AsyncMsg::PrimalProfilesLoaded { records } => {
+                for record in &records {
+                    self.profile_info_requests.remove(&record.pubkey_hex);
+                }
+                let contacts = self.cache_primal_profile_contacts(records);
+                let contact_ids = contacts
+                    .iter()
+                    .map(|contact| contact.id.clone())
+                    .collect::<Vec<_>>();
+                merge_contacts(&mut self.state.nostr.contacts, contacts);
+                self.save_app_data();
+                self.prefetch_profile_pictures(contact_ids);
+            }
+            AsyncMsg::PrimalProfilesFailed { pubkeys } => {
+                for pubkey in pubkeys {
+                    self.profile_info_requests.remove(&pubkey);
+                }
+            }
+            AsyncMsg::ProfilePictureCached { pubkey, remote_url } => {
+                self.profile_picture_downloads
+                    .remove(&profile_picture_download_key(&pubkey, &remote_url));
+                if let Some(conn) = self.profile_db.as_ref() {
+                    let _ = update_cached_picture(conn, &pubkey, &remote_url);
+                }
+                self.refresh_contact_picture_for_pubkey(&pubkey);
+            }
+            AsyncMsg::ProfilePictureCacheFailed { pubkey, remote_url } => {
+                self.profile_picture_downloads
+                    .remove(&profile_picture_download_key(&pubkey, &remote_url));
             }
             AsyncMsg::NostrProfilePictureUploaded(url) => {
                 self.state.nostr.picture = url;
@@ -466,15 +556,20 @@ impl AppCore {
                 self.state.busy.uploading_profile_picture = false;
             }
             AsyncMsg::NostrPublished(_) => self.state.busy.publishing_nostr = false,
-            AsyncMsg::NostrProfileLoaded(_) | AsyncMsg::NostrContactsLoaded(_) => {
-                self.state.busy.refreshing_contacts = false;
-            }
+            AsyncMsg::NostrProfileLoaded(_)
+            | AsyncMsg::NostrContactsLoaded(_)
+            | AsyncMsg::PrimalContactsLoaded { .. } => self.state.busy.refreshing_contacts = false,
             AsyncMsg::Error(_) => self.state.busy = BusyState::default(),
             AsyncMsg::LightningReceiveStatus { .. }
             | AsyncMsg::LightningReceiveClaimed { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
             | AsyncMsg::DirectMessageSent(_)
+            | AsyncMsg::NostrSearchLoaded { .. }
+            | AsyncMsg::PrimalProfilesLoaded { .. }
+            | AsyncMsg::PrimalProfilesFailed { .. }
+            | AsyncMsg::ProfilePictureCached { .. }
+            | AsyncMsg::ProfilePictureCacheFailed { .. }
             | AsyncMsg::PriceUpdated { .. }
             | AsyncMsg::PriceFailed => {}
         }
@@ -660,7 +755,9 @@ impl AppCore {
             return;
         }
         let lower = destination.to_lowercase();
-        if lower.starts_with("lightning:") || lower.starts_with("ln") {
+        if is_lnurl_pay_destination(&destination) {
+            self.pay_lnurl_destination(destination, self.state.send.amount_sat);
+        } else if lower.starts_with("lightning:") || lower.starts_with("ln") {
             let invoice = destination
                 .strip_prefix("lightning:")
                 .or_else(|| destination.strip_prefix("LIGHTNING:"))
@@ -695,13 +792,64 @@ impl AppCore {
                 self.state.toast = Some(toast);
             }
         } else {
-            self.state.send.destination = raw;
+            self.state.send.destination = raw.clone();
         }
+        self.state.send.search_query = raw;
         self.state.send.phase = SendPhase::Editing;
+    }
+
+    fn select_send_contact(&mut self, contact_id: String) {
+        if !self
+            .state
+            .nostr
+            .contacts
+            .iter()
+            .any(|contact| contact.id == contact_id)
+        {
+            if let Some(contact) = self
+                .state
+                .send
+                .search_results
+                .iter()
+                .find(|contact| contact.id == contact_id)
+                .cloned()
+            {
+                self.state.nostr.contacts.push(contact);
+                self.save_app_data();
+            }
+        }
+
+        let Some(contact) = self
+            .state
+            .nostr
+            .contacts
+            .iter_mut()
+            .find(|contact| contact.id == contact_id)
+        else {
+            self.state.toast = Some("Contact not found.".to_string());
+            return;
+        };
+
+        let destination = if !contact.lightning_address.trim().is_empty() {
+            contact.lightning_address.clone()
+        } else {
+            contact.lnurl.clone()
+        };
+
+        if destination.trim().is_empty() {
+            self.state.toast = Some("This contact does not have a Lightning address.".to_string());
+            return;
+        }
+
+        contact.last_used = now_unix();
+        self.save_app_data();
+        self.set_send_destination(destination);
     }
 
     fn reset_send_draft(&mut self) {
         self.state.send.destination.clear();
+        self.state.send.search_query.clear();
+        self.state.send.global_search_results.clear();
         self.state.send.amount_sat = 0;
         self.state.send.memo.clear();
         self.state.send.last_result = None;
@@ -714,6 +862,214 @@ impl AppCore {
             id: self.next_capability_id,
             kind,
         });
+    }
+
+    fn cache_primal_profile_contacts(
+        &mut self,
+        records: Vec<PrimalProfileContact>,
+    ) -> Vec<Contact> {
+        records
+            .into_iter()
+            .map(|record| self.cache_primal_profile_contact(record))
+            .collect()
+    }
+
+    fn cache_primal_profile_contact(&mut self, record: PrimalProfileContact) -> Contact {
+        let mut contact = record.contact;
+        let cached = self
+            .profile_db
+            .as_ref()
+            .and_then(|conn| load_profile(conn, &record.pubkey_hex).ok().flatten());
+        let cached_file_url = cached
+            .as_ref()
+            .filter(|entry| {
+                !record.picture_remote_url.is_empty()
+                    && entry.picture_cached_url == record.picture_remote_url
+            })
+            .and_then(|_| profile_picture_file_url(&self.data_dir, &record.pubkey_hex));
+
+        if let Some(file_url) = cached_file_url {
+            contact.picture = file_url;
+        } else if !record.picture_remote_url.is_empty() {
+            contact.picture = record.picture_remote_url.clone();
+        }
+
+        if let Some(conn) = self.profile_db.as_ref() {
+            let previous = cached.unwrap_or_else(|| ProfileCacheEntry {
+                pubkey: record.pubkey_hex.clone(),
+                metadata_json: "{}".to_string(),
+                name: String::new(),
+                picture_remote_url: String::new(),
+                picture_cached_url: String::new(),
+                picture_cached_at: 0,
+                lightning_address: String::new(),
+                lnurl: String::new(),
+                event_created_at: 0,
+            });
+            let same_remote = previous.picture_remote_url == record.picture_remote_url;
+            let entry = ProfileCacheEntry {
+                pubkey: record.pubkey_hex,
+                metadata_json: record.metadata_json,
+                name: contact.name.clone(),
+                picture_remote_url: record.picture_remote_url.clone(),
+                picture_cached_url: if same_remote {
+                    previous.picture_cached_url
+                } else {
+                    String::new()
+                },
+                picture_cached_at: if same_remote {
+                    previous.picture_cached_at
+                } else {
+                    0
+                },
+                lightning_address: contact.lightning_address.clone(),
+                lnurl: contact.lnurl.clone(),
+                event_created_at: record.event_created_at,
+            };
+            let _ = save_profile(conn, &entry);
+        }
+
+        contact
+    }
+
+    fn prefetch_profile_pictures(&mut self, contact_ids: Vec<String>) {
+        let mut missing_profile_pubkeys = Vec::new();
+        for contact_id in contact_ids.into_iter().take(80) {
+            let Some(contact) = self
+                .state
+                .send
+                .search_results
+                .iter()
+                .chain(self.state.send.global_search_results.iter())
+                .chain(self.state.nostr.contacts.iter())
+                .find(|contact| contact.id == contact_id)
+                .cloned()
+            else {
+                continue;
+            };
+
+            let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+                continue;
+            };
+            let pubkey_hex = pubkey.to_hex();
+            let mut remote_url = contact.picture;
+            if remote_url.starts_with("file://") {
+                continue;
+            }
+            if remote_url.trim().is_empty() {
+                remote_url = self
+                    .profile_db
+                    .as_ref()
+                    .and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+                    .map(|entry| entry.picture_remote_url)
+                    .unwrap_or_default();
+            }
+
+            if remote_url.trim().is_empty() {
+                if self.profile_info_requests.insert(pubkey_hex.clone()) {
+                    missing_profile_pubkeys.push(pubkey);
+                }
+                continue;
+            }
+            let cached_file_url = self
+                .profile_db
+                .as_ref()
+                .and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+                .filter(|entry| entry.picture_cached_url == remote_url)
+                .and_then(|_| profile_picture_file_url(&self.data_dir, &pubkey_hex));
+            if cached_file_url.is_some() {
+                self.refresh_contact_picture_for_pubkey(&pubkey_hex);
+                continue;
+            }
+
+            self.spawn_profile_picture_download(pubkey_hex, remote_url);
+        }
+
+        self.spawn_primal_profile_prefetch(missing_profile_pubkeys);
+    }
+
+    fn spawn_primal_profile_prefetch(&self, pubkeys: Vec<NostrPublicKey>) {
+        if pubkeys.is_empty() {
+            return;
+        }
+
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let pubkey_hexes = pubkeys.iter().map(|key| key.to_hex()).collect::<Vec<_>>();
+            match primal_profile_contacts(pubkeys, true).await {
+                Ok(records) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::PrimalProfilesLoaded { records }));
+                }
+                Err(_) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::PrimalProfilesFailed {
+                        pubkeys: pubkey_hexes,
+                    }));
+                }
+            }
+        });
+    }
+
+    fn spawn_profile_picture_download(&mut self, pubkey: String, remote_url: String) {
+        if remote_url.trim().is_empty() {
+            return;
+        }
+        let Some(scheme) = remote_url.split(':').next().map(|s| s.to_ascii_lowercase()) else {
+            return;
+        };
+        if scheme != "https" && scheme != "http" {
+            return;
+        }
+
+        let download_key = profile_picture_download_key(&pubkey, &remote_url);
+        if !self.profile_picture_downloads.insert(download_key) {
+            return;
+        }
+
+        let tx = self.tx.clone();
+        let data_dir = self.data_dir.clone();
+        self.rt.spawn(async move {
+            let client = reqwest::Client::new();
+            let failed_pubkey = pubkey.clone();
+            let failed_remote_url = remote_url.clone();
+            match download_profile_picture(client, data_dir, pubkey, remote_url).await {
+                Ok((pubkey, remote_url)) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::ProfilePictureCached {
+                        pubkey,
+                        remote_url,
+                    }));
+                }
+                Err(err) => {
+                    let _ = err;
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::ProfilePictureCacheFailed {
+                        pubkey: failed_pubkey,
+                        remote_url: failed_remote_url,
+                    }));
+                }
+            }
+        });
+    }
+
+    fn refresh_contact_picture_for_pubkey(&mut self, pubkey: &str) {
+        let Some(file_url) = profile_picture_file_url(&self.data_dir, pubkey) else {
+            return;
+        };
+        for contact in &mut self.state.nostr.contacts {
+            let Ok(contact_pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+                continue;
+            };
+            if contact_pubkey.to_hex() == pubkey {
+                contact.picture = file_url.clone();
+            }
+        }
+        for contact in &mut self.state.send.global_search_results {
+            let Ok(contact_pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+                continue;
+            };
+            if contact_pubkey.to_hex() == pubkey {
+                contact.picture = file_url.clone();
+            }
+        }
+        self.save_app_data();
     }
 
     fn pay_lightning_invoice(&mut self, invoice: String, amount_sat: Option<u64>) {
@@ -744,6 +1100,65 @@ impl AppCore {
                     Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
                 },
                 Err(e) => AsyncMsg::Error(format!("Invalid Lightning invoice: {e}")),
+            };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
+    }
+
+    fn pay_lnurl_destination(&mut self, destination: String, amount_sat: u64) {
+        if amount_sat == 0 {
+            self.state.toast =
+                Some("Enter an amount before sending to this Lightning address.".to_string());
+            return;
+        }
+        if amount_sat > self.state.wallet.balance_sat {
+            self.state.toast = Some("Insufficient balance for this Lightning payment.".to_string());
+            return;
+        }
+        let Some(wallet) = self.wallet.clone() else {
+            self.state.toast = Some("Wallet is not ready yet.".to_string());
+            return;
+        };
+        self.state.busy.sending_payment = true;
+        self.state.send.phase = SendPhase::Sending;
+        self.state.send.last_result = None;
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let msg = match resolve_lnurl_pay_invoice(&destination, amount_sat).await {
+                Ok(invoice) => match Bolt11Invoice::from_str(&invoice) {
+                    Ok(invoice) => match amount_sat.checked_mul(1_000) {
+                        Some(requested_msat) => match invoice.amount_milli_satoshis() {
+                            Some(invoice_msat) if invoice_msat == requested_msat => match wallet
+                                .pay_lightning_invoice(
+                                    invoice,
+                                    Some(Amount::from_sat(amount_sat)),
+                                    true,
+                                )
+                                .await
+                            {
+                                Ok(_) => {
+                                    AsyncMsg::Paid("Lightning address payment sent.".to_string())
+                                }
+                                Err(e) => {
+                                    AsyncMsg::Error(format!("Lightning payment failed: {e:#}"))
+                                }
+                            },
+                            Some(invoice_msat) => AsyncMsg::Error(format!(
+                                "LNURL invoice amount mismatch: requested {} sats, got {} sats.",
+                                amount_sat,
+                                msats_to_display_sats(invoice_msat)
+                            )),
+                            None => AsyncMsg::Error(
+                                "LNURL invoice did not include an amount.".to_string(),
+                            ),
+                        },
+                        None => AsyncMsg::Error(
+                            "LNURL payment failed: send amount is too large.".to_string(),
+                        ),
+                    },
+                    Err(e) => AsyncMsg::Error(format!("Invalid LNURL invoice: {e}")),
+                },
+                Err(e) => AsyncMsg::Error(format!("LNURL payment failed: {e:#}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
         });
@@ -789,6 +1204,7 @@ impl AppCore {
                 self.reset_nostr_identity(npub);
                 self.state.toast = Some("Nostr key generated in Keychain.".to_string());
                 self.save_app_data();
+                self.sync_primal_follow_contacts(false);
             }
             _ => {
                 self.state.toast = Some("Could not encode generated Nostr key.".to_string());
@@ -811,6 +1227,7 @@ impl AppCore {
                         Some("Nostr key imported. Refreshing profile...".to_string());
                     self.save_app_data();
                     self.refresh_nostr_profile();
+                    self.sync_primal_follow_contacts(false);
                 }
                 _ => {
                     self.state.toast = Some("Could not encode imported Nostr key.".to_string());
@@ -843,6 +1260,25 @@ impl AppCore {
         self.save_app_data();
     }
 
+    fn clear_nostr_profile_cache(&mut self) {
+        if let Some(conn) = self.profile_db.as_ref() {
+            let _ = clear_profile_cache(conn);
+        }
+        let _ = clear_profile_picture_dir(&self.data_dir);
+        self.profile_picture_downloads.clear();
+        self.profile_info_requests.clear();
+
+        for contact in &mut self.state.nostr.contacts {
+            contact.picture.clear();
+        }
+        for contact in &mut self.state.send.global_search_results {
+            contact.picture.clear();
+        }
+        self.state.send.global_search_results.clear();
+        self.state.toast = Some("Nostr profile cache cleared.".to_string());
+        self.save_app_data();
+    }
+
     fn load_nostr_key(&mut self) {
         if let Some(secret) = self.secrets.get_secret(NOSTR_SECRET_KEY.to_string()) {
             if let Ok(keys) = Keys::parse(&secret) {
@@ -852,6 +1288,7 @@ impl AppCore {
                     self.save_app_data();
                 }
                 self.refresh_nostr_profile();
+                self.sync_primal_follow_contacts(false);
             }
         }
     }
@@ -1038,6 +1475,10 @@ impl AppCore {
     }
 
     fn refresh_contact_list(&mut self) {
+        self.sync_primal_follow_contacts(true);
+    }
+
+    fn sync_primal_follow_contacts(&mut self, show_toast: bool) {
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -1047,10 +1488,27 @@ impl AppCore {
                 return;
             }
         };
-        self.state.busy.refreshing_contacts = true;
+        if show_toast {
+            self.state.busy.refreshing_contacts = true;
+        }
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let result = async {
+                let contacts = primal_follow_contacts(keys.public_key()).await?;
+                if !contacts.is_empty() {
+                    return Ok::<_, anyhow::Error>(AsyncMsg::PrimalContactsLoaded {
+                        records: contacts,
+                        show_toast,
+                    });
+                }
+
+                if !show_toast {
+                    return Ok::<_, anyhow::Error>(AsyncMsg::PrimalContactsLoaded {
+                        records: Vec::new(),
+                        show_toast,
+                    });
+                }
+
                 let client = nostr_client().await?;
                 let filter = Filter::new()
                     .author(keys.public_key())
@@ -1125,7 +1583,36 @@ impl AppCore {
                 Ok::<_, anyhow::Error>(AsyncMsg::NostrContactsLoaded(contacts))
             }
             .await
-            .unwrap_or_else(|e| AsyncMsg::Error(format!("Nostr contact refresh failed: {e:#}")));
+            .unwrap_or_else(|e| {
+                if show_toast {
+                    AsyncMsg::Error(format!("Nostr contact refresh failed: {e:#}"))
+                } else {
+                    AsyncMsg::PrimalContactsLoaded {
+                        records: Vec::new(),
+                        show_toast,
+                    }
+                }
+            });
+            let _ = tx.send(CoreMsg::Async(result));
+        });
+    }
+
+    fn search_nostr_profiles(&mut self) {
+        let query = self.state.send.search_query.trim().to_string();
+        if query.len() < 2 {
+            self.state.send.global_search_results.clear();
+            return;
+        }
+
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let result = match primal_search_profiles(&query).await {
+                Ok(contacts) => AsyncMsg::NostrSearchLoaded { query, contacts },
+                Err(_) => AsyncMsg::NostrSearchLoaded {
+                    query,
+                    contacts: Vec::new(),
+                },
+            };
             let _ = tx.send(CoreMsg::Async(result));
         });
     }
@@ -1248,6 +1735,7 @@ impl AppCore {
         match serde_json::from_str::<PersistedAppData>(&raw) {
             Ok(data) => {
                 self.state.nostr = data.nostr;
+                self.hydrate_cached_profile_pictures();
                 self.state.receive.amount_sat = data.receive_amount_sat;
                 self.state.receive.memo = data.receive_memo;
                 self.state.wallet.server_address = data.servers.server_address;
@@ -1260,9 +1748,22 @@ impl AppCore {
         }
     }
 
+    fn hydrate_cached_profile_pictures(&mut self) {
+        let data_dir = self.data_dir.clone();
+        let profile_db = self.profile_db.as_ref();
+        for contact in &mut self.state.nostr.contacts {
+            hydrate_contact_picture(profile_db, &data_dir, contact);
+        }
+        for contact in &mut self.state.send.global_search_results {
+            hydrate_contact_picture(profile_db, &data_dir, contact);
+        }
+    }
+
     fn save_app_data(&self) {
+        let mut nostr = self.state.nostr.clone();
+        sanitize_persisted_contact_pictures(self.profile_db.as_ref(), &mut nostr.contacts);
         let data = PersistedAppData {
-            nostr: self.state.nostr.clone(),
+            nostr,
             receive_amount_sat: self.state.receive.amount_sat,
             receive_memo: self.state.receive.memo.clone(),
             servers: ServerConfig::from_wallet(&self.state.wallet),
@@ -1274,5 +1775,52 @@ impl AppCore {
             let _ = std::fs::create_dir_all(&self.data_dir);
             let _ = std::fs::write(&self.app_data_path, raw);
         }
+    }
+}
+
+fn hydrate_contact_picture(
+    profile_db: Option<&rusqlite::Connection>,
+    data_dir: &PathBuf,
+    contact: &mut Contact,
+) {
+    if contact.picture.starts_with("file://") {
+        contact.picture.clear();
+    }
+    let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+        return;
+    };
+    let pubkey_hex = pubkey.to_hex();
+    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+    else {
+        return;
+    };
+    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
+    {
+        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
+            contact.picture = file_url;
+            return;
+        }
+    }
+    if contact.picture.is_empty() {
+        contact.picture = entry.picture_remote_url;
+    }
+}
+
+fn sanitize_persisted_contact_pictures(
+    profile_db: Option<&rusqlite::Connection>,
+    contacts: &mut [Contact],
+) {
+    for contact in contacts {
+        if !contact.picture.starts_with("file://") {
+            continue;
+        }
+        let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+            contact.picture.clear();
+            continue;
+        };
+        contact.picture = profile_db
+            .and_then(|conn| load_profile(conn, &pubkey.to_hex()).ok().flatten())
+            .map(|entry| entry.picture_remote_url)
+            .unwrap_or_default();
     }
 }

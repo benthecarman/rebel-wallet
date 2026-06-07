@@ -12,6 +12,7 @@ mod nostr_support;
 mod payments;
 mod persistence;
 mod price;
+mod profile_cache;
 mod state;
 mod time;
 mod updates;

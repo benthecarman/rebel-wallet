@@ -43,6 +43,16 @@ pub enum AppAction {
     BeginReceiveRequest,
     CreateArkAddress,
     CreateLightningInvoice,
+    SetSendSearchQuery {
+        query: String,
+    },
+    ContinueSendSearch,
+    SelectSendContact {
+        contact_id: String,
+    },
+    PrefetchProfilePictures {
+        contact_ids: Vec<String>,
+    },
     SetSendDestination {
         destination: String,
     },
@@ -121,6 +131,7 @@ pub enum AppAction {
     DeleteNostrProfile,
     PublishContactList,
     RefreshContactList,
+    ClearNostrProfileCache,
     LoadDirectMessages {
         contact_id: String,
     },

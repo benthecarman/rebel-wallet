@@ -69,6 +69,18 @@ final class ProfileImageLoader: ObservableObject {
         }
 
         let task = Task.detached(priority: .utility) { () -> UIImage? in
+            if url.isFileURL {
+                let fileURL = URL(fileURLWithPath: url.path)
+                guard
+                    let data = try? Data(contentsOf: fileURL),
+                    data.count <= maxImageBytes,
+                    let image = UIImage(data: data)
+                else {
+                    return nil
+                }
+                return image
+            }
+
             var request = URLRequest(url: url)
             request.cachePolicy = .reloadIgnoringLocalCacheData
 
@@ -96,7 +108,7 @@ final class ProfileImageLoader: ObservableObject {
 
     private static func canLoad(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
-        return scheme == "https" || scheme == "http"
+        return scheme == "https" || scheme == "http" || scheme == "file"
     }
 
     deinit {
