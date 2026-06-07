@@ -2132,13 +2132,11 @@ struct RebelMark: View {
     let size: CGFloat
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(rebelRed)
-            Text("R")
-                .font(.system(size: size * 0.55, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-        }
+        Image("RebelMark")
+            .renderingMode(.original)
+            .resizable()
+            .scaledToFit()
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.16))
         .frame(width: size, height: size)
     }
 }
