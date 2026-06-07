@@ -1495,10 +1495,13 @@ struct SettingsView: View {
                 Button {
                     manager.dispatch(.selectTab(tab: .home))
                 } label: {
-                    Label("Back to wallet", systemImage: "chevron.left")
-                        .foregroundStyle(mutedText)
+                    MutinyCircle(size: 44) {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.semibold))
+                    }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Back to wallet")
 
                 SettingsCard(title: "General") {
                     SettingsRow(title: "Backup", caption: "Show recovery phrase", accent: rebelGreen) {
