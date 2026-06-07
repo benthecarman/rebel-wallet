@@ -1345,6 +1345,8 @@ struct SettingsRow: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .opacity(disabled ? 0.45 : 1)
         }
         .buttonStyle(.plain)
