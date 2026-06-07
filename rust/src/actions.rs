@@ -12,6 +12,7 @@ pub enum AppAction {
     },
     ShowSeed,
     SyncWallet,
+    MaintainVtxos,
     RefreshPrice,
     SetPriceCurrency {
         currency: PriceCurrency,

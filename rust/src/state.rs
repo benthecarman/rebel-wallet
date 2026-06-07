@@ -37,6 +37,7 @@ pub struct BusyState {
     pub sending_payment: bool,
     pub uploading_profile_picture: bool,
     pub publishing_nostr: bool,
+    pub maintaining_vtxos: bool,
     pub refreshing_contacts: bool,
 }
 
@@ -160,6 +161,9 @@ pub struct WalletState {
     pub pending_send_sat: u64,
     pub pending_send_display: String,
     pub pending_send_fiat_display: Option<String>,
+    pub pending_refresh_sat: u64,
+    pub pending_refresh_display: String,
+    pub pending_refresh_fiat_display: Option<String>,
     pub last_sync: Option<String>,
 }
 
@@ -317,6 +321,9 @@ impl AppState {
                 pending_send_sat: 0,
                 pending_send_display: format_sats(0),
                 pending_send_fiat_display: None,
+                pending_refresh_sat: 0,
+                pending_refresh_display: format_sats(0),
+                pending_refresh_fiat_display: None,
                 last_sync: None,
             },
             receive: ReceiveState {
@@ -375,6 +382,7 @@ impl AppState {
         self.wallet.balance_display = format_sats(self.wallet.balance_sat);
         self.wallet.pending_receive_display = format_sats(self.wallet.pending_receive_sat);
         self.wallet.pending_send_display = format_sats(self.wallet.pending_send_sat);
+        self.wallet.pending_refresh_display = format_sats(self.wallet.pending_refresh_sat);
         self.wallet.balance_fiat_display = format_fiat_sats(
             self.wallet.balance_sat,
             self.wallet.btc_price,
@@ -387,6 +395,11 @@ impl AppState {
         );
         self.wallet.pending_send_fiat_display = format_fiat_sats(
             self.wallet.pending_send_sat,
+            self.wallet.btc_price,
+            &self.wallet.price_currency,
+        );
+        self.wallet.pending_refresh_fiat_display = format_fiat_sats(
+            self.wallet.pending_refresh_sat,
             self.wallet.btc_price,
             &self.wallet.price_currency,
         );

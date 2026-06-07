@@ -11,6 +11,7 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
     SWIFT_VERSION: 5.0
+    DEVELOPMENT_TEAM: 6JWFWV65BL
   configs:
     Debug:
       PRODUCT_BUNDLE_IDENTIFIER: com.rebelwallet.app

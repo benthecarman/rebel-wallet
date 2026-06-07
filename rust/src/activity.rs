@@ -1,4 +1,5 @@
 use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
+use bark::subsystem::{RoundMovement, Subsystem};
 
 use crate::{state, ActivityIconKind, ActivityItem, Contact};
 
@@ -107,6 +108,15 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         lightning_payment_hash,
         lightning_payment_preimage,
     }
+}
+
+pub(crate) fn is_user_visible_movement(movement: &Movement) -> bool {
+    !is_round_refresh_movement(movement)
+}
+
+fn is_round_refresh_movement(movement: &Movement) -> bool {
+    movement.subsystem.name == Subsystem::ROUND.as_name()
+        && movement.subsystem.kind == RoundMovement::Refresh.to_string()
 }
 
 fn activity_method_icon(method: &str, inbound: bool) -> &'static str {
@@ -235,6 +245,7 @@ pub(crate) fn truncate_middle(value: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bark::movement::{MovementId, MovementStatus, MovementSubsystem};
 
     #[test]
     fn activity_helpers_return_render_ready_labels() {
@@ -261,5 +272,30 @@ mod tests {
             truncate_middle("abcdefghijklmnopqrstuvwxyz", 11),
             "abcd...wxyz"
         );
+    }
+
+    #[test]
+    fn hides_internal_round_refresh_movements() {
+        let refresh = Movement::new(
+            MovementId(1),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: Subsystem::ROUND.as_name().to_string(),
+                kind: RoundMovement::Refresh.to_string(),
+            },
+            chrono::Local::now(),
+        );
+        assert!(!is_user_visible_movement(&refresh));
+
+        let receive = Movement::new(
+            MovementId(2),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: "bark.arkoor".to_string(),
+                kind: "receive".to_string(),
+            },
+            chrono::Local::now(),
+        );
+        assert!(is_user_visible_movement(&receive));
     }
 }

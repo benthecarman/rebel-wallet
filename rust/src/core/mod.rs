@@ -18,7 +18,7 @@ use nostr_sdk::prelude::{
 };
 use tokio::runtime::Runtime;
 
-use crate::activity::{activity_from_movement, truncate_middle};
+use crate::activity::{activity_from_movement, is_user_visible_movement, truncate_middle};
 use crate::nostr_support::{
     contact_id, merge_contacts, metadata_from_state, nostr_client, primal_follow_contacts,
     primal_profile_contacts, primal_search_profiles, public_key_from_npub_or_hex,
@@ -59,6 +59,28 @@ fn msats_to_display_sats(msats: u64) -> String {
     } else {
         format!("{:.3}", msats as f64 / 1_000.0)
     }
+}
+
+async fn wallet_synced_msg(
+    wallet: &Wallet,
+    contacts: &[Contact],
+    maintenance_checked: bool,
+) -> anyhow::Result<AsyncMsg> {
+    let balance = wallet.balance().await.context("balance failed")?;
+    let history = wallet.history().await.context("history failed")?;
+    let activity = history
+        .into_iter()
+        .filter(is_user_visible_movement)
+        .map(|movement| activity_from_movement(movement, contacts))
+        .collect();
+    Ok(AsyncMsg::WalletSynced {
+        balance_sat: balance.spendable.to_sat(),
+        pending_receive_sat: balance.claimable_lightning_receive.to_sat(),
+        pending_send_sat: balance.pending_lightning_send.to_sat(),
+        pending_refresh_sat: balance.pending_in_round.to_sat(),
+        maintenance_checked,
+        activity,
+    })
 }
 
 pub(crate) fn spawn_actor(
@@ -150,6 +172,7 @@ impl AppCore {
                 self.state.wallet.balance_sat = 0;
                 self.state.wallet.pending_receive_sat = 0;
                 self.state.wallet.pending_send_sat = 0;
+                self.state.wallet.pending_refresh_sat = 0;
                 self.open_wallet(mnemonic.trim().to_string(), WalletOpenMode::Replace);
             }
             AppAction::ShowSeed => {
@@ -160,6 +183,7 @@ impl AppCore {
                 }
             }
             AppAction::SyncWallet => self.sync_wallet(),
+            AppAction::MaintainVtxos => self.maintain_vtxos(),
             AppAction::RefreshPrice => self.refresh_price(),
             AppAction::SetPriceCurrency { currency } => self.set_price_currency(currency),
             AppAction::ConfigureServers {
@@ -376,17 +400,20 @@ impl AppCore {
                 let _ = self
                     .secrets
                     .set_secret(WALLET_SEED_KEY.to_string(), mnemonic);
-                self.sync_wallet();
+                self.maintain_vtxos();
             }
             AsyncMsg::WalletSynced {
                 balance_sat,
                 pending_receive_sat,
                 pending_send_sat,
+                pending_refresh_sat,
+                maintenance_checked: _,
                 activity,
             } => {
                 self.state.wallet.balance_sat = balance_sat;
                 self.state.wallet.pending_receive_sat = pending_receive_sat;
                 self.state.wallet.pending_send_sat = pending_send_sat;
+                self.state.wallet.pending_refresh_sat = pending_refresh_sat;
                 self.state.wallet.last_sync = Some(now_label());
                 self.state.activity = activity;
             }
@@ -424,13 +451,13 @@ impl AppCore {
                     self.state.receive.lightning_paid = true;
                     self.state.receive.phase = ReceivePhase::Success;
                 }
-                self.sync_wallet();
+                self.maintain_vtxos();
             }
             AsyncMsg::Paid(result) => {
                 self.state.send.phase = SendPhase::Success;
                 self.state.send.success_amount_display = self.state.send.amount_display.clone();
                 self.state.send.last_result = Some(result);
-                self.sync_wallet();
+                self.maintain_vtxos();
             }
             AsyncMsg::Seed(seed) => {
                 self.state.recovery_phrase = Some(seed);
@@ -543,7 +570,17 @@ impl AppCore {
                 self.state.busy.bootstrapping = false;
                 self.state.busy.opening_wallet = false;
             }
-            AsyncMsg::WalletSynced { .. } => self.state.busy.syncing_wallet = false,
+            AsyncMsg::WalletSynced {
+                maintenance_checked,
+                ..
+            } => {
+                if *maintenance_checked {
+                    self.state.busy.syncing_wallet = false;
+                    self.state.busy.maintaining_vtxos = false;
+                } else if !self.state.busy.maintaining_vtxos {
+                    self.state.busy.syncing_wallet = false;
+                }
+            }
             AsyncMsg::ArkAddress(_) | AsyncMsg::LightningInvoice { .. } => {
                 self.state.busy.creating_invoice = false;
             }
@@ -673,21 +710,63 @@ impl AppCore {
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
-                let balance = wallet.balance().await.context("balance failed")?;
-                let history = wallet.history().await.context("history failed")?;
-                let activity = history
-                    .into_iter()
-                    .map(|movement| activity_from_movement(movement, &contacts))
-                    .collect();
-                Ok::<_, anyhow::Error>(AsyncMsg::WalletSynced {
-                    balance_sat: balance.spendable.to_sat(),
-                    pending_receive_sat: balance.claimable_lightning_receive.to_sat(),
-                    pending_send_sat: balance.pending_lightning_send.to_sat(),
-                    activity,
-                })
+                wallet_synced_msg(&wallet, &contacts, false).await
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("Sync failed: {e:#}")));
+            let _ = tx.send(CoreMsg::Async(result));
+        });
+    }
+
+    fn maintain_vtxos(&mut self) {
+        let Some(wallet) = self.wallet.clone() else {
+            return;
+        };
+        if self.state.busy.maintaining_vtxos || self.state.busy.sending_payment {
+            return;
+        }
+        if self
+            .state
+            .router
+            .screen_stack
+            .iter()
+            .any(|screen| matches!(screen, Screen::Send))
+            && self.state.send.phase != SendPhase::Success
+        {
+            self.sync_wallet();
+            return;
+        }
+
+        self.state.busy.syncing_wallet = true;
+        self.state.busy.maintaining_vtxos = true;
+        let tx = self.tx.clone();
+        let contacts = self.state.nostr.contacts.clone();
+        self.rt.spawn(async move {
+            let result = async {
+                wallet.sync().await;
+                let _ = wallet.progress_pending_rounds(None).await;
+
+                let pending_round_balance = wallet
+                    .pending_round_balance()
+                    .await
+                    .context("pending round balance failed")?;
+                if pending_round_balance == Amount::ZERO
+                    && !wallet
+                        .get_vtxos_to_refresh()
+                        .await
+                        .context("refresh candidate check failed")?
+                        .is_empty()
+                {
+                    let _ = wallet
+                        .maybe_schedule_maintenance_refresh_delegated()
+                        .await
+                        .context("delegated refresh scheduling failed")?;
+                }
+
+                wallet_synced_msg(&wallet, &contacts, true).await
+            }
+            .await
+            .unwrap_or_else(|e| AsyncMsg::Error(format!("VTXO refresh check failed: {e:#}")));
             let _ = tx.send(CoreMsg::Async(result));
         });
     }

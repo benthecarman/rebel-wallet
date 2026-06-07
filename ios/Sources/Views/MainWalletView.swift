@@ -66,22 +66,33 @@ struct WalletHeader: View {
     @Bindable var manager: AppManager
 
     var body: some View {
-        HStack(spacing: 14) {
-            Button {
-                manager.dispatch(.pushScreen(screen: .profile))
-            } label: {
-                ProfileAvatar(url: manager.state.nostr.picture, size: 48)
-            }
-            .buttonStyle(.plain)
-            Spacer(minLength: 8)
-            MutinyBalanceButton(wallet: manager.state.wallet)
-                .frame(maxWidth: .infinity)
-            Button {
-                manager.dispatch(.selectTab(tab: .settings))
-            } label: {
-                MutinyCircle(size: 48) {
-                    RebelMark(size: 28)
+        VStack(spacing: 8) {
+            HStack(spacing: 14) {
+                Button {
+                    manager.dispatch(.pushScreen(screen: .profile))
+                } label: {
+                    ProfileAvatar(url: manager.state.nostr.picture, size: 48)
                 }
+                .buttonStyle(.plain)
+                Spacer(minLength: 8)
+                MutinyBalanceButton(wallet: manager.state.wallet)
+                    .frame(maxWidth: .infinity)
+                Button {
+                    manager.dispatch(.selectTab(tab: .settings))
+                } label: {
+                    MutinyCircle(size: 48) {
+                        RebelMark(size: 28)
+                    }
+                }
+            }
+            if manager.state.wallet.pendingRefreshSat > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("\(manager.state.wallet.pendingRefreshDisplay) refreshing")
+                }
+                .font(.caption)
+                .foregroundStyle(mutedText)
+                .frame(maxWidth: .infinity)
             }
         }
     }

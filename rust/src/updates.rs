@@ -22,6 +22,8 @@ pub(crate) enum AsyncMsg {
         balance_sat: u64,
         pending_receive_sat: u64,
         pending_send_sat: u64,
+        pending_refresh_sat: u64,
+        maintenance_checked: bool,
         activity: Vec<ActivityItem>,
     },
     ArkAddress(String),
