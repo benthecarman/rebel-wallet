@@ -93,7 +93,14 @@ struct ActivityRow: View {
     }
 
     private var counterpartyHasPicture: Bool {
-        item.counterpartyKnown && !item.counterpartyPicture.isEmpty
+        if let counterparty = item.counterparty {
+            return !counterparty.picture.isEmpty
+        }
+        return false
+    }
+
+    private var counterpartyKnown: Bool {
+        item.counterparty != nil
     }
 
     private var verb: String {
@@ -112,7 +119,7 @@ struct ActivityRow: View {
         HStack(alignment: .center, spacing: 12) {
             Group {
                 if counterpartyHasPicture {
-                    ProfileAvatar(url: item.counterpartyPicture, size: 48)
+                    ProfileAvatar(url: item.counterparty?.picture ?? "", size: 48)
                 } else {
                     ZStack {
                         Circle()
@@ -129,13 +136,13 @@ struct ActivityRow: View {
                 HStack(spacing: 0) {
                     Text(primaryName)
                         .font(.subheadline.bold())
-                    .foregroundStyle(item.counterpartyKnown || primaryName == "You" ? primaryText : mutedText)
+                    .foregroundStyle(counterpartyKnown || primaryName == "You" ? primaryText : mutedText)
                     Text(" \(verb) ")
                         .font(.subheadline.weight(.light))
                         .foregroundStyle(primaryText)
                     Text(secondaryName)
                         .font(.subheadline.bold())
-                    .foregroundStyle(item.counterpartyKnown || secondaryName == "you" ? primaryText : mutedText)
+                    .foregroundStyle(counterpartyKnown || secondaryName == "you" ? primaryText : mutedText)
                 }
                 .lineLimit(1)
 

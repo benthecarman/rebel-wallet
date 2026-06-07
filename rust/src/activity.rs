@@ -10,7 +10,9 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
     } else {
         movement.sent_to.first()
     };
-    let contact = destination.and_then(|d| contact_for_payment_method(&d.destination, contacts));
+    let contact = destination
+        .and_then(|d| contact_for_payment_method(&d.destination, contacts))
+        .cloned();
     let method = destination
         .map(|d| {
             format!(
@@ -31,14 +33,17 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
     } else {
         String::new()
     };
-    let counterparty_name = contact.map(|c| c.name.clone()).unwrap_or_default();
-    let counterparty_known = contact.is_some();
-    let display_counterparty = if counterparty_known && !counterparty_name.is_empty() {
-        counterparty_name.clone()
+    let display_counterparty = if let Some(contact) = &contact {
+        if contact.name.is_empty() {
+            "Unknown".to_string()
+        } else {
+            contact.name.clone()
+        }
     } else {
         "Unknown".to_string()
     };
     let method_icon = activity_method_icon(&method, inbound).to_string();
+    let method_display = activity_method_display(destination.map(|d| &d.destination), &method);
     let message_text = activity_message_text(&subtitle);
     let timestamp = movement
         .time
@@ -46,6 +51,27 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         .unwrap_or(movement.time.updated_at)
         .format("%b %-d, %-I:%M %p")
         .to_string();
+    let lightning_invoice = movement.lightning_invoice().map(|invoice| invoice.to_string());
+    let lightning_payment_hash = movement
+        .lightning_payment_hash()
+        .map(|payment_hash| payment_hash.to_string());
+    let lightning_payment_preimage = movement
+        .metadata
+        .get("payment_preimage")
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string);
+    let ark_address = destination
+        .and_then(|destination| ark_address_from_payment_method(&destination.destination))
+        .or_else(|| {
+            let destinations = if inbound {
+                &movement.received_on
+            } else {
+                &movement.sent_to
+            };
+            destinations
+                .iter()
+                .find_map(|destination| ark_address_from_payment_method(&destination.destination))
+        });
 
     ActivityItem {
         id: movement.id.to_string(),
@@ -64,6 +90,7 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         },
         message_text,
         method_icon,
+        method_display,
         amount_sat,
         amount_display: state::format_sats(amount_sat.unsigned_abs()),
         signed_amount_display: state::format_signed_sats(amount_sat, true),
@@ -74,9 +101,11 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         },
         status: movement.status.to_string(),
         timestamp,
-        counterparty_name,
-        counterparty_picture: contact.map(|c| c.picture.clone()).unwrap_or_default(),
-        counterparty_known,
+        counterparty: contact,
+        ark_address,
+        lightning_invoice,
+        lightning_payment_hash,
+        lightning_payment_preimage,
     }
 }
 
@@ -90,6 +119,33 @@ fn activity_method_icon(method: &str, inbound: bool) -> &'static str {
         "arrow.down.left"
     } else {
         "arrow.up.right"
+    }
+}
+
+fn ark_address_from_payment_method(method: &BarkPaymentMethod) -> Option<String> {
+    match method {
+        BarkPaymentMethod::Ark(address) => Some(address.to_string()),
+        _ => None,
+    }
+}
+
+fn activity_method_display(destination: Option<&BarkPaymentMethod>, fallback: &str) -> String {
+    match destination {
+        Some(method) if method.is_lightning() => "Lightning".to_string(),
+        Some(BarkPaymentMethod::Ark(_)) => "Ark".to_string(),
+        Some(method) if method.is_bitcoin() => "Onchain".to_string(),
+        _ => {
+            let lower = fallback.to_ascii_lowercase();
+            if lower.contains("lightning") || lower.contains("invoice") {
+                "Lightning".to_string()
+            } else if lower.contains("ark") {
+                "Ark".to_string()
+            } else if lower.contains("bitcoin") || lower.contains("output-script") {
+                "Onchain".to_string()
+            } else {
+                "Wallet".to_string()
+            }
+        }
     }
 }
 

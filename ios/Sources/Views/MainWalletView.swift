@@ -25,6 +25,11 @@ struct MainWalletView: View {
 
 struct HomeView: View {
     @Bindable var manager: AppManager
+    @State private var selectedActivityId: String?
+
+    private var selectedActivity: ActivityItem? {
+        manager.state.activity.first { $0.id == selectedActivityId }
+    }
 
     var body: some View {
         ScrollView {
@@ -36,7 +41,12 @@ struct HomeView: View {
                         MutinyEmptyHome()
                     } else {
                         ForEach(manager.state.activity, id: \.id) { item in
-                            ActivityRow(item: item)
+                            Button {
+                                selectedActivityId = item.id
+                            } label: {
+                                ActivityRow(item: item)
+                            }
+                            .buttonStyle(.plain)
                             Divider().overlay(borderColor)
                         }
                     }
@@ -48,6 +58,7 @@ struct HomeView: View {
         }
         .foregroundStyle(primaryText)
         .background(pageBackground)
+        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId)
     }
 }
 

@@ -267,15 +267,18 @@ pub struct ActivityItem {
     pub display_secondary_name: String,
     pub message_text: Option<String>,
     pub method_icon: String,
+    pub method_display: String,
     pub amount_sat: i64,
     pub amount_display: String,
     pub signed_amount_display: String,
     pub icon_kind: ActivityIconKind,
     pub status: String,
     pub timestamp: String,
-    pub counterparty_name: String,
-    pub counterparty_picture: String,
-    pub counterparty_known: bool,
+    pub counterparty: Option<Contact>,
+    pub ark_address: Option<String>,
+    pub lightning_invoice: Option<String>,
+    pub lightning_payment_hash: Option<String>,
+    pub lightning_payment_preimage: Option<String>,
 }
 
 #[derive(uniffi::Enum, Clone, Debug, PartialEq)]
