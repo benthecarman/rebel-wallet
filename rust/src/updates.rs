@@ -1,6 +1,6 @@
 use bark::Wallet;
 
-use crate::{ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState};
+use crate::{ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppUpdate {
@@ -44,5 +44,10 @@ pub(crate) enum AsyncMsg {
     NostrPublished(String),
     DirectMessagesLoaded(Vec<NostrMessage>),
     DirectMessageSent(NostrMessage),
+    PriceUpdated {
+        currency: PriceCurrency,
+        price: f64,
+    },
+    PriceFailed,
     Error(String),
 }

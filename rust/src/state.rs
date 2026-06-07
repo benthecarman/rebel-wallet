@@ -69,6 +69,7 @@ pub enum Screen {
     Backup,
     Restore,
     Servers,
+    Currency,
     ContactDetail { contact_id: String },
 }
 
@@ -79,17 +80,64 @@ pub enum SetupState {
     Error { message: String },
 }
 
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PriceCurrency {
+    BTC,
+    USD,
+    EUR,
+    GBP,
+}
+
+impl PriceCurrency {
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::BTC => "BTC",
+            Self::USD => "USD",
+            Self::EUR => "EUR",
+            Self::GBP => "GBP",
+        }
+    }
+
+    fn symbol(&self) -> &'static str {
+        match self {
+            Self::BTC => "₿",
+            Self::USD => "$",
+            Self::EUR => "€",
+            Self::GBP => "£",
+        }
+    }
+
+    fn max_fractional_digits(&self) -> usize {
+        match self {
+            Self::BTC => 8,
+            Self::USD | Self::EUR | Self::GBP => 2,
+        }
+    }
+
+    fn approximate(&self) -> &'static str {
+        match self {
+            Self::BTC => "",
+            Self::USD | Self::EUR | Self::GBP => "~",
+        }
+    }
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct WalletState {
     pub network: String,
     pub server_address: String,
     pub esplora_address: String,
+    pub price_currency: PriceCurrency,
+    pub btc_price: Option<f64>,
     pub balance_sat: u64,
     pub balance_display: String,
+    pub balance_fiat_display: Option<String>,
     pub pending_receive_sat: u64,
     pub pending_receive_display: String,
+    pub pending_receive_fiat_display: Option<String>,
     pub pending_send_sat: u64,
     pub pending_send_display: String,
+    pub pending_send_fiat_display: Option<String>,
     pub last_sync: Option<String>,
 }
 
@@ -224,12 +272,17 @@ impl AppState {
                 network: "Signet".to_string(),
                 server_address: SIGNET_SERVER.to_string(),
                 esplora_address: SIGNET_ESPLORA.to_string(),
+                price_currency: PriceCurrency::BTC,
+                btc_price: None,
                 balance_sat: 0,
                 balance_display: format_sats(0),
+                balance_fiat_display: None,
                 pending_receive_sat: 0,
                 pending_receive_display: format_sats(0),
+                pending_receive_fiat_display: None,
                 pending_send_sat: 0,
                 pending_send_display: format_sats(0),
+                pending_send_fiat_display: None,
                 last_sync: None,
             },
             receive: ReceiveState {
@@ -279,6 +332,21 @@ impl AppState {
         self.wallet.balance_display = format_sats(self.wallet.balance_sat);
         self.wallet.pending_receive_display = format_sats(self.wallet.pending_receive_sat);
         self.wallet.pending_send_display = format_sats(self.wallet.pending_send_sat);
+        self.wallet.balance_fiat_display = format_fiat_sats(
+            self.wallet.balance_sat,
+            self.wallet.btc_price,
+            &self.wallet.price_currency,
+        );
+        self.wallet.pending_receive_fiat_display = format_fiat_sats(
+            self.wallet.pending_receive_sat,
+            self.wallet.btc_price,
+            &self.wallet.price_currency,
+        );
+        self.wallet.pending_send_fiat_display = format_fiat_sats(
+            self.wallet.pending_send_sat,
+            self.wallet.btc_price,
+            &self.wallet.price_currency,
+        );
 
         self.receive.amount_display = format_sats(self.receive.amount_sat);
         self.receive.lightning_status_display = if self.receive.lightning_paid {
@@ -312,6 +380,32 @@ impl AppState {
 
 pub(crate) fn format_sats(amount: u64) -> String {
     format!("{} sats", grouped_digits(amount))
+}
+
+fn format_fiat_sats(
+    amount_sat: u64,
+    btc_price: Option<f64>,
+    currency: &PriceCurrency,
+) -> Option<String> {
+    let price = btc_price?;
+    let value = amount_sat as f64 / 100_000_000.0 * price;
+    Some(format_fiat(value, currency))
+}
+
+fn format_fiat(value: f64, currency: &PriceCurrency) -> String {
+    let max_fraction_digits = currency.max_fractional_digits();
+    let number = if value == 0.0 {
+        "0".to_string()
+    } else {
+        format!("{value:.max_fraction_digits$}")
+    };
+    format!(
+        "{}{}{} {}",
+        currency.approximate(),
+        currency.symbol(),
+        number,
+        currency.code()
+    )
 }
 
 pub(crate) fn format_signed_sats(amount: i64, signed: bool) -> String {

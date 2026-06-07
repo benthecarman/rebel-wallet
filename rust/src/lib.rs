@@ -33,8 +33,9 @@ mod updates;
 pub use actions::AppAction;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, MainTab, NostrMessage, NostrState, ReceiveMethod, ReceivePhase, ReceiveState, Router,
-    Screen, SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
+    Contact, MainTab, NostrMessage, NostrState, PriceCurrency, ReceiveMethod, ReceivePhase,
+    ReceiveState, Router, Screen, SendDestinationKind, SendPhase, SendState, SetupState,
+    WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -210,6 +211,8 @@ impl AppCore {
                 }
             }
             AppAction::SyncWallet => self.sync_wallet(),
+            AppAction::RefreshPrice => self.refresh_price(),
+            AppAction::SetPriceCurrency { currency } => self.set_price_currency(currency),
             AppAction::ConfigureServers {
                 server_address,
                 esplora_address,
@@ -503,6 +506,14 @@ impl AppCore {
                 self.state.direct_messages.push(message);
                 self.state.toast = Some("Message sent.".to_string());
             }
+            AsyncMsg::PriceUpdated { currency, price } => {
+                self.state.wallet.price_currency = currency;
+                self.state.wallet.btc_price = Some(price);
+            }
+            AsyncMsg::PriceFailed => {
+                self.state.wallet.price_currency = PriceCurrency::BTC;
+                self.state.wallet.btc_price = Some(1.0);
+            }
             AsyncMsg::Error(message) => {
                 if self.state.receive.phase == ReceivePhase::Creating {
                     self.state.receive.phase = ReceivePhase::Editing;
@@ -543,7 +554,9 @@ impl AppCore {
             | AsyncMsg::LightningReceiveClaimed { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
-            | AsyncMsg::DirectMessageSent(_) => {}
+            | AsyncMsg::DirectMessageSent(_)
+            | AsyncMsg::PriceUpdated { .. }
+            | AsyncMsg::PriceFailed => {}
         }
     }
 
@@ -560,6 +573,7 @@ impl AppCore {
     fn bootstrap(&mut self) {
         self.load_app_data();
         self.load_nostr_key();
+        self.refresh_price();
         if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
             self.state.busy.bootstrapping = true;
             self.state.busy.opening_wallet = true;
@@ -617,6 +631,25 @@ impl AppCore {
         } else {
             self.state.toast = Some("Servers already up to date.".to_string());
         }
+    }
+
+    fn set_price_currency(&mut self, currency: PriceCurrency) {
+        self.state.wallet.price_currency = currency;
+        self.state.wallet.btc_price = None;
+        self.save_app_data();
+        self.refresh_price();
+    }
+
+    fn refresh_price(&self) {
+        let tx = self.tx.clone();
+        let currency = self.state.wallet.price_currency.clone();
+        self.rt.spawn(async move {
+            let msg = match fetch_bitcoin_price(&currency).await {
+                Ok(price) => AsyncMsg::PriceUpdated { currency, price },
+                Err(_) => AsyncMsg::PriceFailed,
+            };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
     }
 
     fn sync_wallet(&mut self) {
@@ -1299,6 +1332,7 @@ impl AppCore {
                 self.state.receive.memo = data.receive_memo;
                 self.state.wallet.server_address = data.servers.server_address;
                 self.state.wallet.esplora_address = data.servers.esplora_address;
+                self.state.wallet.price_currency = data.price_currency.currency;
             }
             Err(e) => {
                 self.state.toast = Some(format!("Could not load local app data: {e}"));
@@ -1312,6 +1346,9 @@ impl AppCore {
             receive_amount_sat: self.state.receive.amount_sat,
             receive_memo: self.state.receive.memo.clone(),
             servers: ServerConfig::from_wallet(&self.state.wallet),
+            price_currency: PersistedPriceCurrency {
+                currency: self.state.wallet.price_currency.clone(),
+            },
         };
         if let Ok(raw) = serde_json::to_string_pretty(&data) {
             let _ = std::fs::create_dir_all(&self.data_dir);
@@ -1333,6 +1370,31 @@ fn validate_server_url(label: &str, raw: &str) -> Result<(), String> {
         "http" | "https" => Ok(()),
         _ => Err(format!("{label} must use http or https.")),
     }
+}
+
+fn default_price_currency() -> PersistedPriceCurrency {
+    PersistedPriceCurrency {
+        currency: PriceCurrency::BTC,
+    }
+}
+
+#[derive(Deserialize)]
+struct PriceResponse {
+    price: f64,
+}
+
+async fn fetch_bitcoin_price(currency: &PriceCurrency) -> anyhow::Result<f64> {
+    if currency == &PriceCurrency::BTC {
+        return Ok(1.0);
+    }
+
+    let currency = currency.code();
+    let url = format!("https://price-proxy.benthecarman.workers.dev/price/{currency}");
+    let response: PriceResponse = reqwest::get(url).await?.error_for_status()?.json().await?;
+    if !response.price.is_finite() {
+        anyhow::bail!("invalid BTC/{currency} price");
+    }
+    Ok(response.price)
 }
 
 async fn parse_send_destination(wallet: Wallet, raw: &str) -> Option<ParsedSendDestination> {
@@ -1525,6 +1587,42 @@ struct PersistedAppData {
     receive_memo: String,
     #[serde(default = "default_server_config")]
     servers: ServerConfig,
+    #[serde(default = "default_price_currency")]
+    price_currency: PersistedPriceCurrency,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+struct PersistedPriceCurrency {
+    #[serde(with = "price_currency_serde")]
+    currency: PriceCurrency,
+}
+
+mod price_currency_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::PriceCurrency;
+
+    pub(super) fn serialize<S>(currency: &PriceCurrency, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(currency.code())
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<PriceCurrency, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.to_ascii_uppercase().as_str() {
+            "BTC" => Ok(PriceCurrency::BTC),
+            "USD" => Ok(PriceCurrency::USD),
+            "EUR" => Ok(PriceCurrency::EUR),
+            "GBP" => Ok(PriceCurrency::GBP),
+            _ => Ok(PriceCurrency::BTC),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

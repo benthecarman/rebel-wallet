@@ -14,6 +14,28 @@ private let primaryText = Color.white
 private let mutedText = Color(red: 0.64, green: 0.64, blue: 0.64)
 private let borderColor = Color.white.opacity(0.10)
 
+private extension PriceCurrency {
+    static let supported: [PriceCurrency] = [.btc, .usd, .eur, .gbp]
+
+    var displayCode: String {
+        switch self {
+        case .btc: "BTC"
+        case .usd: "USD"
+        case .eur: "EUR"
+        case .gbp: "GBP"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .btc: "Bitcoin"
+        case .usd: "US Dollar"
+        case .eur: "Euro"
+        case .gbp: "British Pound"
+        }
+    }
+}
+
 @MainActor
 final class ProfileImageLoader: ObservableObject {
     @Published private(set) var image: UIImage?
@@ -179,6 +201,8 @@ struct ContentView: View {
             RestoreWalletView(manager: manager)
         case .servers:
             ServersView(manager: manager)
+        case .currency:
+            CurrencyView(manager: manager)
         case .contactDetail(let contactId):
             ContactDetailView(manager: manager, contactId: contactId)
         }
@@ -314,17 +338,36 @@ struct WalletHeader: View {
 
 struct MutinyBalanceButton: View {
     let wallet: WalletState
+    @State private var displayMode: BalanceDisplayMode = .sats
+
+    private var canShowCurrency: Bool {
+        wallet.priceCurrency != .btc && wallet.balanceFiatDisplay != nil
+    }
+
+    private var balanceText: String {
+        switch displayMode {
+        case .sats:
+            wallet.balanceDisplay
+        case .currency:
+            wallet.balanceFiatDisplay ?? wallet.balanceDisplay
+        case .privacy:
+            "****"
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text(wallet.balanceDisplay)
+        Button {
+            advanceDisplayMode()
+        } label: {
+            Text(balanceText)
                 .font(.system(size: 25, weight: .light, design: .default))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text(wallet.network)
-                .font(.caption2)
-                .foregroundStyle(mutedText)
+                .frame(minHeight: 48)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .frame(minHeight: 48)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
@@ -339,7 +382,36 @@ struct MutinyBalanceButton: View {
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 .mask(alignment: .bottom) { Rectangle().frame(height: 1) }
         }
+        .onChange(of: wallet.priceCurrency) { _, _ in
+            normalizeDisplayMode()
+        }
+        .onChange(of: wallet.balanceFiatDisplay) { _, _ in
+            normalizeDisplayMode()
+        }
     }
+
+    private func advanceDisplayMode() {
+        switch displayMode {
+        case .sats:
+            displayMode = canShowCurrency ? .currency : .privacy
+        case .currency:
+            displayMode = .privacy
+        case .privacy:
+            displayMode = .sats
+        }
+    }
+
+    private func normalizeDisplayMode() {
+        if displayMode == .currency && !canShowCurrency {
+            displayMode = .sats
+        }
+    }
+}
+
+private enum BalanceDisplayMode {
+    case sats
+    case currency
+    case privacy
 }
 
 struct MutinyEmptyHome: View {
@@ -435,9 +507,14 @@ struct BalancePanel: View {
                 .foregroundStyle(mutedText)
             Text(wallet.balanceDisplay)
                 .font(.system(size: 42, weight: .bold, design: .rounded))
+            if let fiatDisplay = wallet.balanceFiatDisplay {
+                Text(fiatDisplay)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(mutedText)
+            }
             HStack {
-                StatPill(title: "Claimable", value: wallet.pendingReceiveDisplay)
-                StatPill(title: "Sending", value: wallet.pendingSendDisplay)
+                StatPill(title: "Claimable", value: wallet.pendingReceiveDisplay, caption: wallet.pendingReceiveFiatDisplay)
+                StatPill(title: "Sending", value: wallet.pendingSendDisplay, caption: wallet.pendingSendFiatDisplay)
             }
             if let lastSync = wallet.lastSync {
                 Text("Last sync \(lastSync)")
@@ -1344,7 +1421,9 @@ struct SettingsView: View {
                 }
 
                 SettingsCard(title: "Appearance") {
-                    SettingsRow(title: "Currency", caption: "Sats", disabled: true) {}
+                    SettingsRow(title: "Currency", caption: manager.state.wallet.priceCurrency.displayCode) {
+                        manager.dispatch(.pushScreen(screen: .currency))
+                    }
                     SettingsDivider()
                     SettingsRow(title: "Language", caption: "English", disabled: true) {}
                 }
@@ -1437,6 +1516,76 @@ struct SettingsDivider: View {
         Divider()
             .overlay(borderColor)
             .padding(.leading, 14)
+    }
+}
+
+struct CurrencyView: View {
+    @Bindable var manager: AppManager
+    @State private var selectedCurrency: PriceCurrency = .btc
+
+    private var hasChanges: Bool {
+        selectedCurrency != manager.state.wallet.priceCurrency
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Choose the currency used for balances and price conversions.")
+                    .font(.body)
+                    .foregroundStyle(mutedText)
+
+                SettingsCard(title: "Select currency") {
+                    ForEach(Array(PriceCurrency.supported.enumerated()), id: \.element) { index, currency in
+                        Button {
+                            selectedCurrency = currency
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(currency.displayCode)
+                                        .font(.body)
+                                        .foregroundStyle(primaryText)
+                                    Text(currency.displayName)
+                                        .font(.caption)
+                                        .foregroundStyle(mutedText)
+                                }
+                                Spacer()
+                                if selectedCurrency == currency {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(rebelGreen)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < PriceCurrency.supported.count - 1 {
+                            SettingsDivider()
+                        }
+                    }
+                }
+
+                Button {
+                    manager.dispatch(.setPriceCurrency(currency: selectedCurrency))
+                    manager.dispatch(.popScreen)
+                } label: {
+                    Label("Select currency", systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(!hasChanges)
+            }
+            .padding(16)
+        }
+        .navigationTitle("Currency")
+        .scrollContentBackground(.hidden)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            selectedCurrency = manager.state.wallet.priceCurrency
+        }
     }
 }
 
@@ -2392,6 +2541,7 @@ struct PrimaryButtonStyle: ButtonStyle {
 struct StatPill: View {
     let title: String
     let value: String
+    var caption: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -2400,6 +2550,11 @@ struct StatPill: View {
                 .foregroundStyle(mutedText)
             Text(value)
                 .font(.subheadline.bold())
+            if let caption {
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundStyle(mutedText)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)

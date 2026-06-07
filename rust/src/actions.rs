@@ -1,4 +1,4 @@
-use crate::{MainTab, ReceiveMethod, Screen};
+use crate::{MainTab, PriceCurrency, ReceiveMethod, Screen};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppAction {
@@ -12,6 +12,10 @@ pub enum AppAction {
     },
     ShowSeed,
     SyncWallet,
+    RefreshPrice,
+    SetPriceCurrency {
+        currency: PriceCurrency,
+    },
     ConfigureServers {
         server_address: String,
         esplora_address: String,
