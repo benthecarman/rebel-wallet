@@ -5,9 +5,11 @@ use crate::{SIGNET_ESPLORA, SIGNET_SERVER};
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
     pub rev: u64,
+    pub show_launch_splash: bool,
     pub router: Router,
     pub setup: SetupState,
     pub wallet: WalletState,
+    pub supported_price_currencies: Vec<CurrencyOption>,
     pub receive: ReceiveState,
     pub send: SendState,
     pub nostr: NostrState,
@@ -17,6 +19,13 @@ pub struct AppState {
     pub toast: Option<String>,
     pub busy: BusyState,
     pub capability_request: Option<CapabilityRequest>,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct CurrencyOption {
+    pub currency: PriceCurrency,
+    pub code: String,
+    pub name: String,
 }
 
 #[derive(uniffi::Record, Clone, Debug, Default)]
@@ -73,7 +82,7 @@ pub enum Screen {
     ContactDetail { contact_id: String },
 }
 
-#[derive(uniffi::Enum, Clone, Debug)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
 pub enum SetupState {
     NeedsSetup,
     Ready,
@@ -95,6 +104,15 @@ impl PriceCurrency {
             Self::USD => "USD",
             Self::EUR => "EUR",
             Self::GBP => "GBP",
+        }
+    }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            Self::BTC => "Bitcoin",
+            Self::USD => "US Dollar",
+            Self::EUR => "Euro",
+            Self::GBP => "British Pound",
         }
     }
 
@@ -125,9 +143,13 @@ impl PriceCurrency {
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct WalletState {
     pub network: String,
+    pub default_server_address: String,
+    pub default_esplora_address: String,
     pub server_address: String,
     pub esplora_address: String,
     pub price_currency: PriceCurrency,
+    pub price_currency_code: String,
+    pub price_currency_name: String,
     pub btc_price: Option<f64>,
     pub balance_sat: u64,
     pub balance_display: String,
@@ -262,6 +284,7 @@ impl AppState {
     pub(crate) fn initial() -> Self {
         Self {
             rev: 0,
+            show_launch_splash: true,
             router: Router {
                 default_screen: Screen::Setup,
                 screen_stack: vec![],
@@ -270,9 +293,13 @@ impl AppState {
             setup: SetupState::NeedsSetup,
             wallet: WalletState {
                 network: "Signet".to_string(),
+                default_server_address: SIGNET_SERVER.to_string(),
+                default_esplora_address: SIGNET_ESPLORA.to_string(),
                 server_address: SIGNET_SERVER.to_string(),
                 esplora_address: SIGNET_ESPLORA.to_string(),
                 price_currency: PriceCurrency::BTC,
+                price_currency_code: PriceCurrency::BTC.code().to_string(),
+                price_currency_name: PriceCurrency::BTC.display_name().to_string(),
                 btc_price: None,
                 balance_sat: 0,
                 balance_display: format_sats(0),
@@ -319,6 +346,7 @@ impl AppState {
                 nip05: String::new(),
                 contacts: vec![],
             },
+            supported_price_currencies: supported_price_currencies(),
             direct_messages: vec![],
             activity: vec![],
             recovery_phrase: None,
@@ -329,6 +357,10 @@ impl AppState {
     }
 
     pub(crate) fn refresh_derived(&mut self) {
+        self.show_launch_splash = should_show_launch_splash(self);
+        self.supported_price_currencies = supported_price_currencies();
+        self.wallet.price_currency_code = self.wallet.price_currency.code().to_string();
+        self.wallet.price_currency_name = self.wallet.price_currency.display_name().to_string();
         self.wallet.balance_display = format_sats(self.wallet.balance_sat);
         self.wallet.pending_receive_display = format_sats(self.wallet.pending_receive_sat);
         self.wallet.pending_send_display = format_sats(self.wallet.pending_send_sat);
@@ -376,6 +408,34 @@ impl AppState {
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);
     }
+}
+
+fn supported_price_currencies() -> Vec<CurrencyOption> {
+    [
+        PriceCurrency::BTC,
+        PriceCurrency::USD,
+        PriceCurrency::EUR,
+        PriceCurrency::GBP,
+    ]
+    .into_iter()
+    .map(|currency| CurrencyOption {
+        code: currency.code().to_string(),
+        name: currency.display_name().to_string(),
+        currency,
+    })
+    .collect()
+}
+
+fn should_show_launch_splash(state: &AppState) -> bool {
+    if state.rev == 0 {
+        return true;
+    }
+    if state.busy.bootstrapping || state.busy.opening_wallet {
+        return true;
+    }
+    state.setup == SetupState::Ready
+        && state.busy.syncing_wallet
+        && state.wallet.last_sync.is_none()
 }
 
 pub(crate) fn format_sats(amount: u64) -> String {
@@ -516,5 +576,25 @@ mod tests {
         state.receive.lightning_paid = true;
         state.refresh_derived();
         assert_eq!(state.receive.lightning_status_display, "Paid");
+    }
+
+    #[test]
+    fn derives_platform_render_metadata() {
+        let mut state = AppState::initial();
+        state.rev = 1;
+        state.busy.bootstrapping = false;
+        state.busy.opening_wallet = false;
+        state.refresh_derived();
+
+        assert!(!state.show_launch_splash);
+        assert_eq!(state.wallet.price_currency_code, "BTC");
+        assert_eq!(state.wallet.price_currency_name, "Bitcoin");
+        assert_eq!(state.supported_price_currencies.len(), 4);
+
+        state.setup = SetupState::Ready;
+        state.busy.syncing_wallet = true;
+        state.wallet.last_sync = None;
+        state.refresh_derived();
+        assert!(state.show_launch_splash);
     }
 }

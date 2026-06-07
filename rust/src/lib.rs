@@ -33,9 +33,9 @@ mod updates;
 pub use actions::AppAction;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, MainTab, NostrMessage, NostrState, PriceCurrency, ReceiveMethod, ReceivePhase,
-    ReceiveState, Router, Screen, SendDestinationKind, SendPhase, SendState, SetupState,
-    WalletState,
+    Contact, CurrencyOption, MainTab, NostrMessage, NostrState, PriceCurrency, ReceiveMethod,
+    ReceivePhase, ReceiveState, Router, Screen, SendDestinationKind, SendPhase, SendState,
+    SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};

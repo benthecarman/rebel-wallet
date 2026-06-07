@@ -539,9 +539,9 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 public protocol FfiAppProtocol: AnyObject, Sendable {
-    
+
     func dispatch(action: AppAction) 
-    
+
     func listenForUpdates(reconciler: AppReconciler) 
     
     func state()  -> AppState
@@ -797,9 +797,11 @@ public func FfiConverterTypeActivityItem_lower(_ value: ActivityItem) -> RustBuf
 
 public struct AppState: Equatable, Hashable {
     public var rev: UInt64
+    public var showLaunchSplash: Bool
     public var router: Router
     public var setup: SetupState
     public var wallet: WalletState
+    public var supportedPriceCurrencies: [CurrencyOption]
     public var receive: ReceiveState
     public var send: SendState
     public var nostr: NostrState
@@ -812,11 +814,13 @@ public struct AppState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, setup: SetupState, wallet: WalletState, receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: BusyState, capabilityRequest: CapabilityRequest?) {
+    public init(rev: UInt64, showLaunchSplash: Bool, router: Router, setup: SetupState, wallet: WalletState, supportedPriceCurrencies: [CurrencyOption], receive: ReceiveState, send: SendState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, toast: String?, busy: BusyState, capabilityRequest: CapabilityRequest?) {
         self.rev = rev
+        self.showLaunchSplash = showLaunchSplash
         self.router = router
         self.setup = setup
         self.wallet = wallet
+        self.supportedPriceCurrencies = supportedPriceCurrencies
         self.receive = receive
         self.send = send
         self.nostr = nostr
@@ -845,9 +849,11 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         return
             try AppState(
                 rev: FfiConverterUInt64.read(from: &buf), 
+                showLaunchSplash: FfiConverterBool.read(from: &buf),
                 router: FfiConverterTypeRouter.read(from: &buf), 
                 setup: FfiConverterTypeSetupState.read(from: &buf), 
                 wallet: FfiConverterTypeWalletState.read(from: &buf), 
+                supportedPriceCurrencies: FfiConverterSequenceTypeCurrencyOption.read(from: &buf),
                 receive: FfiConverterTypeReceiveState.read(from: &buf), 
                 send: FfiConverterTypeSendState.read(from: &buf), 
                 nostr: FfiConverterTypeNostrState.read(from: &buf), 
@@ -862,9 +868,11 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
 
     public static func write(_ value: AppState, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.rev, into: &buf)
+        FfiConverterBool.write(value.showLaunchSplash, into: &buf)
         FfiConverterTypeRouter.write(value.router, into: &buf)
         FfiConverterTypeSetupState.write(value.setup, into: &buf)
         FfiConverterTypeWalletState.write(value.wallet, into: &buf)
+        FfiConverterSequenceTypeCurrencyOption.write(value.supportedPriceCurrencies, into: &buf)
         FfiConverterTypeReceiveState.write(value.receive, into: &buf)
         FfiConverterTypeSendState.write(value.send, into: &buf)
         FfiConverterTypeNostrState.write(value.nostr, into: &buf)
@@ -916,9 +924,9 @@ public struct BusyState: Equatable, Hashable {
         self.refreshingContacts = refreshingContacts
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1100,6 +1108,60 @@ public func FfiConverterTypeContact_lift(_ buf: RustBuffer) throws -> Contact {
 #endif
 public func FfiConverterTypeContact_lower(_ value: Contact) -> RustBuffer {
     return FfiConverterTypeContact.lower(value)
+}
+
+
+public struct CurrencyOption: Equatable, Hashable {
+    public var currency: PriceCurrency
+    public var code: String
+    public var name: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(currency: PriceCurrency, code: String, name: String) {
+        self.currency = currency
+        self.code = code
+        self.name = name
+    }
+}
+
+#if compiler(>=6)
+extension CurrencyOption: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCurrencyOption: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CurrencyOption {
+        return
+            try CurrencyOption(
+                currency: FfiConverterTypePriceCurrency.read(from: &buf),
+                code: FfiConverterString.read(from: &buf),
+                name: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CurrencyOption, into buf: inout [UInt8]) {
+        FfiConverterTypePriceCurrency.write(value.currency, into: &buf)
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCurrencyOption_lift(_ buf: RustBuffer) throws -> CurrencyOption {
+    return try FfiConverterTypeCurrencyOption.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCurrencyOption_lower(_ value: CurrencyOption) -> RustBuffer {
+    return FfiConverterTypeCurrencyOption.lower(value)
 }
 
 
@@ -1479,9 +1541,13 @@ public func FfiConverterTypeSendState_lower(_ value: SendState) -> RustBuffer {
 
 public struct WalletState: Equatable, Hashable {
     public var network: String
+    public var defaultServerAddress: String
+    public var defaultEsploraAddress: String
     public var serverAddress: String
     public var esploraAddress: String
     public var priceCurrency: PriceCurrency
+    public var priceCurrencyCode: String
+    public var priceCurrencyName: String
     public var btcPrice: Double?
     public var balanceSat: UInt64
     public var balanceDisplay: String
@@ -1496,11 +1562,15 @@ public struct WalletState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(network: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, lastSync: String?) {
+    public init(network: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, lastSync: String?) {
         self.network = network
+        self.defaultServerAddress = defaultServerAddress
+        self.defaultEsploraAddress = defaultEsploraAddress
         self.serverAddress = serverAddress
         self.esploraAddress = esploraAddress
         self.priceCurrency = priceCurrency
+        self.priceCurrencyCode = priceCurrencyCode
+        self.priceCurrencyName = priceCurrencyName
         self.btcPrice = btcPrice
         self.balanceSat = balanceSat
         self.balanceDisplay = balanceDisplay
@@ -1531,9 +1601,13 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
         return
             try WalletState(
                 network: FfiConverterString.read(from: &buf), 
+                defaultServerAddress: FfiConverterString.read(from: &buf),
+                defaultEsploraAddress: FfiConverterString.read(from: &buf),
                 serverAddress: FfiConverterString.read(from: &buf), 
                 esploraAddress: FfiConverterString.read(from: &buf), 
                 priceCurrency: FfiConverterTypePriceCurrency.read(from: &buf), 
+                priceCurrencyCode: FfiConverterString.read(from: &buf),
+                priceCurrencyName: FfiConverterString.read(from: &buf),
                 btcPrice: FfiConverterOptionDouble.read(from: &buf), 
                 balanceSat: FfiConverterUInt64.read(from: &buf), 
                 balanceDisplay: FfiConverterString.read(from: &buf), 
@@ -1550,9 +1624,13 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
 
     public static func write(_ value: WalletState, into buf: inout [UInt8]) {
         FfiConverterString.write(value.network, into: &buf)
+        FfiConverterString.write(value.defaultServerAddress, into: &buf)
+        FfiConverterString.write(value.defaultEsploraAddress, into: &buf)
         FfiConverterString.write(value.serverAddress, into: &buf)
         FfiConverterString.write(value.esploraAddress, into: &buf)
         FfiConverterTypePriceCurrency.write(value.priceCurrency, into: &buf)
+        FfiConverterString.write(value.priceCurrencyCode, into: &buf)
+        FfiConverterString.write(value.priceCurrencyName, into: &buf)
         FfiConverterOptionDouble.write(value.btcPrice, into: &buf)
         FfiConverterUInt64.write(value.balanceSat, into: &buf)
         FfiConverterString.write(value.balanceDisplay, into: &buf)
@@ -3443,6 +3521,31 @@ fileprivate struct FfiConverterSequenceTypeContact: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeContact.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeCurrencyOption: FfiConverterRustBuffer {
+    typealias SwiftType = [CurrencyOption]
+
+    public static func write(_ value: [CurrencyOption], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCurrencyOption.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CurrencyOption] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CurrencyOption]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCurrencyOption.read(from: &buf))
         }
         return seq
     }

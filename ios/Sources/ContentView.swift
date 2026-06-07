@@ -14,28 +14,6 @@ private let primaryText = Color.white
 private let mutedText = Color(red: 0.64, green: 0.64, blue: 0.64)
 private let borderColor = Color.white.opacity(0.10)
 
-private extension PriceCurrency {
-    static let supported: [PriceCurrency] = [.btc, .usd, .eur, .gbp]
-
-    var displayCode: String {
-        switch self {
-        case .btc: "BTC"
-        case .usd: "USD"
-        case .eur: "EUR"
-        case .gbp: "GBP"
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .btc: "Bitcoin"
-        case .usd: "US Dollar"
-        case .eur: "Euro"
-        case .gbp: "British Pound"
-        }
-    }
-}
-
 @MainActor
 final class ProfileImageLoader: ObservableObject {
     @Published private(set) var image: UIImage?
@@ -174,7 +152,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var root: some View {
-        if shouldShowLaunchSplash {
+        if manager.state.showLaunchSplash {
             LaunchSplashView()
         } else {
             switch manager.state.setup {
@@ -184,21 +162,6 @@ struct ContentView: View {
                 SetupView(manager: manager)
             }
         }
-    }
-
-    private var shouldShowLaunchSplash: Bool {
-        if manager.state.rev == 0 {
-            return true
-        }
-        if manager.state.busy.bootstrapping || manager.state.busy.openingWallet {
-            return true
-        }
-        if case .ready = manager.state.setup,
-           manager.state.busy.syncingWallet,
-           manager.state.wallet.lastSync == nil {
-            return true
-        }
-        return false
     }
 
     @ViewBuilder
@@ -1511,7 +1474,7 @@ struct SettingsView: View {
                 }
 
                 SettingsCard(title: "Appearance") {
-                    SettingsRow(title: "Currency", caption: manager.state.wallet.priceCurrency.displayCode) {
+                    SettingsRow(title: "Currency", caption: manager.state.wallet.priceCurrencyCode) {
                         manager.dispatch(.pushScreen(screen: .currency))
                     }
                     SettingsDivider()
@@ -1625,21 +1588,21 @@ struct CurrencyView: View {
                     .foregroundStyle(mutedText)
 
                 SettingsCard(title: "Select currency") {
-                    ForEach(Array(PriceCurrency.supported.enumerated()), id: \.element) { index, currency in
+                    ForEach(Array(manager.state.supportedPriceCurrencies.enumerated()), id: \.element.currency) { index, option in
                         Button {
-                            selectedCurrency = currency
+                            selectedCurrency = option.currency
                         } label: {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(currency.displayCode)
+                                    Text(option.code)
                                         .font(.body)
                                         .foregroundStyle(primaryText)
-                                    Text(currency.displayName)
+                                    Text(option.name)
                                         .font(.caption)
                                         .foregroundStyle(mutedText)
                                 }
                                 Spacer()
-                                if selectedCurrency == currency {
+                                if selectedCurrency == option.currency {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(rebelGreen)
                                 }
@@ -1651,7 +1614,7 @@ struct CurrencyView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if index < PriceCurrency.supported.count - 1 {
+                        if index < manager.state.supportedPriceCurrencies.count - 1 {
                             SettingsDivider()
                         }
                     }
@@ -1684,11 +1647,10 @@ struct ServersView: View {
     @State private var serverAddress = ""
     @State private var esploraAddress = ""
 
-    private let defaultServerAddress = "https://ark.signet.2nd.dev"
-    private let defaultEsploraAddress = "https://esplora.signet.2nd.dev"
-
     private var canSave: Bool {
-        validHttpUrl(serverAddress) && validHttpUrl(esploraAddress) && !manager.state.busy.openingWallet
+        !serverAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !esploraAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !manager.state.busy.openingWallet
     }
 
     private var hasChanges: Bool {
@@ -1720,8 +1682,8 @@ struct ServersView: View {
 
                 HStack(spacing: 12) {
                     Button {
-                        serverAddress = defaultServerAddress
-                        esploraAddress = defaultEsploraAddress
+                        serverAddress = manager.state.wallet.defaultServerAddress
+                        esploraAddress = manager.state.wallet.defaultEsploraAddress
                     } label: {
                         Label("Defaults", systemImage: "arrow.counterclockwise")
                             .frame(maxWidth: .infinity)
@@ -1758,14 +1720,6 @@ struct ServersView: View {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
-    private func validHttpUrl(_ value: String) -> Bool {
-        guard let url = URL(string: normalized(value)),
-              let scheme = url.scheme?.lowercased(),
-              url.host != nil else {
-            return false
-        }
-        return scheme == "http" || scheme == "https"
-    }
 }
 
 struct ServerTextField: View {
