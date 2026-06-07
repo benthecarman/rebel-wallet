@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::SIGNET_SERVER;
+use crate::{SIGNET_ESPLORA, SIGNET_SERVER};
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
@@ -68,6 +68,7 @@ pub enum Screen {
     Profile,
     Backup,
     Restore,
+    Servers,
     ContactDetail { contact_id: String },
 }
 
@@ -82,6 +83,7 @@ pub enum SetupState {
 pub struct WalletState {
     pub network: String,
     pub server_address: String,
+    pub esplora_address: String,
     pub balance_sat: u64,
     pub balance_display: String,
     pub pending_receive_sat: u64,
@@ -221,6 +223,7 @@ impl AppState {
             wallet: WalletState {
                 network: "Signet".to_string(),
                 server_address: SIGNET_SERVER.to_string(),
+                esplora_address: SIGNET_ESPLORA.to_string(),
                 balance_sat: 0,
                 balance_display: format_sats(0),
                 pending_receive_sat: 0,

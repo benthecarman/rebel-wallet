@@ -12,6 +12,10 @@ pub enum AppAction {
     },
     ShowSeed,
     SyncWallet,
+    ConfigureServers {
+        server_address: String,
+        esplora_address: String,
+    },
     SelectTab {
         tab: MainTab,
     },

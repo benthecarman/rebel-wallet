@@ -96,6 +96,8 @@ struct ContentView: View {
             BackupView(manager: manager)
         case .restore:
             RestoreWalletView(manager: manager)
+        case .servers:
+            ServersView(manager: manager)
         case .contactDetail(let contactId):
             ContactDetailView(manager: manager, contactId: contactId)
         }
@@ -1258,7 +1260,9 @@ struct SettingsView: View {
                         manager.dispatch(.pushScreen(screen: .restore))
                     }
                     SettingsDivider()
-                    SettingsRow(title: "Servers", caption: manager.state.wallet.serverAddress, disabled: true) {}
+                    SettingsRow(title: "Servers", caption: manager.state.wallet.serverAddress) {
+                        manager.dispatch(.pushScreen(screen: .servers))
+                    }
                 }
 
                 SettingsCard(title: "Appearance") {
@@ -1353,6 +1357,120 @@ struct SettingsDivider: View {
         Divider()
             .overlay(borderColor)
             .padding(.leading, 14)
+    }
+}
+
+struct ServersView: View {
+    @Bindable var manager: AppManager
+    @State private var serverAddress = ""
+    @State private var esploraAddress = ""
+
+    private let defaultServerAddress = "https://ark.signet.2nd.dev"
+    private let defaultEsploraAddress = "https://esplora.signet.2nd.dev"
+
+    private var canSave: Bool {
+        validHttpUrl(serverAddress) && validHttpUrl(esploraAddress) && !manager.state.busy.openingWallet
+    }
+
+    private var hasChanges: Bool {
+        normalized(serverAddress) != manager.state.wallet.serverAddress ||
+            normalized(esploraAddress) != manager.state.wallet.esploraAddress
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Servers")
+                        .font(.largeTitle.bold())
+                    Text("Configure the Ark and Esplora endpoints used by this Signet wallet.")
+                        .font(.body)
+                        .foregroundStyle(mutedText)
+                }
+
+                SettingsCard(title: "Network") {
+                    ServerTextField(title: "Ark server", text: $serverAddress)
+                    SettingsDivider()
+                    ServerTextField(title: "Esplora", text: $esploraAddress)
+                }
+
+                if manager.state.busy.openingWallet {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reconnecting wallet")
+                            .font(.footnote)
+                            .foregroundStyle(mutedText)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        serverAddress = defaultServerAddress
+                        esploraAddress = defaultEsploraAddress
+                    } label: {
+                        Label("Defaults", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+
+                    Button {
+                        manager.dispatch(.configureServers(
+                            serverAddress: normalized(serverAddress),
+                            esploraAddress: normalized(esploraAddress)
+                        ))
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                    .disabled(!canSave || !hasChanges)
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle("Servers")
+        .scrollContentBackground(.hidden)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .onAppear {
+            serverAddress = manager.state.wallet.serverAddress
+            esploraAddress = manager.state.wallet.esploraAddress
+        }
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func validHttpUrl(_ value: String) -> Bool {
+        guard let url = URL(string: normalized(value)),
+              let scheme = url.scheme?.lowercased(),
+              url.host != nil else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
+    }
+}
+
+struct ServerTextField: View {
+    let title: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(mutedText)
+            TextField(title, text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .font(.body.monospaced())
+                .foregroundStyle(primaryText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 }
 

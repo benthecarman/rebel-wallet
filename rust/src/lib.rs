@@ -44,7 +44,7 @@ uniffi::setup_scaffolding!();
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
 pub(crate) const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
-const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
+pub(crate) const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
 const NOSTR_RELAYS: [&str; 3] = [
     "wss://relay.damus.io",
     "wss://nostr.wine",
@@ -210,6 +210,10 @@ impl AppCore {
                 }
             }
             AppAction::SyncWallet => self.sync_wallet(),
+            AppAction::ConfigureServers {
+                server_address,
+                esplora_address,
+            } => self.configure_servers(server_address, esplora_address),
             AppAction::SelectTab { tab } => self.state.router.selected_tab = tab,
             AppAction::PushScreen { screen } => self.state.router.screen_stack.push(screen),
             AppAction::PopScreen => {
@@ -566,10 +570,11 @@ impl AppCore {
     fn open_wallet(&self, mnemonic: String, mode: WalletOpenMode) {
         let tx = self.tx.clone();
         let data_dir = self.data_dir.clone();
+        let server_config = ServerConfig::from_wallet(&self.state.wallet);
         self.rt.spawn(async move {
             let result = async {
                 let mnemonic = Mnemonic::from_str(&mnemonic).context("invalid recovery phrase")?;
-                let wallet = open_bark_wallet(data_dir, &mnemonic, mode).await?;
+                let wallet = open_bark_wallet(data_dir, &mnemonic, mode, server_config).await?;
                 Ok::<_, anyhow::Error>((wallet, mnemonic.to_string()))
             }
             .await;
@@ -579,6 +584,39 @@ impl AppCore {
             };
             let _ = tx.send(CoreMsg::Async(msg));
         });
+    }
+
+    fn configure_servers(&mut self, server_address: String, esplora_address: String) {
+        let server_address = server_address.trim().trim_end_matches('/').to_string();
+        let esplora_address = esplora_address.trim().trim_end_matches('/').to_string();
+
+        if let Err(message) = validate_server_url("Ark server", &server_address) {
+            self.state.toast = Some(message);
+            return;
+        }
+        if let Err(message) = validate_server_url("Esplora", &esplora_address) {
+            self.state.toast = Some(message);
+            return;
+        }
+
+        let changed = self.state.wallet.server_address != server_address
+            || self.state.wallet.esplora_address != esplora_address;
+        self.state.wallet.server_address = server_address;
+        self.state.wallet.esplora_address = esplora_address;
+        self.save_app_data();
+
+        if changed {
+            if let Some(seed) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
+                self.wallet = None;
+                self.state.busy.opening_wallet = true;
+                self.open_wallet(seed, WalletOpenMode::Open);
+                self.state.toast = Some("Servers saved. Reconnecting wallet.".to_string());
+            } else {
+                self.state.toast = Some("Servers saved.".to_string());
+            }
+        } else {
+            self.state.toast = Some("Servers already up to date.".to_string());
+        }
     }
 
     fn sync_wallet(&mut self) {
@@ -1259,6 +1297,8 @@ impl AppCore {
                 self.state.nostr = data.nostr;
                 self.state.receive.amount_sat = data.receive_amount_sat;
                 self.state.receive.memo = data.receive_memo;
+                self.state.wallet.server_address = data.servers.server_address;
+                self.state.wallet.esplora_address = data.servers.esplora_address;
             }
             Err(e) => {
                 self.state.toast = Some(format!("Could not load local app data: {e}"));
@@ -1271,11 +1311,27 @@ impl AppCore {
             nostr: self.state.nostr.clone(),
             receive_amount_sat: self.state.receive.amount_sat,
             receive_memo: self.state.receive.memo.clone(),
+            servers: ServerConfig::from_wallet(&self.state.wallet),
         };
         if let Ok(raw) = serde_json::to_string_pretty(&data) {
             let _ = std::fs::create_dir_all(&self.data_dir);
             let _ = std::fs::write(&self.app_data_path, raw);
         }
+    }
+}
+
+fn default_server_config() -> ServerConfig {
+    ServerConfig {
+        server_address: SIGNET_SERVER.to_string(),
+        esplora_address: SIGNET_ESPLORA.to_string(),
+    }
+}
+
+fn validate_server_url(label: &str, raw: &str) -> Result<(), String> {
+    let parsed = Url::parse(raw).map_err(|_| format!("{label} must be a valid URL."))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(()),
+        _ => Err(format!("{label} must use http or https.")),
     }
 }
 
@@ -1467,6 +1523,23 @@ struct PersistedAppData {
     nostr: NostrState,
     receive_amount_sat: u64,
     receive_memo: String,
+    #[serde(default = "default_server_config")]
+    servers: ServerConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ServerConfig {
+    server_address: String,
+    esplora_address: String,
+}
+
+impl ServerConfig {
+    fn from_wallet(wallet: &WalletState) -> Self {
+        Self {
+            server_address: wallet.server_address.clone(),
+            esplora_address: wallet.esplora_address.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1481,6 +1554,7 @@ async fn open_bark_wallet(
     data_dir: PathBuf,
     mnemonic: &Mnemonic,
     mode: WalletOpenMode,
+    server_config: ServerConfig,
 ) -> anyhow::Result<Wallet> {
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("rebel-wallet.sqlite");
@@ -1489,8 +1563,8 @@ async fn open_bark_wallet(
     }
     let db = Arc::new(SqliteClient::open(&db_path)?);
     let config = Config {
-        server_address: SIGNET_SERVER.to_string(),
-        esplora_address: Some(SIGNET_ESPLORA.to_string()),
+        server_address: server_config.server_address,
+        esplora_address: Some(server_config.esplora_address),
         ..Config::network_default(bitcoin::Network::Signet)
     };
     let lock_manager = Box::new(MemoryLockManager::new());
