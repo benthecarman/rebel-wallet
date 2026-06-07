@@ -1247,9 +1247,6 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("Settings")
-                    .font(.largeTitle.bold())
-
                 SettingsCard(title: "General") {
                     SettingsRow(title: "Backup", caption: "Show recovery phrase", accent: rebelGreen) {
                         manager.dispatch(.showSeed)
@@ -1382,13 +1379,9 @@ struct ServersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Servers")
-                        .font(.largeTitle.bold())
-                    Text("Configure the Ark and Esplora endpoints used by this Signet wallet.")
-                        .font(.body)
-                        .foregroundStyle(mutedText)
-                }
+                Text("Configure the Ark and Esplora endpoints used by this Signet wallet.")
+                    .font(.body)
+                    .foregroundStyle(mutedText)
 
                 SettingsCard(title: "Network") {
                     ServerTextField(title: "Ark server", text: $serverAddress)
@@ -1494,8 +1487,6 @@ struct BackupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Backup")
-                        .font(.largeTitle.bold())
                     Text("Your recovery phrase controls your funds. Write these words down and keep them offline.")
                         .font(.body)
                         .foregroundStyle(mutedText)
@@ -1570,8 +1561,6 @@ struct RestoreWalletView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Restore")
-                        .font(.largeTitle.bold())
                     Text(replacingCurrentWallet ? "Restore from seed words and replace the wallet currently on this device." : "Restore your wallet from seed words.")
                         .font(.body)
                         .foregroundStyle(mutedText)
