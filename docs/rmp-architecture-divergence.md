@@ -103,22 +103,7 @@ Suggested direction:
 - Store `let rust: AppCore`.
 - Add Swift test or preview fakes once views are split out.
 
-### 7. Release Profile Hardening Is Missing
-
-The bible recommends release profile settings for mobile binary size:
-
-- `lto = true`
-- `codegen-units = 1`
-- `strip = true`
-- `panic = "abort"`
-
-Current root `Cargo.toml` has only the workspace declaration and no `[profile.release]`.
-
-Suggested direction:
-
-- Add a workspace-level `[profile.release]` once release build/debugging tradeoffs are acceptable.
-
-### 8. Testing Is Rust-Only and Narrow
+### 7. Testing Is Rust-Only and Narrow
 
 The repo has focused Rust unit tests in `state.rs`, `activity.rs`, and `nostr_support.rs`. There are no checked-in iOS tests, Android tests, desktop tests, or integration tests that exercise the actor/update loop.
 
