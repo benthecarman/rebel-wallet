@@ -1,4 +1,5 @@
 /target
+/build/
 .direnv/
 .DS_Store
 *.swp
