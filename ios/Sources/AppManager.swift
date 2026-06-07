@@ -44,6 +44,34 @@ final class AppManager: AppReconciler {
     func dispatch(_ action: AppAction) {
         rust.dispatch(action: action)
     }
+
+    func syncWalletForRefresh() async {
+        if state.busy.syncingWallet {
+            await waitForWalletSync()
+            return
+        }
+
+        let startingRev = state.rev
+        dispatch(.syncWallet)
+        await waitForWalletSync(startingRev: startingRev)
+    }
+
+    private func waitForWalletSync(startingRev: UInt64? = nil) async {
+        let timeout = Date().addingTimeInterval(60)
+        var observedSync = state.busy.syncingWallet
+
+        while Date() < timeout {
+            if state.busy.syncingWallet {
+                observedSync = true
+            } else if observedSync {
+                return
+            } else if let startingRev, state.rev > startingRev {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
 }
 
 final class KeychainSecretStore: SecretStore {

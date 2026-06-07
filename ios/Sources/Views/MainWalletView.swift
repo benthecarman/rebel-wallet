@@ -26,15 +26,32 @@ struct MainWalletView: View {
 struct HomeView: View {
     @Bindable var manager: AppManager
     @State private var selectedActivityId: String?
+    @State private var pullDistance: CGFloat = 0
+    @State private var refreshingActivity = false
+
+    private let refreshThreshold: CGFloat = 86
 
     private var selectedActivity: ActivityItem? {
         manager.state.activity.first { $0.id == selectedActivityId }
     }
 
+    private var refreshProgress: CGFloat {
+        min(1, pullDistance / refreshThreshold)
+    }
+
+    private var refreshIndicatorHeight: CGFloat {
+        refreshingActivity ? 54 : min(54, pullDistance * 0.72)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                WalletHeader(manager: manager)
+        VStack(spacing: 16) {
+            WalletHeader(manager: manager)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+            ScrollView {
+                Color.clear
+                    .frame(height: refreshIndicatorHeight)
 
                 VStack(alignment: .leading, spacing: 0) {
                     if manager.state.activity.isEmpty {
@@ -52,13 +69,102 @@ struct HomeView: View {
                     }
                 }
                 .padding(.bottom, 88)
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .scrollBounceBehavior(.always, axes: .vertical)
+            .overlay(alignment: .top) {
+                HomeActivityRefreshIndicator(
+                    progress: refreshProgress,
+                    refreshing: refreshingActivity
+                )
+                .frame(height: refreshIndicatorHeight)
+                .opacity(refreshingActivity || refreshProgress > 0.04 ? 1 : 0)
+                .allowsHitTesting(false)
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        guard !refreshingActivity else { return }
+                        pullDistance = max(0, value.translation.height)
+                    }
+                    .onEnded { value in
+                        guard !refreshingActivity else { return }
+                        let distance = max(0, value.translation.height)
+                        if distance >= refreshThreshold {
+                            startActivityRefresh()
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                pullDistance = 0
+                            }
+                        }
+                    }
+            )
+            .onChange(of: manager.state.router.selectedTab) { _, _ in
+                if !refreshingActivity {
+                    pullDistance = 0
+                }
+            }
         }
         .foregroundStyle(primaryText)
         .background(pageBackground)
         .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId)
+    }
+
+    private func startActivityRefresh() {
+        refreshingActivity = true
+        Task {
+            await manager.syncWalletForRefresh()
+            await MainActor.run {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    refreshingActivity = false
+                    pullDistance = 0
+                }
+            }
+        }
+    }
+}
+
+private struct HomeActivityRefreshIndicator: View {
+    let progress: CGFloat
+    let refreshing: Bool
+
+    private var normalizedProgress: CGFloat {
+        min(1, max(0, progress))
+    }
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let rotation = refreshing
+                ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1 * 360
+                : Double(normalizedProgress) * 220
+
+            ZStack {
+                Circle()
+                    .fill(raisedSurface)
+
+                Circle()
+                    .trim(from: 0, to: refreshing ? 0.34 : 0.16 + normalizedProgress * 0.66)
+                    .stroke(
+                        AngularGradient(
+                            colors: [rebelRed, rebelBlue, rebelGreen, rebelRed],
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(rotation))
+
+                Image(systemName: refreshing ? "bolt.fill" : "arrow.down")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(refreshing ? rebelRed : primaryText)
+                    .rotationEffect(.degrees(refreshing ? 0 : normalizedProgress * 180))
+                    .scaleEffect(0.78 + normalizedProgress * 0.22)
+            }
+            .frame(width: 34, height: 34)
+            .frame(maxWidth: .infinity)
+            .scaleEffect(refreshing ? 1 : 0.78 + normalizedProgress * 0.22)
+            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: normalizedProgress)
+            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: refreshing)
+        }
     }
 }
 
