@@ -60,18 +60,7 @@ Some of this is harmless local UI state, but the more reusable policy should mov
 
 The code is already doing this well in several places: balances, fiat displays, send destination kind, send error text, send `can_submit`, receive status display, and activity display fields are Rust-derived.
 
-### 4. Image Networking and Cache Are Native-Owned
-
-`ProfileImageLoader` in `ios/Sources/Services/ProfileImageLoader.swift` owns URL fetching, HTTP status handling, in-flight request coalescing, and `NSCache` storage for profile images.
-
-The bible generally assigns networking, caching, and persistence to Rust unless native execution is required for UX quality. Native image rendering is appropriate, but image fetch/cache policy is currently iOS-only.
-
-Suggested direction:
-
-- If profile image behavior must match across platforms, move fetch/cache policy to Rust and expose either cached file paths/data or a capability/request contract.
-- If this remains iOS-only for pragmatic reasons, document it as an intentional native cache exception.
-
-### 5. Secrets Are Persisted Through a Native Callback, Not Side-Effect Updates
+### 4. Secrets Are Persisted Through a Native Callback, Not Side-Effect Updates
 
 The bible's example pattern uses dedicated secret-bearing `AppUpdate` variants for values that native must persist, and the native side applies those side effects before stale-rev guards.
 
@@ -87,7 +76,7 @@ Suggested direction:
 - Either document `SecretStore` as the project's chosen secure-storage capability bridge, or migrate wallet/Nostr secret creation/export flows to explicit `AppUpdate` side-effect variants with rev fields.
 - If keeping `SecretStore`, make persistence failures visible in Rust state/toasts where user recovery is possible.
 
-### 6. iOS AppManager Has No Testable Core Protocol
+### 5. iOS AppManager Has No Testable Core Protocol
 
 The bible recommends an `AppCore` Swift protocol that `FfiApp` conforms to, so previews and tests can run without a live Rust core.
 
@@ -103,7 +92,7 @@ Suggested direction:
 - Store `let rust: AppCore`.
 - Add Swift test or preview fakes once views are split out.
 
-### 7. Testing Is Rust-Only and Narrow
+### 6. Testing Is Rust-Only and Narrow
 
 The repo has focused Rust unit tests in `state.rs`, `activity.rs`, and `nostr_support.rs`. There are no checked-in iOS tests, Android tests, desktop tests, or integration tests that exercise the actor/update loop.
 
@@ -122,6 +111,7 @@ Suggested direction:
 - Rust owns navigation state through `Router`.
 - iOS reports platform pops back to Rust via `UpdateScreenStack`.
 - iOS Keychain is kept native, which is consistent with the bible's secure credential storage guidance.
+- iOS profile image fetching and `NSCache` storage are an intentional native cache exception. Rust owns profile metadata and image URLs, while Swift owns UIKit image decoding, coalesced URL loading, and memory-pressure-aware image caching for display.
 - QR scan, clipboard read, and photo pick are bounded capability requests where Rust opens/closes the request and native reports raw data back.
 - iOS SwiftUI source is split into root, screen, component, service, capability, and theme files rather than one large `ContentView.swift`.
 - Generated Swift UniFFI bindings and the xcframework are checked in.
