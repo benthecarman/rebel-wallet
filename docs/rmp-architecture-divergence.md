@@ -38,25 +38,7 @@ The bible describes desktop as a direct Rust consumer using iced, with no UniFFI
 
 This is also a scope gap, but it means the current workspace does not satisfy the bible's multiplatform target set.
 
-### 3. Core Actor Lives in `rust/src/lib.rs`
-
-The bible recommends a thin FFI boundary in `rust/src/lib.rs` and an actor implementation under `rust/src/core/`, with domain modules once the actor grows past roughly 1,000 lines.
-
-Current state:
-
-- `rust/src/lib.rs` contains `FfiApp`, callback interfaces, `AppCore`, action handling, async handling, and domain orchestration.
-- `rust/src/lib.rs` is about 1,356 lines.
-- There is no `rust/src/core/` module.
-
-This is the largest structural drift. The core is still single-actor and Rust-owned, but the FFI boundary and actor/domain implementation are not separated.
-
-Suggested direction:
-
-- Keep `FfiApp`, `AppReconciler`, `SecretStore`, exports, and `uniffi::setup_scaffolding!()` in `lib.rs`.
-- Move `AppCore` to `rust/src/core/mod.rs`.
-- Split domain helpers into `core/wallet.rs`, `core/receive.rs`, `core/send.rs`, `core/nostr.rs`, and `core/bootstrap.rs` as needed.
-
-### 4. Native View Derivation Contains Some Cross-Platform Policy
+### 3. Native View Derivation Contains Some Cross-Platform Policy
 
 The bible allows thin native `ViewState` derivation only when it is mechanical. It says filtering, sorting, validation, formatting, and business rules should live in Rust and be exposed as state fields.
 
@@ -78,7 +60,7 @@ Some of this is harmless local UI state, but the more reusable policy should mov
 
 The code is already doing this well in several places: balances, fiat displays, send destination kind, send error text, send `can_submit`, receive status display, and activity display fields are Rust-derived.
 
-### 5. Image Networking and Cache Are Native-Owned
+### 4. Image Networking and Cache Are Native-Owned
 
 `ProfileImageLoader` in `ios/Sources/Services/ProfileImageLoader.swift` owns URL fetching, HTTP status handling, in-flight request coalescing, and `NSCache` storage for profile images.
 
@@ -89,7 +71,7 @@ Suggested direction:
 - If profile image behavior must match across platforms, move fetch/cache policy to Rust and expose either cached file paths/data or a capability/request contract.
 - If this remains iOS-only for pragmatic reasons, document it as an intentional native cache exception.
 
-### 6. Secrets Are Persisted Through a Native Callback, Not Side-Effect Updates
+### 5. Secrets Are Persisted Through a Native Callback, Not Side-Effect Updates
 
 The bible's example pattern uses dedicated secret-bearing `AppUpdate` variants for values that native must persist, and the native side applies those side effects before stale-rev guards.
 
@@ -105,7 +87,7 @@ Suggested direction:
 - Either document `SecretStore` as the project's chosen secure-storage capability bridge, or migrate wallet/Nostr secret creation/export flows to explicit `AppUpdate` side-effect variants with rev fields.
 - If keeping `SecretStore`, make persistence failures visible in Rust state/toasts where user recovery is possible.
 
-### 7. iOS AppManager Has No Testable Core Protocol
+### 6. iOS AppManager Has No Testable Core Protocol
 
 The bible recommends an `AppCore` Swift protocol that `FfiApp` conforms to, so previews and tests can run without a live Rust core.
 
@@ -121,7 +103,7 @@ Suggested direction:
 - Store `let rust: AppCore`.
 - Add Swift test or preview fakes once views are split out.
 
-### 8. Release Profile Hardening Is Missing
+### 7. Release Profile Hardening Is Missing
 
 The bible recommends release profile settings for mobile binary size:
 
@@ -136,7 +118,7 @@ Suggested direction:
 
 - Add a workspace-level `[profile.release]` once release build/debugging tradeoffs are acceptable.
 
-### 9. Testing Is Rust-Only and Narrow
+### 8. Testing Is Rust-Only and Narrow
 
 The repo has focused Rust unit tests in `state.rs`, `activity.rs`, and `nostr_support.rs`. There are no checked-in iOS tests, Android tests, desktop tests, or integration tests that exercise the actor/update loop.
 
@@ -149,6 +131,7 @@ Suggested direction:
 ## Non-Divergences Worth Preserving
 
 - `FfiApp::dispatch()` is fire-and-forget.
+- `rust/src/lib.rs` is a thin UniFFI boundary, with the actor implementation moved under `rust/src/core/`.
 - Updates are full-state snapshots.
 - `AppState.rev` is monotonic and the iOS bridge uses a stale-rev guard.
 - Rust owns navigation state through `Router`.
