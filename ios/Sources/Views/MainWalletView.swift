@@ -2,29 +2,79 @@ import SwiftUI
 
 struct MainWalletView: View {
     @Bindable var manager: AppManager
+    @State private var displayedPanel: WalletPanel = .tab(.home)
+    @State private var panelMovesForward = true
+
+    private var selectedTab: MainTab {
+        manager.state.router.selectedTab
+    }
+
+    private var panelTransition: AnyTransition {
+        return .asymmetric(
+            insertion: .move(edge: panelMovesForward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: panelMovesForward ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                switch manager.state.router.selectedTab {
-                case .home:
-                    HomeView(manager: manager)
-                case .activity:
-                    ActivityView(manager: manager)
-                case .contacts:
-                    ContactsView(manager: manager)
-                case .settings:
-                    SettingsView(manager: manager)
+                switch displayedPanel {
+                case .tab(let tab):
+                    switch tab {
+                    case .home:
+                        HomeView(manager: manager, openProfile: openProfile)
+                    case .activity:
+                        ActivityView(manager: manager)
+                    case .contacts:
+                        ContactsView(manager: manager)
+                    case .settings:
+                        SettingsView(manager: manager)
+                    }
+                case .profile:
+                    ProfileView(manager: manager, close: closeProfile)
                 }
             }
-            MutinyFab(manager: manager)
+            .id(displayedPanel)
+            .transition(panelTransition)
+
+            if displayedPanel.showsFab {
+                MutinyFab(manager: manager)
+            }
         }
         .background(pageBackground.ignoresSafeArea())
+        .onAppear {
+            displayedPanel = .tab(selectedTab)
+        }
+        .onChange(of: selectedTab) { _, new in
+            let newPanel = WalletPanel.tab(new)
+            guard newPanel != displayedPanel else { return }
+            panelMovesForward = newPanel.order >= displayedPanel.order
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                displayedPanel = newPanel
+            }
+        }
+    }
+
+    private func openProfile() {
+        guard displayedPanel != .profile else { return }
+        panelMovesForward = false
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            displayedPanel = .profile
+        }
+    }
+
+    private func closeProfile() {
+        panelMovesForward = true
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            displayedPanel = .tab(selectedTab)
+        }
     }
 }
 
 struct HomeView: View {
     @Bindable var manager: AppManager
+    let openProfile: () -> Void
     @State private var selectedActivityId: String?
     @State private var pullDistance: CGFloat = 0
     @State private var refreshingActivity = false
@@ -45,7 +95,7 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            WalletHeader(manager: manager)
+            WalletHeader(manager: manager, openProfile: openProfile)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
 
@@ -171,12 +221,13 @@ private struct HomeActivityRefreshIndicator: View {
 
 struct WalletHeader: View {
     @Bindable var manager: AppManager
+    let openProfile: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 14) {
                 Button {
-                    manager.dispatch(.pushScreen(screen: .profile))
+                    openProfile()
                 } label: {
                     ProfileAvatar(url: manager.state.nostr.picture, size: 48)
                 }
@@ -185,7 +236,9 @@ struct WalletHeader: View {
                 MutinyBalanceButton(wallet: manager.state.wallet)
                     .frame(maxWidth: .infinity)
                 Button {
-                    manager.dispatch(.selectTab(tab: .settings))
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        manager.dispatch(.selectTab(tab: .settings))
+                    }
                 } label: {
                     MutinyCircle(size: 48) {
                         RebelMark(size: 28)
@@ -201,6 +254,44 @@ struct WalletHeader: View {
                 .foregroundStyle(mutedText)
                 .frame(maxWidth: .infinity)
             }
+        }
+    }
+}
+
+private extension MainTab {
+    var order: Int {
+        switch self {
+        case .home:
+            return 0
+        case .activity:
+            return 1
+        case .contacts:
+            return 2
+        case .settings:
+            return 3
+        }
+    }
+}
+
+private enum WalletPanel: Equatable, Hashable {
+    case profile
+    case tab(MainTab)
+
+    var order: Int {
+        switch self {
+        case .profile:
+            return -1
+        case .tab(let tab):
+            return tab.order
+        }
+    }
+
+    var showsFab: Bool {
+        switch self {
+        case .profile:
+            return false
+        case .tab:
+            return true
         }
     }
 }

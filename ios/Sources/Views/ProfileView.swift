@@ -3,6 +3,7 @@ import UIKit
 
 struct ProfileView: View {
     @Bindable var manager: AppManager
+    var close: (() -> Void)? = nil
     @State private var mode: ProfileMode = .summary
 
     var body: some View {
@@ -24,6 +25,16 @@ struct ProfileView: View {
             .padding(16)
         }
         .navigationTitle(mode.title)
+        .toolbar {
+            if let close {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: close) {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .tint(mutedText)
+                }
+            }
+        }
         .background(pageBackground)
         .foregroundStyle(primaryText)
     }
