@@ -1,5 +1,3 @@
-#[cfg(test)]
-use nostr_sdk::prelude::Url;
 use serde::{Deserialize, Serialize};
 
 use crate::{NostrState, PriceCurrency, WalletNetwork, WalletState};
@@ -15,9 +13,7 @@ pub(crate) struct PersistedAppData {
     pub(crate) servers: ServerConfig,
     #[serde(default = "default_price_currency")]
     pub(crate) price_currency: PersistedPriceCurrency,
-    #[serde(default)]
-    pub(crate) lightning_address: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub(crate) lightning_address_ark_address: Option<String>,
 }
 
@@ -36,8 +32,6 @@ pub(crate) struct ServerConfig {
     #[serde(skip)]
     pub(crate) server_access_token: Option<String>,
     pub(crate) esplora_address: String,
-    #[serde(default = "default_lnurl_server_address")]
-    pub(crate) lnurl_server_address: String,
 }
 
 impl ServerConfig {
@@ -47,7 +41,6 @@ impl ServerConfig {
             server_address: network.server_address().to_string(),
             server_access_token: network.server_access_token().map(str::to_string),
             esplora_address: network.esplora_address().to_string(),
-            lnurl_server_address: network.lnurl_server_address().to_string(),
         }
     }
 
@@ -57,26 +50,12 @@ impl ServerConfig {
             server_address: wallet.server_address.clone(),
             server_access_token: wallet.network.server_access_token().map(str::to_string),
             esplora_address: wallet.esplora_address.clone(),
-            lnurl_server_address: wallet.lnurl_server_address.clone(),
         }
-    }
-}
-
-#[cfg(test)]
-fn validate_server_url(label: &str, raw: &str) -> Result<(), String> {
-    let parsed = Url::parse(raw).map_err(|_| format!("{label} must be a valid URL."))?;
-    match parsed.scheme() {
-        "http" | "https" => Ok(()),
-        _ => Err(format!("{label} must use http or https.")),
     }
 }
 
 fn default_server_config() -> ServerConfig {
     ServerConfig::for_network(WalletNetwork::Signet)
-}
-
-fn default_lnurl_server_address() -> String {
-    WalletNetwork::Signet.lnurl_server_address().to_string()
 }
 
 fn default_network() -> WalletNetwork {
@@ -121,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_data_defaults_missing_lnurl_server_and_lightning_address() {
+    fn app_data_defaults_missing_arkzap_addresses() {
         let raw = r#"{
             "nostr": {
                 "npub": null,
@@ -144,19 +123,6 @@ mod tests {
         let data: PersistedAppData = serde_json::from_str(raw).unwrap();
 
         assert_eq!(data.network, WalletNetwork::Signet);
-        assert_eq!(
-            data.servers.lnurl_server_address,
-            WalletNetwork::Signet.lnurl_server_address()
-        );
-        assert_eq!(data.lightning_address, None);
         assert_eq!(data.lightning_address_ark_address, None);
-    }
-
-    #[test]
-    fn validates_http_server_urls() {
-        assert!(validate_server_url("LNURL server", "https://example.com").is_ok());
-        assert!(validate_server_url("LNURL server", "http://example.com").is_ok());
-        assert!(validate_server_url("LNURL server", "ftp://example.com").is_err());
-        assert!(validate_server_url("LNURL server", "not a url").is_err());
     }
 }

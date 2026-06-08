@@ -62,11 +62,6 @@ pub enum AppAction {
     SetSendMemo {
         memo: String,
     },
-    SetLightningAddressName {
-        name: String,
-    },
-    RegisterLightningAddress,
-    UseLightningAddressForNostr,
     PayDestination,
     PayLightningInvoice {
         invoice: String,

@@ -2,8 +2,7 @@ use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    MAINNET_ESPLORA, MAINNET_LNURL_SERVER, MAINNET_SERVER, MAINNET_SERVER_ACCESS_TOKEN,
-    SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER,
+    MAINNET_ESPLORA, MAINNET_SERVER, MAINNET_SERVER_ACCESS_TOKEN, SIGNET_ESPLORA, SIGNET_SERVER,
 };
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -52,7 +51,6 @@ pub struct BusyState {
     pub publishing_nostr: bool,
     pub maintaining_vtxos: bool,
     pub refreshing_contacts: bool,
-    pub registering_lightning_address: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
@@ -167,13 +165,6 @@ impl WalletNetwork {
             Self::Signet => SIGNET_ESPLORA,
         }
     }
-
-    pub(crate) fn lnurl_server_address(&self) -> &'static str {
-        match self {
-            Self::Mainnet => MAINNET_LNURL_SERVER,
-            Self::Signet => SIGNET_LNURL_SERVER,
-        }
-    }
 }
 
 impl PriceCurrency {
@@ -225,10 +216,8 @@ pub struct WalletState {
     pub network_name: String,
     pub default_server_address: String,
     pub default_esplora_address: String,
-    pub default_lnurl_server_address: String,
     pub server_address: String,
     pub esplora_address: String,
-    pub lnurl_server_address: String,
     pub price_currency: PriceCurrency,
     pub price_currency_code: String,
     pub price_currency_name: String,
@@ -250,20 +239,8 @@ pub struct WalletState {
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct LightningAddressState {
-    pub draft_name: String,
     pub address: Option<String>,
     pub backing_ark_address: Option<String>,
-    pub phase: LightningAddressPhase,
-    pub error_text: Option<String>,
-    pub can_register: bool,
-    pub can_use_for_nostr: bool,
-}
-
-#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
-pub enum LightningAddressPhase {
-    Idle,
-    Registering,
-    Registered,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -408,12 +385,8 @@ impl AppState {
                 network_name: WalletNetwork::Signet.display_name().to_string(),
                 default_server_address: WalletNetwork::Signet.server_address().to_string(),
                 default_esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
-                default_lnurl_server_address: WalletNetwork::Signet
-                    .lnurl_server_address()
-                    .to_string(),
                 server_address: WalletNetwork::Signet.server_address().to_string(),
                 esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
-                lnurl_server_address: WalletNetwork::Signet.lnurl_server_address().to_string(),
                 price_currency: PriceCurrency::BTC,
                 price_currency_code: PriceCurrency::BTC.code().to_string(),
                 price_currency_name: PriceCurrency::BTC.display_name().to_string(),
@@ -463,13 +436,8 @@ impl AppState {
                 error_text: None,
             },
             lightning_address: LightningAddressState {
-                draft_name: String::new(),
                 address: None,
                 backing_ark_address: None,
-                phase: LightningAddressPhase::Idle,
-                error_text: None,
-                can_register: false,
-                can_use_for_nostr: false,
             },
             nostr: NostrState {
                 npub: None,
@@ -497,8 +465,6 @@ impl AppState {
         self.wallet.network_name = self.wallet.network.display_name().to_string();
         self.wallet.default_server_address = self.wallet.network.server_address().to_string();
         self.wallet.default_esplora_address = self.wallet.network.esplora_address().to_string();
-        self.wallet.default_lnurl_server_address =
-            self.wallet.network.lnurl_server_address().to_string();
         self.supported_price_currencies = supported_price_currencies();
         self.wallet.price_currency_code = self.wallet.price_currency.code().to_string();
         self.wallet.price_currency_name = self.wallet.price_currency.display_name().to_string();
@@ -572,20 +538,12 @@ impl AppState {
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);
 
-        self.lightning_address.can_register = self.lightning_address.phase
-            != LightningAddressPhase::Registering
-            && self.lightning_address.address.is_none()
-            && lightning_address_name_error(&self.lightning_address.draft_name).is_none();
-        self.lightning_address.can_use_for_nostr = self
+        self.lightning_address.address = self
             .lightning_address
-            .address
+            .backing_ark_address
             .as_ref()
-            .map(|address| {
-                !address.trim().is_empty()
-                    && self.nostr.lud16.trim() != address.trim()
-                    && self.nostr.npub.is_some()
-            })
-            .unwrap_or(false);
+            .filter(|address| !address.trim().is_empty())
+            .map(|address| arkzap_lightning_address(address));
     }
 
     pub(crate) fn reset_receive_draft(&mut self) {
@@ -601,25 +559,14 @@ impl AppState {
     }
 }
 
-pub(crate) fn normalize_lightning_address_name(name: &str) -> String {
-    name.trim().to_ascii_lowercase()
-}
-
-pub(crate) fn lightning_address_name_error(name: &str) -> Option<String> {
-    let name = normalize_lightning_address_name(name);
-    if name.is_empty() {
-        return Some("Enter a Lightning address name.".to_string());
-    }
-    if name.starts_with('.') || name.ends_with('.') {
-        return Some("Name cannot start or end with a dot.".to_string());
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
-    {
-        return Some("Use lowercase letters, numbers, dots, underscores, or hyphens.".to_string());
-    }
-    None
+pub(crate) fn arkzap_lightning_address(ark_address: &str) -> String {
+    let ark_address = ark_address.trim();
+    let domain = if ark_address.starts_with("tark") {
+        "signet.arkzap.me"
+    } else {
+        "arkzap.me"
+    };
+    format!("{ark_address}@{domain}")
 }
 
 fn supported_price_currencies() -> Vec<CurrencyOption> {
@@ -1206,30 +1153,24 @@ mod tests {
     }
 
     #[test]
-    fn validates_lightning_address_names() {
-        assert_eq!(normalize_lightning_address_name(" Alice_1 "), "alice_1");
-        assert_eq!(lightning_address_name_error("alice-1"), None);
-        assert!(lightning_address_name_error("").is_some());
-        assert!(lightning_address_name_error(".alice").is_some());
-        assert!(lightning_address_name_error("alice!").is_some());
-    }
-
-    #[test]
-    fn derives_lightning_address_controls() {
+    fn derives_arkzap_lightning_address() {
         let mut state = AppState::initial();
-        state.lightning_address.draft_name = "alice".to_string();
+        state.nostr.lud16 = "saved@example.com".to_string();
+        state.lightning_address.backing_ark_address = Some("tark1example".to_string());
         state.refresh_derived();
-        assert!(state.lightning_address.can_register);
-        assert!(!state.lightning_address.can_use_for_nostr);
+        assert_eq!(
+            state.lightning_address.address.as_deref(),
+            Some("tark1example@signet.arkzap.me")
+        );
+        assert_eq!(state.nostr.lud16, "saved@example.com");
 
-        state.lightning_address.address = Some("alice@example.com".to_string());
-        state.nostr.npub = Some("npub1".to_string());
+        state.wallet.network = WalletNetwork::Mainnet;
+        state.lightning_address.backing_ark_address = Some("ark1example".to_string());
         state.refresh_derived();
-        assert!(!state.lightning_address.can_register);
-        assert!(state.lightning_address.can_use_for_nostr);
-
-        state.nostr.lud16 = "alice@example.com".to_string();
-        state.refresh_derived();
-        assert!(!state.lightning_address.can_use_for_nostr);
+        assert_eq!(
+            state.lightning_address.address.as_deref(),
+            Some("ark1example@arkzap.me")
+        );
+        assert_eq!(state.nostr.lud16, "saved@example.com");
     }
 }

@@ -100,12 +100,15 @@ struct LightningAddressPanel: View {
     @Bindable var manager: AppManager
     @Environment(\.walletAccent) private var walletAccent
 
-    private var isRegistering: Bool {
-        manager.state.lightningAddress.phase == .registering
-    }
-
     private var claimedAddress: String? {
         manager.state.lightningAddress.address
+    }
+
+    private var domain: String {
+        claimedAddress?
+            .split(separator: "@")
+            .last
+            .map(String.init) ?? "arkzap.me"
     }
 
     var body: some View {
@@ -117,7 +120,7 @@ struct LightningAddressPanel: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Lightning Address")
                         .font(.headline)
-                    Text(manager.state.wallet.lnurlServerAddress)
+                    Text(domain)
                         .font(.caption)
                         .foregroundStyle(mutedText)
                         .lineLimit(1)
@@ -126,7 +129,7 @@ struct LightningAddressPanel: View {
             }
 
             if let claimedAddress {
-                Text(claimedAddress)
+                Text(truncateLightningAddress(claimedAddress))
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .padding(10)
@@ -148,47 +151,13 @@ struct LightningAddressPanel: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 }
-
-                Button {
-                    manager.dispatch(.useLightningAddressForNostr)
-                } label: {
-                    Label("Use in Nostr profile", systemImage: "person.badge.key")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
-                .disabled(!manager.state.lightningAddress.canUseForNostr)
             } else {
-                TextField("Name", text: Binding(
-                    get: { manager.state.lightningAddress.draftName },
-                    set: { manager.dispatch(.setLightningAddressName(name: $0)) }
-                ))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
-                .profileField()
-
-                Button {
-                    manager.dispatch(.registerLightningAddress)
-                } label: {
-                    HStack(spacing: 8) {
-                        if isRegistering {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "checkmark.seal.fill")
-                        }
-                        Text(isRegistering ? "Claiming..." : "Claim address")
-                    }
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Preparing Arkzap address")
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
                 }
-                .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
-                .disabled(!manager.state.lightningAddress.canRegister)
-            }
-
-            if let errorText = manager.state.lightningAddress.errorText {
-                Text(errorText)
-                    .font(.caption)
-                    .foregroundStyle(walletAccent)
             }
         }
         .padding(14)
@@ -197,13 +166,20 @@ struct LightningAddressPanel: View {
     }
 }
 
+private func truncateLightningAddress(_ value: String) -> String {
+    let maxLength = 34
+    guard value.count > maxLength else { return value }
+    let prefixCount = 14
+    let suffixCount = maxLength - prefixCount - 3
+    return "\(value.prefix(prefixCount))...\(value.suffix(suffixCount))"
+}
+
 struct EditProfilePanel: View {
     @Bindable var manager: AppManager
     let done: () -> Void
     @State private var name = ""
     @State private var about = ""
     @State private var picture = ""
-    @State private var lud16 = ""
     @State private var nip05 = ""
     @Environment(\.walletAccent) private var walletAccent
 
@@ -238,17 +214,13 @@ struct EditProfilePanel: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .profileField()
-                TextField("Lightning address", text: $lud16)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .profileField()
                 TextField("NIP-05", text: $nip05)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .profileField()
 
                 Button {
-                    manager.dispatch(.editNostrProfile(name: name, about: about, picture: picture, lud16: lud16, nip05: nip05))
+                    manager.dispatch(.editNostrProfile(name: name, about: about, picture: picture, lud16: manager.state.nostr.lud16, nip05: nip05))
                     manager.dispatch(.publishNostrProfile)
                     done()
                 } label: {
@@ -265,7 +237,6 @@ struct EditProfilePanel: View {
             name = manager.state.nostr.name
             about = manager.state.nostr.about
             picture = manager.state.nostr.picture
-            lud16 = manager.state.nostr.lud16
             nip05 = manager.state.nostr.nip05
         }
         .onChange(of: manager.state.nostr.picture) { _, newValue in

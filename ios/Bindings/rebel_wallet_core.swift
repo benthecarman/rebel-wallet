@@ -935,11 +935,10 @@ public struct BusyState: Equatable, Hashable {
     public var publishingNostr: Bool
     public var maintainingVtxos: Bool
     public var refreshingContacts: Bool
-    public var registeringLightningAddress: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(bootstrapping: Bool, openingWallet: Bool, syncingWallet: Bool, creatingInvoice: Bool, sendingPayment: Bool, uploadingProfilePicture: Bool, publishingNostr: Bool, maintainingVtxos: Bool, refreshingContacts: Bool, registeringLightningAddress: Bool) {
+    public init(bootstrapping: Bool, openingWallet: Bool, syncingWallet: Bool, creatingInvoice: Bool, sendingPayment: Bool, uploadingProfilePicture: Bool, publishingNostr: Bool, maintainingVtxos: Bool, refreshingContacts: Bool) {
         self.bootstrapping = bootstrapping
         self.openingWallet = openingWallet
         self.syncingWallet = syncingWallet
@@ -949,7 +948,6 @@ public struct BusyState: Equatable, Hashable {
         self.publishingNostr = publishingNostr
         self.maintainingVtxos = maintainingVtxos
         self.refreshingContacts = refreshingContacts
-        self.registeringLightningAddress = registeringLightningAddress
     }
 
     
@@ -976,8 +974,7 @@ public struct FfiConverterTypeBusyState: FfiConverterRustBuffer {
                 uploadingProfilePicture: FfiConverterBool.read(from: &buf), 
                 publishingNostr: FfiConverterBool.read(from: &buf), 
                 maintainingVtxos: FfiConverterBool.read(from: &buf), 
-                refreshingContacts: FfiConverterBool.read(from: &buf), 
-                registeringLightningAddress: FfiConverterBool.read(from: &buf)
+                refreshingContacts: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -991,7 +988,6 @@ public struct FfiConverterTypeBusyState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.publishingNostr, into: &buf)
         FfiConverterBool.write(value.maintainingVtxos, into: &buf)
         FfiConverterBool.write(value.refreshingContacts, into: &buf)
-        FfiConverterBool.write(value.registeringLightningAddress, into: &buf)
     }
 }
 
@@ -1202,24 +1198,14 @@ public func FfiConverterTypeCurrencyOption_lower(_ value: CurrencyOption) -> Rus
 
 
 public struct LightningAddressState: Equatable, Hashable {
-    public var draftName: String
     public var address: String?
     public var backingArkAddress: String?
-    public var phase: LightningAddressPhase
-    public var errorText: String?
-    public var canRegister: Bool
-    public var canUseForNostr: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(draftName: String, address: String?, backingArkAddress: String?, phase: LightningAddressPhase, errorText: String?, canRegister: Bool, canUseForNostr: Bool) {
-        self.draftName = draftName
+    public init(address: String?, backingArkAddress: String?) {
         self.address = address
         self.backingArkAddress = backingArkAddress
-        self.phase = phase
-        self.errorText = errorText
-        self.canRegister = canRegister
-        self.canUseForNostr = canUseForNostr
     }
 
     
@@ -1238,24 +1224,14 @@ public struct FfiConverterTypeLightningAddressState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LightningAddressState {
         return
             try LightningAddressState(
-                draftName: FfiConverterString.read(from: &buf), 
                 address: FfiConverterOptionString.read(from: &buf), 
-                backingArkAddress: FfiConverterOptionString.read(from: &buf), 
-                phase: FfiConverterTypeLightningAddressPhase.read(from: &buf), 
-                errorText: FfiConverterOptionString.read(from: &buf), 
-                canRegister: FfiConverterBool.read(from: &buf), 
-                canUseForNostr: FfiConverterBool.read(from: &buf)
+                backingArkAddress: FfiConverterOptionString.read(from: &buf)
         )
     }
 
     public static func write(_ value: LightningAddressState, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.draftName, into: &buf)
         FfiConverterOptionString.write(value.address, into: &buf)
         FfiConverterOptionString.write(value.backingArkAddress, into: &buf)
-        FfiConverterTypeLightningAddressPhase.write(value.phase, into: &buf)
-        FfiConverterOptionString.write(value.errorText, into: &buf)
-        FfiConverterBool.write(value.canRegister, into: &buf)
-        FfiConverterBool.write(value.canUseForNostr, into: &buf)
     }
 }
 
@@ -1732,10 +1708,8 @@ public struct WalletState: Equatable, Hashable {
     public var networkName: String
     public var defaultServerAddress: String
     public var defaultEsploraAddress: String
-    public var defaultLnurlServerAddress: String
     public var serverAddress: String
     public var esploraAddress: String
-    public var lnurlServerAddress: String
     public var priceCurrency: PriceCurrency
     public var priceCurrencyCode: String
     public var priceCurrencyName: String
@@ -1756,15 +1730,13 @@ public struct WalletState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, defaultLnurlServerAddress: String, serverAddress: String, esploraAddress: String, lnurlServerAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, pendingRefreshSat: UInt64, pendingRefreshDisplay: String, pendingRefreshFiatDisplay: String?, lastSync: String?) {
+    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, pendingRefreshSat: UInt64, pendingRefreshDisplay: String, pendingRefreshFiatDisplay: String?, lastSync: String?) {
         self.network = network
         self.networkName = networkName
         self.defaultServerAddress = defaultServerAddress
         self.defaultEsploraAddress = defaultEsploraAddress
-        self.defaultLnurlServerAddress = defaultLnurlServerAddress
         self.serverAddress = serverAddress
         self.esploraAddress = esploraAddress
-        self.lnurlServerAddress = lnurlServerAddress
         self.priceCurrency = priceCurrency
         self.priceCurrencyCode = priceCurrencyCode
         self.priceCurrencyName = priceCurrencyName
@@ -1804,10 +1776,8 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
                 networkName: FfiConverterString.read(from: &buf), 
                 defaultServerAddress: FfiConverterString.read(from: &buf), 
                 defaultEsploraAddress: FfiConverterString.read(from: &buf), 
-                defaultLnurlServerAddress: FfiConverterString.read(from: &buf), 
                 serverAddress: FfiConverterString.read(from: &buf), 
                 esploraAddress: FfiConverterString.read(from: &buf), 
-                lnurlServerAddress: FfiConverterString.read(from: &buf), 
                 priceCurrency: FfiConverterTypePriceCurrency.read(from: &buf), 
                 priceCurrencyCode: FfiConverterString.read(from: &buf), 
                 priceCurrencyName: FfiConverterString.read(from: &buf), 
@@ -1833,10 +1803,8 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
         FfiConverterString.write(value.networkName, into: &buf)
         FfiConverterString.write(value.defaultServerAddress, into: &buf)
         FfiConverterString.write(value.defaultEsploraAddress, into: &buf)
-        FfiConverterString.write(value.defaultLnurlServerAddress, into: &buf)
         FfiConverterString.write(value.serverAddress, into: &buf)
         FfiConverterString.write(value.esploraAddress, into: &buf)
-        FfiConverterString.write(value.lnurlServerAddress, into: &buf)
         FfiConverterTypePriceCurrency.write(value.priceCurrency, into: &buf)
         FfiConverterString.write(value.priceCurrencyCode, into: &buf)
         FfiConverterString.write(value.priceCurrencyName, into: &buf)
@@ -1988,10 +1956,6 @@ public enum AppAction: Equatable, Hashable {
     )
     case setSendMemo(memo: String
     )
-    case setLightningAddressName(name: String
-    )
-    case registerLightningAddress
-    case useLightningAddressForNostr
     case payDestination
     case payLightningInvoice(invoice: String, amountSat: UInt64?
     )
@@ -2132,91 +2096,84 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         case 28: return .setSendMemo(memo: try FfiConverterString.read(from: &buf)
         )
         
-        case 29: return .setLightningAddressName(name: try FfiConverterString.read(from: &buf)
+        case 29: return .payDestination
+        
+        case 30: return .payLightningInvoice(invoice: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
-        case 30: return .registerLightningAddress
-        
-        case 31: return .useLightningAddressForNostr
-        
-        case 32: return .payDestination
-        
-        case 33: return .payLightningInvoice(invoice: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterOptionUInt64.read(from: &buf)
+        case 31: return .payArkAddress(address: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 34: return .payArkAddress(address: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterUInt64.read(from: &buf)
+        case 32: return .dismissPaymentSuccess
+        
+        case 33: return .resetSendDraft
+        
+        case 34: return .requestQrScan
+        
+        case 35: return .requestClipboardRead
+        
+        case 36: return .requestPhotoPick
+        
+        case 37: return .completeQrScan(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 35: return .dismissPaymentSuccess
-        
-        case 36: return .resetSendDraft
-        
-        case 37: return .requestQrScan
-        
-        case 38: return .requestClipboardRead
-        
-        case 39: return .requestPhotoPick
-        
-        case 40: return .completeQrScan(value: try FfiConverterOptionString.read(from: &buf)
+        case 38: return .completeClipboardRead(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 41: return .completeClipboardRead(value: try FfiConverterOptionString.read(from: &buf)
+        case 39: return .completePhotoPick(imageBase64: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 42: return .completePhotoPick(imageBase64: try FfiConverterOptionString.read(from: &buf)
+        case 40: return .cancelCapabilityRequest
+        
+        case 41: return .generateNostrKey
+        
+        case 42: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
         )
         
-        case 43: return .cancelCapabilityRequest
+        case 43: return .exportNostrSecret
         
-        case 44: return .generateNostrKey
+        case 44: return .clearNostrKey
         
-        case 45: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
+        case 45: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
         )
         
-        case 46: return .exportNostrSecret
-        
-        case 47: return .clearNostrKey
-        
-        case 48: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
+        case 46: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
         )
         
-        case 49: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
+        case 47: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
         )
         
-        case 50: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 48: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
         )
         
-        case 51: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 49: return .followContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 52: return .followContact(contactId: try FfiConverterString.read(from: &buf)
+        case 50: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 53: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
+        case 51: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 54: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
+        case 52: return .publishNostrProfile
+        
+        case 53: return .refreshNostrProfile
+        
+        case 54: return .deleteNostrProfile
+        
+        case 55: return .publishContactList
+        
+        case 56: return .refreshContactList
+        
+        case 57: return .clearNostrProfileCache
+        
+        case 58: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 55: return .publishNostrProfile
-        
-        case 56: return .refreshNostrProfile
-        
-        case 57: return .deleteNostrProfile
-        
-        case 58: return .publishContactList
-        
-        case 59: return .refreshContactList
-        
-        case 60: return .clearNostrProfileCache
-        
-        case 61: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
+        case 59: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
         )
         
-        case 62: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 63: return .clearToast
+        case 60: return .clearToast
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2354,93 +2311,80 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             FfiConverterString.write(memo, into: &buf)
             
         
-        case let .setLightningAddressName(name):
-            writeInt(&buf, Int32(29))
-            FfiConverterString.write(name, into: &buf)
-            
-        
-        case .registerLightningAddress:
-            writeInt(&buf, Int32(30))
-        
-        
-        case .useLightningAddressForNostr:
-            writeInt(&buf, Int32(31))
-        
-        
         case .payDestination:
-            writeInt(&buf, Int32(32))
+            writeInt(&buf, Int32(29))
         
         
         case let .payLightningInvoice(invoice,amountSat):
-            writeInt(&buf, Int32(33))
+            writeInt(&buf, Int32(30))
             FfiConverterString.write(invoice, into: &buf)
             FfiConverterOptionUInt64.write(amountSat, into: &buf)
             
         
         case let .payArkAddress(address,amountSat):
-            writeInt(&buf, Int32(34))
+            writeInt(&buf, Int32(31))
             FfiConverterString.write(address, into: &buf)
             FfiConverterUInt64.write(amountSat, into: &buf)
             
         
         case .dismissPaymentSuccess:
-            writeInt(&buf, Int32(35))
+            writeInt(&buf, Int32(32))
         
         
         case .resetSendDraft:
-            writeInt(&buf, Int32(36))
+            writeInt(&buf, Int32(33))
         
         
         case .requestQrScan:
-            writeInt(&buf, Int32(37))
+            writeInt(&buf, Int32(34))
         
         
         case .requestClipboardRead:
-            writeInt(&buf, Int32(38))
+            writeInt(&buf, Int32(35))
         
         
         case .requestPhotoPick:
-            writeInt(&buf, Int32(39))
+            writeInt(&buf, Int32(36))
         
         
         case let .completeQrScan(value):
-            writeInt(&buf, Int32(40))
+            writeInt(&buf, Int32(37))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .completeClipboardRead(value):
-            writeInt(&buf, Int32(41))
+            writeInt(&buf, Int32(38))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .completePhotoPick(imageBase64):
-            writeInt(&buf, Int32(42))
+            writeInt(&buf, Int32(39))
             FfiConverterOptionString.write(imageBase64, into: &buf)
             
         
         case .cancelCapabilityRequest:
-            writeInt(&buf, Int32(43))
+            writeInt(&buf, Int32(40))
         
         
         case .generateNostrKey:
-            writeInt(&buf, Int32(44))
+            writeInt(&buf, Int32(41))
         
         
         case let .importNostrSecret(nsecOrHex):
-            writeInt(&buf, Int32(45))
+            writeInt(&buf, Int32(42))
             FfiConverterString.write(nsecOrHex, into: &buf)
             
         
         case .exportNostrSecret:
-            writeInt(&buf, Int32(46))
+            writeInt(&buf, Int32(43))
         
         
         case .clearNostrKey:
-            writeInt(&buf, Int32(47))
+            writeInt(&buf, Int32(44))
         
         
         case let .editNostrProfile(name,about,picture,lud16,nip05):
-            writeInt(&buf, Int32(48))
+            writeInt(&buf, Int32(45))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(about, into: &buf)
             FfiConverterString.write(picture, into: &buf)
@@ -2449,12 +2393,12 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .uploadNostrProfilePicture(imageBase64):
-            writeInt(&buf, Int32(49))
+            writeInt(&buf, Int32(46))
             FfiConverterString.write(imageBase64, into: &buf)
             
         
         case let .addContact(npub,name,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(50))
+            writeInt(&buf, Int32(47))
             FfiConverterString.write(npub, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(lightningAddress, into: &buf)
@@ -2463,7 +2407,7 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .editContact(contactId,name,npub,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(51))
+            writeInt(&buf, Int32(48))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(npub, into: &buf)
@@ -2473,57 +2417,57 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .followContact(contactId):
-            writeInt(&buf, Int32(52))
+            writeInt(&buf, Int32(49))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .unfollowContact(contactId):
-            writeInt(&buf, Int32(53))
+            writeInt(&buf, Int32(50))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .deleteContact(contactId):
-            writeInt(&buf, Int32(54))
+            writeInt(&buf, Int32(51))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case .publishNostrProfile:
-            writeInt(&buf, Int32(55))
+            writeInt(&buf, Int32(52))
         
         
         case .refreshNostrProfile:
-            writeInt(&buf, Int32(56))
+            writeInt(&buf, Int32(53))
         
         
         case .deleteNostrProfile:
-            writeInt(&buf, Int32(57))
+            writeInt(&buf, Int32(54))
         
         
         case .publishContactList:
-            writeInt(&buf, Int32(58))
+            writeInt(&buf, Int32(55))
         
         
         case .refreshContactList:
-            writeInt(&buf, Int32(59))
+            writeInt(&buf, Int32(56))
         
         
         case .clearNostrProfileCache:
-            writeInt(&buf, Int32(60))
+            writeInt(&buf, Int32(57))
         
         
         case let .loadDirectMessages(contactId):
-            writeInt(&buf, Int32(61))
+            writeInt(&buf, Int32(58))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .sendDirectMessage(contactId,message):
-            writeInt(&buf, Int32(62))
+            writeInt(&buf, Int32(59))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(message, into: &buf)
             
         
         case .clearToast:
-            writeInt(&buf, Int32(63))
+            writeInt(&buf, Int32(60))
         
         }
     }
@@ -2679,80 +2623,6 @@ public func FfiConverterTypeCapabilityRequestKind_lift(_ buf: RustBuffer) throws
 #endif
 public func FfiConverterTypeCapabilityRequestKind_lower(_ value: CapabilityRequestKind) -> RustBuffer {
     return FfiConverterTypeCapabilityRequestKind.lower(value)
-}
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-
-public enum LightningAddressPhase: Equatable, Hashable {
-    
-    case idle
-    case registering
-    case registered
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension LightningAddressPhase: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeLightningAddressPhase: FfiConverterRustBuffer {
-    typealias SwiftType = LightningAddressPhase
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LightningAddressPhase {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .idle
-        
-        case 2: return .registering
-        
-        case 3: return .registered
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: LightningAddressPhase, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .idle:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .registering:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .registered:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLightningAddressPhase_lift(_ buf: RustBuffer) throws -> LightningAddressPhase {
-    return try FfiConverterTypeLightningAddressPhase.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeLightningAddressPhase_lower(_ value: LightningAddressPhase) -> RustBuffer {
-    return FfiConverterTypeLightningAddressPhase.lower(value)
 }
 
 

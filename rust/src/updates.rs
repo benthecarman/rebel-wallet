@@ -43,10 +43,7 @@ pub(crate) enum AsyncMsg {
     LightningReceiveClaimed {
         payment_hash: String,
     },
-    LightningAddressRegistered {
-        address: String,
-        ark_address: String,
-    },
+    LightningAddressReady(String),
     Paid(String),
     Seed(String),
     NostrProfileLoaded(NostrState),

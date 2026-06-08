@@ -12,7 +12,7 @@ use crate::persistence::ServerConfig;
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WalletOpenMode {
     Create,
-    Open,
+    OpenOrCreate,
     Restore,
     Replace,
 }
@@ -41,8 +41,7 @@ pub(crate) async fn open_bark_wallet(
         WalletOpenMode::Create | WalletOpenMode::Replace => {
             Wallet::create(mnemonic, network, config, db, lock_manager, false).await
         }
-        WalletOpenMode::Open => Wallet::open(mnemonic, db, config, lock_manager).await,
-        WalletOpenMode::Restore => {
+        WalletOpenMode::OpenOrCreate | WalletOpenMode::Restore => {
             if db.read_properties().await?.is_some() {
                 Wallet::open(mnemonic, db, config, lock_manager).await
             } else {

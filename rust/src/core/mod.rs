@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use bark::ark::lightning::PaymentHash;
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::Wallet;
@@ -16,7 +16,6 @@ use nostr_sdk::prelude::{
     nip04, Contact as NostrContact, ContactListBuilder, EventBuilder, EventBuilderTemplate, Filter,
     FinalizeEvent, JsonUtil, Keys, Kind, Metadata, PublicKey as NostrPublicKey, Tag, ToBech32,
 };
-use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
 use crate::activity::{activity_from_movement, is_user_visible_movement, truncate_middle};
@@ -40,24 +39,13 @@ use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
 use crate::{
-    AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind, Contact,
-    LightningAddressPhase, MainTab, NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase,
-    Screen, SecretStore, SendPhase, SetupState, WalletNetwork,
+    AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind, Contact, MainTab,
+    NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase, Screen, SecretStore, SendPhase,
+    SetupState, WalletNetwork,
 };
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
-
-#[derive(Serialize)]
-struct RegisterLightningAddressRequest {
-    name: String,
-    ark_address: String,
-}
-
-#[derive(Deserialize)]
-struct RegisterLightningAddressResponse {
-    name: String,
-}
 
 fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
     format!("{pubkey}:{remote_url}")
@@ -99,61 +87,6 @@ async fn wallet_synced_msg(
         maintenance_checked,
         activity,
     })
-}
-
-async fn register_lightning_address_request(
-    wallet: Wallet,
-    lnurl_server: &str,
-    name: &str,
-) -> anyhow::Result<(String, String)> {
-    let base = reqwest::Url::parse(lnurl_server).context("LNURL server is not a valid URL")?;
-    let domain = base
-        .host_str()
-        .ok_or_else(|| anyhow!("LNURL server must include a host"))?
-        .to_string();
-    let register_url = base
-        .join("/v1/register")
-        .context("LNURL registration URL is invalid")?;
-    let ark_address = wallet
-        .new_address()
-        .await
-        .context("failed to create Ark address")?
-        .to_string();
-    let request = RegisterLightningAddressRequest {
-        name: name.to_string(),
-        ark_address,
-    };
-    let response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .context("failed to build LNURL client")?
-        .post(register_url)
-        .json(&request)
-        .send()
-        .await
-        .context("failed to contact LNURL server")?;
-
-    if !response.status().is_success() {
-        let body = response.text().await.unwrap_or_default();
-        let reason = match body.trim() {
-            "NameTaken" => "That Lightning address name is already taken.".to_string(),
-            "InvalidArkAddress" => {
-                "The LNURL server rejected the generated Ark address.".to_string()
-            }
-            "ServerError" | "" => "The LNURL server returned an error.".to_string(),
-            other => other.to_string(),
-        };
-        return Err(anyhow!(reason));
-    }
-
-    let registered = response
-        .json::<RegisterLightningAddressResponse>()
-        .await
-        .context("failed to parse LNURL registration response")?;
-    Ok((
-        format!("{}@{}", registered.name, domain),
-        request.ark_address,
-    ))
 }
 
 pub(crate) fn spawn_actor(
@@ -302,14 +235,6 @@ impl AppCore {
             AppAction::SetSendDestination { destination } => self.set_send_destination(destination),
             AppAction::SetSendAmount { amount_sat } => self.state.send.amount_sat = amount_sat,
             AppAction::SetSendMemo { memo } => self.state.send.memo = memo,
-            AppAction::SetLightningAddressName { name } => {
-                self.state.lightning_address.draft_name =
-                    crate::state::normalize_lightning_address_name(&name);
-                self.state.lightning_address.error_text =
-                    crate::state::lightning_address_name_error(&name);
-            }
-            AppAction::RegisterLightningAddress => self.register_lightning_address(),
-            AppAction::UseLightningAddressForNostr => self.use_lightning_address_for_nostr(),
             AppAction::PayDestination => self.pay_destination(),
             AppAction::PayLightningInvoice {
                 invoice,
@@ -366,13 +291,12 @@ impl AppCore {
                 name,
                 about,
                 picture,
-                lud16,
+                lud16: _,
                 nip05,
             } => {
                 self.state.nostr.name = name;
                 self.state.nostr.about = about;
                 self.state.nostr.picture = picture;
-                self.state.nostr.lud16 = lud16;
                 self.state.nostr.nip05 = nip05;
                 self.state.toast = Some("Nostr profile saved locally.".to_string());
                 self.save_app_data();
@@ -483,6 +407,7 @@ impl AppCore {
                 let _ = self
                     .secrets
                     .set_secret(WALLET_SEED_KEY.to_string(), mnemonic);
+                self.ensure_lightning_address();
                 self.maintain_vtxos();
             }
             AsyncMsg::WalletSynced {
@@ -549,15 +474,9 @@ impl AppCore {
                 }
                 self.maintain_vtxos();
             }
-            AsyncMsg::LightningAddressRegistered {
-                address,
-                ark_address,
-            } => {
-                self.state.lightning_address.address = Some(address.clone());
-                self.state.lightning_address.backing_ark_address = Some(ark_address);
-                self.state.lightning_address.phase = LightningAddressPhase::Registered;
-                self.state.lightning_address.error_text = None;
-                self.state.toast = Some(format!("Lightning address claimed: {address}"));
+            AsyncMsg::LightningAddressReady(ark_address) => {
+                self.state.lightning_address.backing_ark_address = Some(ark_address.clone());
+                self.save_lightning_address_ark_address(&ark_address);
                 self.save_app_data();
             }
             AsyncMsg::Paid(result) => {
@@ -661,10 +580,6 @@ impl AppCore {
                 if self.state.send.phase == SendPhase::Sending {
                     self.state.send.phase = SendPhase::Editing;
                 }
-                if self.state.lightning_address.phase == LightningAddressPhase::Registering {
-                    self.state.lightning_address.phase = LightningAddressPhase::Idle;
-                    self.state.lightning_address.error_text = Some(message.clone());
-                }
                 if matches!(self.state.setup, SetupState::NeedsSetup) {
                     self.state.setup = SetupState::Error {
                         message: message.clone(),
@@ -696,9 +611,7 @@ impl AppCore {
                 self.state.busy.creating_invoice = false;
             }
             AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
-            AsyncMsg::LightningAddressRegistered { .. } => {
-                self.state.busy.registering_lightning_address = false;
-            }
+            AsyncMsg::LightningAddressReady(_) => {}
             AsyncMsg::NostrProfilePictureUploaded(_) => {
                 self.state.busy.uploading_profile_picture = false;
             }
@@ -740,7 +653,7 @@ impl AppCore {
         if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
             self.state.busy.bootstrapping = true;
             self.state.busy.opening_wallet = true;
-            self.open_wallet(mnemonic, WalletOpenMode::Open);
+            self.open_wallet(mnemonic, WalletOpenMode::OpenOrCreate);
         }
     }
 
@@ -767,29 +680,27 @@ impl AppCore {
         let server_config = ServerConfig::for_network(network.clone());
         let server_address = server_config.server_address;
         let esplora_address = server_config.esplora_address;
-        let lnurl_server_address = server_config.lnurl_server_address;
 
         let wallet_server_changed = self.state.wallet.server_address != server_address
             || self.state.wallet.esplora_address != esplora_address;
-        let changed = self.state.wallet.network != network
-            || wallet_server_changed
-            || self.state.wallet.lnurl_server_address != lnurl_server_address;
+        let changed = self.state.wallet.network != network || wallet_server_changed;
         self.state.wallet.network = network;
         self.state.wallet.server_address = server_address;
         self.state.wallet.esplora_address = esplora_address;
-        self.state.wallet.lnurl_server_address = lnurl_server_address;
+        self.state.lightning_address.backing_ark_address = None;
         self.save_app_data();
 
         if wallet_server_changed {
             if let Some(seed) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
                 self.wallet = None;
                 self.state.busy.opening_wallet = true;
-                self.open_wallet(seed, WalletOpenMode::Open);
+                self.open_wallet(seed, WalletOpenMode::OpenOrCreate);
                 self.state.toast = Some("Network changed. Reconnecting wallet.".to_string());
             } else {
                 self.state.toast = Some("Network changed.".to_string());
             }
         } else if changed {
+            self.ensure_lightning_address();
             self.state.toast = Some("Network changed.".to_string());
         } else {
             self.state.toast = Some("Network already selected.".to_string());
@@ -803,52 +714,51 @@ impl AppCore {
         self.refresh_price();
     }
 
-    fn register_lightning_address(&mut self) {
-        if self.state.lightning_address.address.is_some() {
-            self.state.lightning_address.error_text =
-                Some("Lightning address is already claimed.".to_string());
+    fn ensure_lightning_address(&mut self) {
+        if let Some(address) = self.load_lightning_address_ark_address() {
+            self.state.lightning_address.backing_ark_address = Some(address);
             return;
         }
-
-        let name = crate::state::normalize_lightning_address_name(
-            &self.state.lightning_address.draft_name,
-        );
-        if let Some(error) = crate::state::lightning_address_name_error(&name) {
-            self.state.lightning_address.error_text = Some(error);
+        if self
+            .state
+            .lightning_address
+            .backing_ark_address
+            .as_ref()
+            .is_some_and(|address| !address.trim().is_empty())
+        {
+            if let Some(address) = self.state.lightning_address.backing_ark_address.as_ref() {
+                self.save_lightning_address_ark_address(address);
+            }
             return;
         }
-
         let Some(wallet) = self.wallet.clone() else {
-            self.state.lightning_address.error_text = Some("Wallet is not ready yet.".to_string());
             return;
         };
-
-        let lnurl_server = self.state.wallet.lnurl_server_address.clone();
-        self.state.lightning_address.draft_name = name.clone();
-        self.state.lightning_address.phase = LightningAddressPhase::Registering;
-        self.state.lightning_address.error_text = None;
-        self.state.busy.registering_lightning_address = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
-            let msg = match register_lightning_address_request(wallet, &lnurl_server, &name).await {
-                Ok((address, ark_address)) => AsyncMsg::LightningAddressRegistered {
-                    address,
-                    ark_address,
-                },
-                Err(e) => AsyncMsg::Error(format!("Lightning address registration failed: {e:#}")),
+            let msg = match wallet.new_address().await {
+                Ok(address) => AsyncMsg::LightningAddressReady(address.to_string()),
+                Err(e) => AsyncMsg::Error(format!("Could not create Arkzap address: {e:#}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
         });
     }
 
-    fn use_lightning_address_for_nostr(&mut self) {
-        let Some(address) = self.state.lightning_address.address.clone() else {
-            self.state.toast = Some("Claim a Lightning address first.".to_string());
-            return;
-        };
-        self.state.nostr.lud16 = address;
-        self.state.toast = Some("Lightning address saved to Nostr profile locally.".to_string());
-        self.save_app_data();
+    fn load_lightning_address_ark_address(&self) -> Option<String> {
+        load_wallet_metadata_value(
+            &self.data_dir,
+            self.state.wallet.network,
+            "lightning_address_ark_address",
+        )
+    }
+
+    fn save_lightning_address_ark_address(&self, address: &str) {
+        let _ = save_wallet_metadata_value(
+            &self.data_dir,
+            self.state.wallet.network,
+            "lightning_address_ark_address",
+            address,
+        );
     }
 
     fn refresh_price(&self) {
@@ -1987,19 +1897,10 @@ impl AppCore {
                 let server_config = ServerConfig::for_network(self.state.wallet.network.clone());
                 self.state.wallet.server_address = server_config.server_address;
                 self.state.wallet.esplora_address = server_config.esplora_address;
-                self.state.wallet.lnurl_server_address = server_config.lnurl_server_address;
                 self.state.wallet.price_currency = data.price_currency.currency;
-                if let Some(address) = data.lightning_address {
-                    if !address.trim().is_empty() {
-                        self.state.lightning_address.address = Some(address);
-                        self.state.lightning_address.phase = LightningAddressPhase::Registered;
-                    }
-                }
-                if let Some(ark_address) = data.lightning_address_ark_address {
-                    if !ark_address.trim().is_empty() {
-                        self.state.lightning_address.backing_ark_address = Some(ark_address);
-                    }
-                }
+                self.state.lightning_address.backing_ark_address = data
+                    .lightning_address_ark_address
+                    .filter(|address| !address.trim().is_empty());
             }
             Err(e) => {
                 self.state.toast = Some(format!("Could not load local app data: {e}"));
@@ -2030,8 +1931,7 @@ impl AppCore {
             price_currency: PersistedPriceCurrency {
                 currency: self.state.wallet.price_currency.clone(),
             },
-            lightning_address: self.state.lightning_address.address.clone(),
-            lightning_address_ark_address: self.state.lightning_address.backing_ark_address.clone(),
+            lightning_address_ark_address: None,
         };
         if let Ok(raw) = serde_json::to_string_pretty(&data) {
             let _ = std::fs::create_dir_all(&self.data_dir);
@@ -2085,4 +1985,51 @@ fn sanitize_persisted_contact_pictures(
             .map(|entry| entry.picture_remote_url)
             .unwrap_or_default();
     }
+}
+
+fn load_wallet_metadata_value(
+    data_dir: &PathBuf,
+    network: WalletNetwork,
+    key: &str,
+) -> Option<String> {
+    let db_path = data_dir.join(network.db_file_name());
+    let conn = rusqlite::Connection::open(db_path).ok()?;
+    ensure_wallet_metadata_table(&conn).ok()?;
+    conn.query_row(
+        "SELECT value FROM rebel_wallet_metadata WHERE key = ?1",
+        [key],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .filter(|value| !value.trim().is_empty())
+}
+
+fn save_wallet_metadata_value(
+    data_dir: &PathBuf,
+    network: WalletNetwork,
+    key: &str,
+    value: &str,
+) -> rusqlite::Result<()> {
+    std::fs::create_dir_all(data_dir).ok();
+    let db_path = data_dir.join(network.db_file_name());
+    let conn = rusqlite::Connection::open(db_path)?;
+    ensure_wallet_metadata_table(&conn)?;
+    conn.execute(
+        "INSERT INTO rebel_wallet_metadata (key, value)
+         VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )?;
+    Ok(())
+}
+
+fn ensure_wallet_metadata_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS rebel_wallet_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
 }
