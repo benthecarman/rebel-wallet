@@ -16,6 +16,17 @@ if ! command -v cargo >/dev/null 2>&1; then
   source "$HOME/.cargo/env"
 fi
 
+if ! command -v protoc >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    brew install protobuf
+  else
+    echo "error: protoc is required but Homebrew is unavailable" >&2
+    exit 1
+  fi
+fi
+
+export PROTOC="$(command -v protoc)"
+
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
 DEV_DIR="$(xcode-select -p)"
