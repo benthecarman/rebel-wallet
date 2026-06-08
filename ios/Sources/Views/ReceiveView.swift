@@ -25,12 +25,6 @@ struct ReceiveView: View {
                 if showingResult {
                     HStack(alignment: .center) {
                         Spacer()
-                        Text("Checking")
-                            .font(.caption.bold())
-                            .foregroundStyle(primaryText)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(raisedSurface, in: Capsule())
                         Button("Edit") {
                             manager.dispatch(.editReceiveRequest)
                         }
