@@ -291,12 +291,13 @@ impl AppCore {
                 name,
                 about,
                 picture,
-                lud16: _,
+                lud16,
                 nip05,
             } => {
                 self.state.nostr.name = name;
                 self.state.nostr.about = about;
                 self.state.nostr.picture = picture;
+                self.state.nostr.lud16 = lud16;
                 self.state.nostr.nip05 = nip05;
                 self.state.toast = Some("Nostr profile saved locally.".to_string());
                 self.save_app_data();

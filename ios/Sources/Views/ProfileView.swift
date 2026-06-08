@@ -180,8 +180,13 @@ struct EditProfilePanel: View {
     @State private var name = ""
     @State private var about = ""
     @State private var picture = ""
+    @State private var lightningAddress = ""
     @State private var nip05 = ""
     @Environment(\.walletAccent) private var walletAccent
+
+    private var arkLightningAddress: String? {
+        manager.state.lightningAddress.address
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -214,13 +219,38 @@ struct EditProfilePanel: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .profileField()
+
+                HStack(spacing: 10) {
+                    TextField("Lightning Address", text: $lightningAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.emailAddress)
+                        .profileField()
+
+                    Button {
+                        if let arkLightningAddress {
+                            lightningAddress = arkLightningAddress
+                        }
+                    } label: {
+                        Label("Use Arkzap", systemImage: "bolt.badge.checkmark")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                            .foregroundStyle(primaryText)
+                            .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(arkLightningAddress == nil)
+                    .accessibilityLabel("Use Arkzap Lightning address")
+                }
+
                 TextField("NIP-05", text: $nip05)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .profileField()
 
                 Button {
-                    manager.dispatch(.editNostrProfile(name: name, about: about, picture: picture, lud16: manager.state.nostr.lud16, nip05: nip05))
+                    manager.dispatch(.editNostrProfile(name: name, about: about, picture: picture, lud16: lightningAddress, nip05: nip05))
                     manager.dispatch(.publishNostrProfile)
                     done()
                 } label: {
@@ -237,6 +267,7 @@ struct EditProfilePanel: View {
             name = manager.state.nostr.name
             about = manager.state.nostr.about
             picture = manager.state.nostr.picture
+            lightningAddress = manager.state.nostr.lud16
             nip05 = manager.state.nostr.nip05
         }
         .onChange(of: manager.state.nostr.picture) { _, newValue in
