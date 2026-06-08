@@ -10,7 +10,10 @@ use bark::ark::lightning::PaymentHash;
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::Wallet;
 use bip39::Mnemonic;
-use bitcoin::Amount;
+use bitcoin::{
+    bip32::{DerivationPath, Xpriv},
+    Amount,
+};
 use flume::Sender;
 use nostr_sdk::prelude::{
     nip04, Contact as NostrContact, ContactListBuilder, EventBuilder, EventBuilderTemplate, Filter,
@@ -47,6 +50,7 @@ use crate::{
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
+const NOSTR_DERIVATION_PATH: &str = "m/44'/1237'/0'/0/0";
 
 fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
     format!("{pubkey}:{remote_url}")
@@ -58,6 +62,21 @@ fn msats_to_display_sats(msats: u64) -> String {
     } else {
         format!("{:.3}", msats as f64 / 1_000.0)
     }
+}
+
+fn derive_nostr_keys_from_mnemonic(mnemonic: &str) -> anyhow::Result<Keys> {
+    let mnemonic = Mnemonic::from_str(mnemonic).context("invalid recovery phrase")?;
+    let seed = mnemonic.to_seed("");
+    let root = Xpriv::new_master(bitcoin::Network::Bitcoin, &seed)
+        .context("could not create master key")?;
+    let path =
+        DerivationPath::from_str(NOSTR_DERIVATION_PATH).context("invalid Nostr derivation path")?;
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let child = root
+        .derive_priv(&secp, &path)
+        .context("could not derive Nostr key")?;
+    let secret_hex = child.private_key.display_secret().to_string();
+    Keys::parse(&secret_hex).context("derived invalid Nostr key")
 }
 
 async fn wallet_synced_msg(
@@ -415,6 +434,7 @@ impl AppCore {
                 let _ = self
                     .secrets
                     .set_secret(WALLET_SEED_KEY.to_string(), mnemonic);
+                self.ensure_wallet_derived_nostr_key();
                 self.ensure_lightning_address();
                 self.maintain_vtxos();
             }
@@ -1412,15 +1432,16 @@ impl AppCore {
 
     fn clear_nostr_key(&mut self) {
         let _ = self.secrets.delete_secret(NOSTR_SECRET_KEY.to_string());
-        self.state.nostr.npub = None;
-        self.state.nostr.name = "Rebel".to_string();
-        self.state.nostr.about.clear();
-        self.state.nostr.picture.clear();
-        self.state.nostr.lud16.clear();
-        self.state.nostr.nip05.clear();
-        self.state.nostr.contacts.clear();
-        self.state.direct_messages.clear();
-        self.state.toast = Some("Nostr key removed from Keychain.".to_string());
+        if !self.ensure_wallet_derived_nostr_key() {
+            self.state.nostr.npub = None;
+            self.state.nostr.name = "Rebel".to_string();
+            self.state.nostr.about.clear();
+            self.state.nostr.picture.clear();
+            self.state.nostr.lud16.clear();
+            self.state.nostr.nip05.clear();
+            self.state.nostr.contacts.clear();
+            self.state.direct_messages.clear();
+        }
         self.save_app_data();
     }
 
@@ -1454,6 +1475,36 @@ impl AppCore {
                 self.refresh_nostr_profile();
                 self.sync_primal_follow_contacts(false);
             }
+        }
+    }
+
+    fn ensure_wallet_derived_nostr_key(&mut self) -> bool {
+        if self
+            .secrets
+            .get_secret(NOSTR_SECRET_KEY.to_string())
+            .is_some()
+        {
+            return false;
+        }
+
+        let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) else {
+            return false;
+        };
+
+        let Ok(keys) = derive_nostr_keys_from_mnemonic(&mnemonic) else {
+            return false;
+        };
+
+        match (keys.secret_key().to_bech32(), keys.public_key().to_bech32()) {
+            (Ok(nsec), Ok(npub)) => {
+                let _ = self.secrets.set_secret(NOSTR_SECRET_KEY.to_string(), nsec);
+                self.reset_nostr_identity(npub);
+                self.save_app_data();
+                self.refresh_nostr_profile();
+                self.sync_primal_follow_contacts(false);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -2041,4 +2092,28 @@ fn ensure_wallet_metadata_table(conn: &rusqlite::Connection) -> rusqlite::Result
         [],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use nostr_sdk::prelude::SecretKey as NostrSecretKey;
+
+    use super::*;
+
+    #[test]
+    fn derives_nostr_key_from_wallet_seed_path() {
+        let keys = derive_nostr_keys_from_mnemonic(
+            "leader monkey parrot ring guide accident before fence cannon height naive bean",
+        )
+        .unwrap();
+
+        assert_eq!(
+            keys.secret_key().as_secret_bytes(),
+            NostrSecretKey::parse(
+                "7f7ff03d123792d6ac594bfa67bf6d0c0ab55b6b1fdb6249303fe861f1ccba9a",
+            )
+            .unwrap()
+            .as_secret_bytes(),
+        );
+    }
 }

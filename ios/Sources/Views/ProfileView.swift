@@ -311,30 +311,20 @@ struct NostrKeysPanel: View {
                     manager.dispatch(.importNostrSecret(nsecOrHex: secret))
                     secret = ""
                 } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
+                    Label("Import override", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
                 .disabled(secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                HStack(spacing: 10) {
-                    Button {
-                        manager.dispatch(.generateNostrKey)
-                    } label: {
-                        Label("Generate", systemImage: "plus")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-
-                    Button {
-                        manager.dispatch(.exportNostrSecret)
-                    } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(manager.state.nostr.npub == nil)
+                Button {
+                    manager.dispatch(.exportNostrSecret)
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(manager.state.nostr.npub == nil)
 
                 Button(role: .destructive) {
                     confirmDelete = true
