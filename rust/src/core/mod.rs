@@ -25,8 +25,8 @@ use crate::nostr_support::{
     upload_profile_picture, PrimalProfileContact,
 };
 use crate::payments::{
-    is_lnurl_pay_destination, monitor_lightning_receive, parse_send_destination,
-    resolve_lnurl_pay_invoice,
+    is_lnurl_pay_destination, monitor_ark_receive, monitor_lightning_receive,
+    parse_send_destination, resolve_lnurl_pay_invoice,
 };
 use crate::persistence::{
     validate_server_url, PersistedAppData, PersistedPriceCurrency, ServerConfig,
@@ -191,7 +191,12 @@ impl AppCore {
                 esplora_address,
             } => self.configure_servers(server_address, esplora_address),
             AppAction::SelectTab { tab } => self.state.router.selected_tab = tab,
-            AppAction::PushScreen { screen } => self.state.router.screen_stack.push(screen),
+            AppAction::PushScreen { screen } => {
+                if screen == Screen::Receive {
+                    self.state.reset_receive_draft();
+                }
+                self.state.router.screen_stack.push(screen);
+            }
             AppAction::PopScreen => {
                 self.state.router.screen_stack.pop();
             }
@@ -421,6 +426,19 @@ impl AppCore {
                 self.state.receive.ark_address = Some(address);
                 self.state.receive.phase = ReceivePhase::ShowingRequest;
             }
+            AsyncMsg::ArkReceiveConfirmed {
+                address,
+                amount_sat,
+            } => {
+                if self.state.receive.method == ReceiveMethod::Ark
+                    && self.state.receive.phase == ReceivePhase::ShowingRequest
+                    && self.state.receive.ark_address.as_deref() == Some(address.as_str())
+                {
+                    self.state.receive.amount_sat = amount_sat;
+                    self.state.receive.phase = ReceivePhase::Success;
+                }
+                self.maintain_vtxos();
+            }
             AsyncMsg::LightningInvoice {
                 invoice,
                 payment_hash,
@@ -593,7 +611,8 @@ impl AppCore {
             | AsyncMsg::NostrContactsLoaded(_)
             | AsyncMsg::PrimalContactsLoaded { .. } => self.state.busy.refreshing_contacts = false,
             AsyncMsg::Error(_) => self.state.busy = BusyState::default(),
-            AsyncMsg::LightningReceiveStatus { .. }
+            AsyncMsg::ArkReceiveConfirmed { .. }
+            | AsyncMsg::LightningReceiveStatus { .. }
             | AsyncMsg::LightningReceiveClaimed { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
@@ -779,11 +798,16 @@ impl AppCore {
         self.state.busy.creating_invoice = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
-            let msg = match wallet.new_address().await {
-                Ok(address) => AsyncMsg::ArkAddress(address.to_string()),
-                Err(e) => AsyncMsg::Error(format!("Could not create Ark address: {e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
+            match wallet.new_address().await {
+                Ok(address) => {
+                    monitor_ark_receive(wallet, tx, address).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::Error(format!(
+                        "Could not create Ark address: {e:#}"
+                    ))));
+                }
+            }
         });
     }
 

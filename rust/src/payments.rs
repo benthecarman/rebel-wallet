@@ -2,9 +2,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context};
 use bark::ark::lightning::PaymentHash;
-use bark::movement::PaymentMethod as BarkPaymentMethod;
+use bark::ark::Address as ArkAddress;
+use bark::movement::{Movement, MovementStatus, PaymentMethod as BarkPaymentMethod};
 use bark::Wallet;
 use flume::Sender;
+use futures_util::StreamExt;
 use serde::Deserialize;
 
 use crate::{AsyncMsg, CoreMsg};
@@ -391,5 +393,48 @@ fn send_receive_status_if_changed(
         payment_hash: payment_hash.to_string(),
         status: status.to_string(),
         paid,
+    }));
+}
+
+pub(crate) async fn monitor_ark_receive(wallet: Wallet, tx: Sender<CoreMsg>, address: ArkAddress) {
+    let address_text = address.to_string();
+    let payment_method = BarkPaymentMethod::Ark(address.clone());
+    let mut movements = wallet
+        .subscribe_notifications()
+        .filter_arkoor_address_movements(address);
+    let _ = tx.send(CoreMsg::Async(AsyncMsg::ArkAddress(address_text.clone())));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10 * 60);
+
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let Ok(Some(movement)) = tokio::time::timeout(remaining, movements.next()).await else {
+            break;
+        };
+        if let Some(amount_sat) = ark_receive_amount(&movement, &payment_method) {
+            send_ark_receive_confirmed(&tx, &address_text, amount_sat);
+            break;
+        }
+    }
+}
+
+fn ark_receive_amount(movement: &Movement, payment_method: &BarkPaymentMethod) -> Option<u64> {
+    if movement.status != MovementStatus::Successful {
+        return None;
+    }
+    movement
+        .received_on
+        .iter()
+        .find(|destination| destination.destination == *payment_method)
+        .map(|destination| destination.amount.to_sat())
+}
+
+fn send_ark_receive_confirmed(tx: &Sender<CoreMsg>, address: &str, amount_sat: u64) {
+    let _ = tx.send(CoreMsg::Async(AsyncMsg::ArkReceiveConfirmed {
+        address: address.to_string(),
+        amount_sat,
     }));
 }

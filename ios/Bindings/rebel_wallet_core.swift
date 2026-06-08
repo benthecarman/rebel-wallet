@@ -1330,6 +1330,7 @@ public struct ReceiveState: Equatable, Hashable {
     public var phase: ReceivePhase
     public var arkAddress: String?
     public var lightningInvoice: String?
+    public var receiveRequest: String?
     public var lightningPaymentHash: String?
     public var lightningStatus: String
     public var lightningStatusDisplay: String
@@ -1340,11 +1341,12 @@ public struct ReceiveState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(method: ReceiveMethod, phase: ReceivePhase, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningStatus: String, lightningStatusDisplay: String, lightningPaid: Bool, amountSat: UInt64, amountDisplay: String, memo: String) {
+    public init(method: ReceiveMethod, phase: ReceivePhase, arkAddress: String?, lightningInvoice: String?, receiveRequest: String?, lightningPaymentHash: String?, lightningStatus: String, lightningStatusDisplay: String, lightningPaid: Bool, amountSat: UInt64, amountDisplay: String, memo: String) {
         self.method = method
         self.phase = phase
         self.arkAddress = arkAddress
         self.lightningInvoice = lightningInvoice
+        self.receiveRequest = receiveRequest
         self.lightningPaymentHash = lightningPaymentHash
         self.lightningStatus = lightningStatus
         self.lightningStatusDisplay = lightningStatusDisplay
@@ -1374,6 +1376,7 @@ public struct FfiConverterTypeReceiveState: FfiConverterRustBuffer {
                 phase: FfiConverterTypeReceivePhase.read(from: &buf), 
                 arkAddress: FfiConverterOptionString.read(from: &buf), 
                 lightningInvoice: FfiConverterOptionString.read(from: &buf), 
+                receiveRequest: FfiConverterOptionString.read(from: &buf),
                 lightningPaymentHash: FfiConverterOptionString.read(from: &buf), 
                 lightningStatus: FfiConverterString.read(from: &buf), 
                 lightningStatusDisplay: FfiConverterString.read(from: &buf), 
@@ -1389,6 +1392,7 @@ public struct FfiConverterTypeReceiveState: FfiConverterRustBuffer {
         FfiConverterTypeReceivePhase.write(value.phase, into: &buf)
         FfiConverterOptionString.write(value.arkAddress, into: &buf)
         FfiConverterOptionString.write(value.lightningInvoice, into: &buf)
+        FfiConverterOptionString.write(value.receiveRequest, into: &buf)
         FfiConverterOptionString.write(value.lightningPaymentHash, into: &buf)
         FfiConverterString.write(value.lightningStatus, into: &buf)
         FfiConverterString.write(value.lightningStatusDisplay, into: &buf)

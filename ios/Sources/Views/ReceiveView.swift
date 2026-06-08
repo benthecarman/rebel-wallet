@@ -16,12 +16,7 @@ struct ReceiveView: View {
     }
 
     private var receiveText: String? {
-        switch method {
-        case .lightning:
-            return manager.state.receive.lightningInvoice
-        case .ark:
-            return manager.state.receive.arkAddress
-        }
+        manager.state.receive.receiveRequest
     }
 
     var body: some View {
@@ -138,10 +133,10 @@ struct ReceiveView: View {
 
     private func returnHomeFromSuccess() {
         amountText = ""
-        manager.dispatch(.dismissPaymentSuccess)
-        manager.dispatch(.setReceiveAmount(amountSat: 0))
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
+        manager.dispatch(.dismissPaymentSuccess)
+        manager.dispatch(.setReceiveAmount(amountSat: 0))
     }
 }
 

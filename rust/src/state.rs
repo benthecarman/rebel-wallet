@@ -1,3 +1,4 @@
+use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
 use crate::{SIGNET_ESPLORA, SIGNET_SERVER};
@@ -173,6 +174,7 @@ pub struct ReceiveState {
     pub phase: ReceivePhase,
     pub ark_address: Option<String>,
     pub lightning_invoice: Option<String>,
+    pub receive_request: Option<String>,
     pub lightning_payment_hash: Option<String>,
     pub lightning_status: String,
     pub lightning_status_display: String,
@@ -331,6 +333,7 @@ impl AppState {
                 phase: ReceivePhase::Editing,
                 ark_address: None,
                 lightning_invoice: None,
+                receive_request: None,
                 lightning_payment_hash: None,
                 lightning_status: "idle".to_string(),
                 lightning_status_display: "Waiting".to_string(),
@@ -405,6 +408,7 @@ impl AppState {
         );
 
         self.receive.amount_display = format_sats(self.receive.amount_sat);
+        self.receive.receive_request = receive_request(&self.receive);
         self.receive.lightning_status_display = if self.receive.lightning_paid {
             "Paid".to_string()
         } else {
@@ -439,6 +443,18 @@ impl AppState {
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);
     }
+
+    pub(crate) fn reset_receive_draft(&mut self) {
+        self.receive.method = ReceiveMethod::Lightning;
+        self.receive.phase = ReceivePhase::Editing;
+        self.receive.ark_address = None;
+        self.receive.lightning_invoice = None;
+        self.receive.receive_request = None;
+        self.receive.lightning_payment_hash = None;
+        self.receive.lightning_status = "idle".to_string();
+        self.receive.lightning_paid = false;
+        self.receive.amount_sat = 0;
+    }
 }
 
 fn supported_price_currencies() -> Vec<CurrencyOption> {
@@ -471,6 +487,22 @@ fn should_show_launch_splash(state: &AppState) -> bool {
 
 pub(crate) fn format_sats(amount: u64) -> String {
     format!("{} sats", grouped_digits(amount))
+}
+
+fn receive_request(receive: &ReceiveState) -> Option<String> {
+    match receive.method {
+        ReceiveMethod::Lightning => receive.lightning_invoice.clone(),
+        ReceiveMethod::Ark => {
+            let address = receive.ark_address.as_ref()?;
+            if receive.amount_sat == 0 {
+                Some(address.clone())
+            } else {
+                let amount =
+                    Amount::from_sat(receive.amount_sat).to_string_in(Denomination::Bitcoin);
+                Some(format!("bitcoin:?amount={amount}&ark={address}"))
+            }
+        }
+    }
 }
 
 fn format_fiat_sats(
@@ -714,6 +746,49 @@ mod tests {
         state.receive.lightning_paid = true;
         state.refresh_derived();
         assert_eq!(state.receive.lightning_status_display, "Paid");
+    }
+
+    #[test]
+    fn derives_receive_request_for_ark_and_lightning() {
+        let mut state = AppState::initial();
+        state.receive.method = ReceiveMethod::Ark;
+        state.receive.ark_address = Some("tark1fdafa".to_string());
+        state.receive.amount_sat = 0;
+        state.refresh_derived();
+        assert_eq!(state.receive.receive_request.as_deref(), Some("tark1fdafa"));
+
+        state.receive.amount_sat = 50_000;
+        state.refresh_derived();
+        assert_eq!(
+            state.receive.receive_request.as_deref(),
+            Some("bitcoin:?amount=0.0005&ark=tark1fdafa")
+        );
+
+        state.receive.method = ReceiveMethod::Lightning;
+        state.receive.lightning_invoice = Some("lnbc1example".to_string());
+        state.refresh_derived();
+        assert_eq!(
+            state.receive.receive_request.as_deref(),
+            Some("lnbc1example")
+        );
+    }
+
+    #[test]
+    fn reset_receive_draft_restores_default_method() {
+        let mut state = AppState::initial();
+        state.receive.method = ReceiveMethod::Ark;
+        state.receive.phase = ReceivePhase::ShowingRequest;
+        state.receive.ark_address = Some("tark1fdafa".to_string());
+        state.receive.receive_request = Some("tark1fdafa".to_string());
+        state.receive.amount_sat = 50_000;
+
+        state.reset_receive_draft();
+
+        assert_eq!(state.receive.method, ReceiveMethod::Lightning);
+        assert_eq!(state.receive.phase, ReceivePhase::Editing);
+        assert_eq!(state.receive.ark_address, None);
+        assert_eq!(state.receive.receive_request, None);
+        assert_eq!(state.receive.amount_sat, 0);
     }
 
     #[test]
