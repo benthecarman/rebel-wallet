@@ -303,7 +303,7 @@ void uniffi_rebel_wallet_core_fn_free_ffiapp(uint64_t handle, RustCallStatus *_N
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_REBEL_WALLET_CORE_FN_CONSTRUCTOR_FFIAPP_NEW
 #define UNIFFI_FFIDEF_UNIFFI_REBEL_WALLET_CORE_FN_CONSTRUCTOR_FFIAPP_NEW
-uint64_t uniffi_rebel_wallet_core_fn_constructor_ffiapp_new(RustBuffer data_dir, uint64_t secret_store, RustCallStatus *_Nonnull out_status
+uint64_t uniffi_rebel_wallet_core_fn_constructor_ffiapp_new(RustBuffer data_dir, RustBuffer cache_dir, uint64_t secret_store, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_REBEL_WALLET_CORE_FN_METHOD_FFIAPP_DISPATCH

@@ -12,6 +12,7 @@ fn main() {
 
     let app = FfiApp::new(
         data_dir.display().to_string(),
+        data_dir.join("cache").display().to_string(),
         Box::new(MemorySecretStore::default()),
     );
     let state = app.state();

@@ -32,8 +32,9 @@ use crate::persistence::{PersistedAppData, PersistedPriceCurrency, ServerConfig}
 use crate::price::fetch_bitcoin_price;
 use crate::profile_cache::{
     clear_profile_cache, clear_profile_picture_dir, download_profile_picture,
-    ensure_profile_picture_dir, load_profile, open_profile_cache, profile_picture_file_url,
-    save_profile, update_cached_picture, ProfileCacheEntry,
+    ensure_profile_picture_dir, load_profile, new_profile_picture_download_semaphore,
+    open_profile_cache, profile_picture_file_url, save_profile, update_cached_picture,
+    ProfileCacheEntry,
 };
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
@@ -91,6 +92,7 @@ async fn wallet_synced_msg(
 
 pub(crate) fn spawn_actor(
     data_dir: PathBuf,
+    cache_dir: PathBuf,
     secrets: Arc<dyn SecretStore>,
     core_tx: Sender<CoreMsg>,
     core_rx: flume::Receiver<CoreMsg>,
@@ -99,7 +101,7 @@ pub(crate) fn spawn_actor(
 ) {
     thread::spawn(move || {
         let rt = Runtime::new().expect("tokio runtime");
-        let mut core = AppCore::new(data_dir, secrets, core_tx, rt);
+        let mut core = AppCore::new(data_dir, cache_dir, secrets, core_tx, rt);
         core.emit(&shared_state, &update_tx);
 
         while let Ok(msg) = core_rx.recv() {
@@ -112,6 +114,7 @@ pub(crate) fn spawn_actor(
 struct AppCore {
     state: AppState,
     data_dir: PathBuf,
+    cache_dir: PathBuf,
     app_data_path: PathBuf,
     secrets: Arc<dyn SecretStore>,
     tx: Sender<CoreMsg>,
@@ -119,6 +122,7 @@ struct AppCore {
     wallet: Option<Wallet>,
     profile_db: Option<rusqlite::Connection>,
     profile_picture_downloads: HashSet<String>,
+    profile_picture_download_semaphore: Arc<tokio::sync::Semaphore>,
     profile_info_requests: HashSet<String>,
     rev: u64,
     next_capability_id: u64,
@@ -127,21 +131,24 @@ struct AppCore {
 impl AppCore {
     fn new(
         data_dir: PathBuf,
+        cache_dir: PathBuf,
         secrets: Arc<dyn SecretStore>,
         tx: Sender<CoreMsg>,
         rt: Runtime,
     ) -> Self {
-        ensure_profile_picture_dir(&data_dir);
+        ensure_profile_picture_dir(&cache_dir);
         Self {
             state: AppState::initial(),
             app_data_path: data_dir.join("rebel-app-data.json"),
-            profile_db: open_profile_cache(&data_dir).ok(),
+            profile_db: open_profile_cache(&cache_dir).ok(),
             data_dir,
+            cache_dir,
             secrets,
             tx,
             rt,
             wallet: None,
             profile_picture_downloads: HashSet::new(),
+            profile_picture_download_semaphore: new_profile_picture_download_semaphore(),
             profile_info_requests: HashSet::new(),
             rev: 0,
             next_capability_id: 0,
@@ -1042,7 +1049,7 @@ impl AppCore {
                 !record.picture_remote_url.is_empty()
                     && entry.picture_cached_url == record.picture_remote_url
             })
-            .and_then(|_| profile_picture_file_url(&self.data_dir, &record.pubkey_hex));
+            .and_then(|_| profile_picture_file_url(&self.cache_dir, &record.pubkey_hex));
 
         if let Some(file_url) = cached_file_url {
             contact.picture = file_url;
@@ -1132,7 +1139,7 @@ impl AppCore {
                 .as_ref()
                 .and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
                 .filter(|entry| entry.picture_cached_url == remote_url)
-                .and_then(|_| profile_picture_file_url(&self.data_dir, &pubkey_hex));
+                .and_then(|_| profile_picture_file_url(&self.cache_dir, &pubkey_hex));
             if cached_file_url.is_some() {
                 self.refresh_contact_picture_for_pubkey(&pubkey_hex);
                 continue;
@@ -1182,12 +1189,13 @@ impl AppCore {
         }
 
         let tx = self.tx.clone();
-        let data_dir = self.data_dir.clone();
+        let cache_dir = self.cache_dir.clone();
+        let semaphore = self.profile_picture_download_semaphore.clone();
         self.rt.spawn(async move {
             let client = reqwest::Client::new();
             let failed_pubkey = pubkey.clone();
             let failed_remote_url = remote_url.clone();
-            match download_profile_picture(client, data_dir, pubkey, remote_url).await {
+            match download_profile_picture(client, cache_dir, pubkey, remote_url, semaphore).await {
                 Ok((pubkey, remote_url)) => {
                     let _ = tx.send(CoreMsg::Async(AsyncMsg::ProfilePictureCached {
                         pubkey,
@@ -1206,7 +1214,7 @@ impl AppCore {
     }
 
     fn refresh_contact_picture_for_pubkey(&mut self, pubkey: &str) {
-        let Some(file_url) = profile_picture_file_url(&self.data_dir, pubkey) else {
+        let Some(file_url) = profile_picture_file_url(&self.cache_dir, pubkey) else {
             return;
         };
         for contact in &mut self.state.nostr.contacts {
@@ -1420,7 +1428,7 @@ impl AppCore {
         if let Some(conn) = self.profile_db.as_ref() {
             let _ = clear_profile_cache(conn);
         }
-        let _ = clear_profile_picture_dir(&self.data_dir);
+        let _ = clear_profile_picture_dir(&self.cache_dir);
         self.profile_picture_downloads.clear();
         self.profile_info_requests.clear();
 
@@ -1910,13 +1918,13 @@ impl AppCore {
     }
 
     fn hydrate_cached_profile_pictures(&mut self) {
-        let data_dir = self.data_dir.clone();
+        let cache_dir = self.cache_dir.clone();
         let profile_db = self.profile_db.as_ref();
         for contact in &mut self.state.nostr.contacts {
-            hydrate_contact_picture(profile_db, &data_dir, contact);
+            hydrate_contact_picture(profile_db, &cache_dir, contact);
         }
         for contact in &mut self.state.send.global_search_results {
-            hydrate_contact_picture(profile_db, &data_dir, contact);
+            hydrate_contact_picture(profile_db, &cache_dir, contact);
         }
     }
 

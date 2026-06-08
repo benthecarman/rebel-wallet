@@ -8,7 +8,12 @@ final class ProfileImageLoader: ObservableObject {
     @Published private(set) var isLoading = false
 
     private nonisolated static let maxImageBytes = 5_000_000
-    private static let cache = NSCache<NSURL, UIImage>()
+    private static let cache: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 200
+        cache.totalCostLimit = 50 * 1024 * 1024
+        return cache
+    }()
     private static var inFlight: [URL: Task<UIImage?, Never>] = [:]
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -100,10 +105,15 @@ final class ProfileImageLoader: ObservableObject {
         inFlight[url] = task
         let loaded = await task.value
         if let loaded {
-            cache.setObject(loaded, forKey: url as NSURL)
+            cache.setObject(loaded, forKey: url as NSURL, cost: imageCost(loaded))
         }
         inFlight[url] = nil
         return loaded
+    }
+
+    private static func imageCost(_ image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 0 }
+        return cgImage.bytesPerRow * cgImage.height
     }
 
     private static func canLoad(_ url: URL) -> Bool {

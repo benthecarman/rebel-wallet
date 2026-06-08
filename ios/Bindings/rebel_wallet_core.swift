@@ -586,11 +586,12 @@ open class FfiApp: FfiAppProtocol, @unchecked Sendable {
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_rebel_wallet_core_fn_clone_ffiapp(self.handle, $0) }
     }
-public convenience init(dataDir: String, secretStore: SecretStore) {
+public convenience init(dataDir: String, cacheDir: String, secretStore: SecretStore) {
     let handle =
         try! rustCall() {
     uniffi_rebel_wallet_core_fn_constructor_ffiapp_new(
         FfiConverterString.lower(dataDir),
+        FfiConverterString.lower(cacheDir),
         FfiConverterCallbackInterfaceSecretStore_lower(secretStore),$0
     )
 }
@@ -3996,7 +3997,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_state() != 28404) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_rebel_wallet_core_checksum_constructor_ffiapp_new() != 52392) {
+    if (uniffi_rebel_wallet_core_checksum_constructor_ffiapp_new() != 37354) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_appreconciler_reconcile() != 39018) {

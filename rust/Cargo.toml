@@ -16,6 +16,7 @@ bitcoin = "0.32"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 flume = "0.11"
 futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 lightning-invoice = "0.33"
 nostr = { version = "0.45.0-alpha.1", features = ["nip04"] }
 nostr-sdk = "0.45.0-alpha.1"
@@ -29,3 +30,6 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 uniffi = "0.31.0"
+
+[dev-dependencies]
+tempfile = "3"

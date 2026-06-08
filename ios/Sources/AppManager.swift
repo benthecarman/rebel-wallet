@@ -12,10 +12,14 @@ final class AppManager: AppReconciler {
     init() {
         let fm = FileManager.default
         let dataDirUrl = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let cacheDirUrl = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("RebelWallet")
         let dataDir = dataDirUrl.path
+        let cacheDir = cacheDirUrl.path
         try? fm.createDirectory(at: dataDirUrl, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: cacheDirUrl, withIntermediateDirectories: true)
+        Self.removeLegacyProfileCache(from: dataDirUrl)
 
-        let rust = FfiApp(dataDir: dataDir, secretStore: KeychainSecretStore())
+        let rust = FfiApp(dataDir: dataDir, cacheDir: cacheDir, secretStore: KeychainSecretStore())
         self.rust = rust
 
         let initial = rust.state()
@@ -43,6 +47,14 @@ final class AppManager: AppReconciler {
 
     func dispatch(_ action: AppAction) {
         rust.dispatch(action: action)
+    }
+
+    private static func removeLegacyProfileCache(from dataDirUrl: URL) {
+        let fm = FileManager.default
+        for fileName in ["profiles.sqlite3", "profiles.sqlite3-wal", "profiles.sqlite3-shm"] {
+            try? fm.removeItem(at: dataDirUrl.appendingPathComponent(fileName))
+        }
+        try? fm.removeItem(at: dataDirUrl.appendingPathComponent("profile_pictures"))
     }
 
     func syncWalletForRefresh() async {

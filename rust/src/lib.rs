@@ -59,17 +59,23 @@ pub struct FfiApp {
 #[uniffi::export]
 impl FfiApp {
     #[uniffi::constructor]
-    pub fn new(data_dir: String, secret_store: Box<dyn SecretStore>) -> Arc<Self> {
+    pub fn new(
+        data_dir: String,
+        cache_dir: String,
+        secret_store: Box<dyn SecretStore>,
+    ) -> Arc<Self> {
         let (update_tx, update_rx) = flume::unbounded();
         let (core_tx, core_rx) = flume::unbounded::<CoreMsg>();
         let shared_state = Arc::new(RwLock::new(AppState::initial()));
         let shared_for_core = shared_state.clone();
         let data_dir = PathBuf::from(data_dir);
+        let cache_dir = PathBuf::from(cache_dir);
         let secrets: Arc<dyn SecretStore> = Arc::from(secret_store);
         let tx_for_bootstrap = core_tx.clone();
 
         core::spawn_actor(
             data_dir,
+            cache_dir,
             secrets,
             tx_for_bootstrap,
             core_rx,
