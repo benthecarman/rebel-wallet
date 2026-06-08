@@ -116,6 +116,7 @@ pub(crate) fn activity_from_movement(
         method_display,
         amount_sat,
         amount_display: state::format_sats(amount_sat.unsigned_abs()),
+        amount_fiat_display: None,
         signed_amount_display: state::format_signed_sats(amount_sat, true),
         icon_kind: if inbound {
             ActivityIconKind::Received

@@ -693,6 +693,7 @@ public struct ActivityItem: Equatable, Hashable {
     public var methodDisplay: String
     public var amountSat: Int64
     public var amountDisplay: String
+    public var amountFiatDisplay: String?
     public var signedAmountDisplay: String
     public var iconKind: ActivityIconKind
     public var status: String
@@ -705,7 +706,7 @@ public struct ActivityItem: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, amountDisplay: String, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
+    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, amountDisplay: String, amountFiatDisplay: String?, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -717,6 +718,7 @@ public struct ActivityItem: Equatable, Hashable {
         self.methodDisplay = methodDisplay
         self.amountSat = amountSat
         self.amountDisplay = amountDisplay
+        self.amountFiatDisplay = amountFiatDisplay
         self.signedAmountDisplay = signedAmountDisplay
         self.iconKind = iconKind
         self.status = status
@@ -755,6 +757,7 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 methodDisplay: FfiConverterString.read(from: &buf), 
                 amountSat: FfiConverterInt64.read(from: &buf), 
                 amountDisplay: FfiConverterString.read(from: &buf), 
+                amountFiatDisplay: FfiConverterOptionString.read(from: &buf),
                 signedAmountDisplay: FfiConverterString.read(from: &buf), 
                 iconKind: FfiConverterTypeActivityIconKind.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
@@ -779,6 +782,7 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.methodDisplay, into: &buf)
         FfiConverterInt64.write(value.amountSat, into: &buf)
         FfiConverterString.write(value.amountDisplay, into: &buf)
+        FfiConverterOptionString.write(value.amountFiatDisplay, into: &buf)
         FfiConverterString.write(value.signedAmountDisplay, into: &buf)
         FfiConverterTypeActivityIconKind.write(value.iconKind, into: &buf)
         FfiConverterString.write(value.status, into: &buf)

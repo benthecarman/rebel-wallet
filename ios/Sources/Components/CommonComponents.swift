@@ -114,6 +114,7 @@ struct StatPill: View {
 
 struct ActivityRow: View {
     let item: ActivityItem
+    var balanceDisplayMode: BalanceDisplayMode = .sats
 
     private var inbound: Bool {
         item.iconKind == .received
@@ -148,6 +149,17 @@ struct ActivityRow: View {
 
     private var methodColor: Color {
         inbound ? rebelGreen : rebelBlue
+    }
+
+    private var amountText: String {
+        switch balanceDisplayMode {
+        case .sats:
+            return item.amountDisplay
+        case .currency:
+            return item.amountFiatDisplay ?? item.amountDisplay
+        case .privacy:
+            return "****"
+        }
     }
 
     var body: some View {
@@ -185,7 +197,7 @@ struct ActivityRow: View {
                     HStack(spacing: 4) {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 10, weight: .bold))
-                        Text(item.amountDisplay)
+                        Text(amountText)
                             .font(.caption.bold())
                     }
                     .foregroundStyle(primaryText)

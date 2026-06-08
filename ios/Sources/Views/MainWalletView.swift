@@ -76,6 +76,7 @@ struct HomeView: View {
     @Bindable var manager: AppManager
     let openProfile: () -> Void
     @State private var selectedActivityId: String?
+    @State private var balanceDisplayMode: BalanceDisplayMode = .sats
     @State private var pullDistance: CGFloat = 0
     @State private var refreshingActivity = false
 
@@ -95,7 +96,11 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            WalletHeader(manager: manager, openProfile: openProfile)
+            WalletHeader(
+                manager: manager,
+                balanceDisplayMode: $balanceDisplayMode,
+                openProfile: openProfile
+            )
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
 
@@ -111,7 +116,7 @@ struct HomeView: View {
                             Button {
                                 selectedActivityId = item.id
                             } label: {
-                                ActivityRow(item: item)
+                                ActivityRow(item: item, balanceDisplayMode: balanceDisplayMode)
                             }
                             .buttonStyle(.plain)
                             Divider().overlay(borderColor)
@@ -221,7 +226,20 @@ private struct HomeActivityRefreshIndicator: View {
 
 struct WalletHeader: View {
     @Bindable var manager: AppManager
+    @Binding var balanceDisplayMode: BalanceDisplayMode
     let openProfile: () -> Void
+
+    private var pendingRefreshText: String {
+        switch balanceDisplayMode {
+        case .sats:
+            return manager.state.wallet.pendingRefreshDisplay
+        case .currency:
+            return manager.state.wallet.pendingRefreshFiatDisplay
+                ?? manager.state.wallet.pendingRefreshDisplay
+        case .privacy:
+            return "****"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -233,7 +251,7 @@ struct WalletHeader: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 8)
-                MutinyBalanceButton(wallet: manager.state.wallet)
+                MutinyBalanceButton(wallet: manager.state.wallet, displayMode: $balanceDisplayMode)
                     .frame(maxWidth: .infinity)
                 Button {
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
@@ -248,7 +266,7 @@ struct WalletHeader: View {
             if manager.state.wallet.pendingRefreshSat > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                    Text("\(manager.state.wallet.pendingRefreshDisplay) refreshing")
+                    Text("\(pendingRefreshText) refreshing")
                 }
                 .font(.caption)
                 .foregroundStyle(mutedText)
@@ -298,7 +316,7 @@ private enum WalletPanel: Equatable, Hashable {
 
 struct MutinyBalanceButton: View {
     let wallet: WalletState
-    @State private var displayMode: BalanceDisplayMode = .sats
+    @Binding var displayMode: BalanceDisplayMode
 
     private var canShowCurrency: Bool {
         wallet.priceCurrency != .btc && wallet.balanceFiatDisplay != nil
@@ -368,7 +386,7 @@ struct MutinyBalanceButton: View {
     }
 }
 
-private enum BalanceDisplayMode {
+enum BalanceDisplayMode {
     case sats
     case currency
     case privacy

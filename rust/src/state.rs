@@ -138,8 +138,8 @@ impl PriceCurrency {
 
     fn approximate(&self) -> &'static str {
         match self {
-            Self::BTC => "",
-            Self::USD | Self::EUR | Self::GBP => "~",
+            Self::BTC | Self::USD => "",
+            Self::EUR | Self::GBP => "~",
         }
     }
 }
@@ -298,6 +298,7 @@ pub struct ActivityItem {
     pub method_display: String,
     pub amount_sat: i64,
     pub amount_display: String,
+    pub amount_fiat_display: Option<String>,
     pub signed_amount_display: String,
     pub icon_kind: ActivityIconKind,
     pub status: String,
@@ -439,6 +440,15 @@ impl AppState {
             self.wallet.btc_price,
             &self.wallet.price_currency,
         );
+        for item in &mut self.activity {
+            item.amount_display = format_sats(item.amount_sat.unsigned_abs());
+            item.amount_fiat_display = format_fiat_sats(
+                item.amount_sat.unsigned_abs(),
+                self.wallet.btc_price,
+                &self.wallet.price_currency,
+            );
+            item.signed_amount_display = format_signed_sats(item.amount_sat, true);
+        }
 
         self.receive.amount_display = format_sats(self.receive.amount_sat);
         self.receive.receive_request = receive_request(&self.receive);
@@ -878,6 +888,43 @@ mod tests {
         state.wallet.last_sync = None;
         state.refresh_derived();
         assert!(state.show_launch_splash);
+    }
+
+    #[test]
+    fn derives_activity_fiat_displays_from_selected_currency() {
+        let mut state = AppState::initial();
+        state.wallet.price_currency = PriceCurrency::USD;
+        state.wallet.btc_price = Some(100_000.0);
+        state.activity = vec![ActivityItem {
+            id: "activity-1".to_string(),
+            title: String::new(),
+            subtitle: String::new(),
+            display_primary_name: "You".to_string(),
+            display_verb: "sent".to_string(),
+            display_secondary_name: "Alice".to_string(),
+            message_text: None,
+            method_icon: "bolt.fill".to_string(),
+            method_display: "Lightning".to_string(),
+            amount_sat: -50_000,
+            amount_display: String::new(),
+            amount_fiat_display: None,
+            signed_amount_display: String::new(),
+            icon_kind: ActivityIconKind::Sent,
+            status: "complete".to_string(),
+            timestamp: String::new(),
+            counterparty: None,
+            ark_address: None,
+            lightning_invoice: None,
+            lightning_payment_hash: None,
+            lightning_payment_preimage: None,
+        }];
+
+        state.refresh_derived();
+
+        let item = &state.activity[0];
+        assert_eq!(item.amount_display, "50,000 sats");
+        assert_eq!(item.amount_fiat_display.as_deref(), Some("$50.00 USD"));
+        assert_eq!(item.signed_amount_display, "-50,000 sats");
     }
 
     #[test]
