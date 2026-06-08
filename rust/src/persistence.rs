@@ -16,6 +16,8 @@ pub(crate) struct PersistedAppData {
     pub(crate) price_currency: PersistedPriceCurrency,
     #[serde(default)]
     pub(crate) lightning_address: Option<String>,
+    #[serde(default)]
+    pub(crate) lightning_address_ark_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -125,6 +127,7 @@ mod tests {
 
         assert_eq!(data.servers.lnurl_server_address, SIGNET_LNURL_SERVER);
         assert_eq!(data.lightning_address, None);
+        assert_eq!(data.lightning_address_ark_address, None);
     }
 
     #[test]

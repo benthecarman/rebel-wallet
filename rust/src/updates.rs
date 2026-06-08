@@ -45,6 +45,7 @@ pub(crate) enum AsyncMsg {
     },
     LightningAddressRegistered {
         address: String,
+        ark_address: String,
     },
     Paid(String),
     Seed(String),

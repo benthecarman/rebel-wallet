@@ -1196,6 +1196,7 @@ public func FfiConverterTypeCurrencyOption_lower(_ value: CurrencyOption) -> Rus
 public struct LightningAddressState: Equatable, Hashable {
     public var draftName: String
     public var address: String?
+    public var backingArkAddress: String?
     public var phase: LightningAddressPhase
     public var errorText: String?
     public var canRegister: Bool
@@ -1203,9 +1204,10 @@ public struct LightningAddressState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(draftName: String, address: String?, phase: LightningAddressPhase, errorText: String?, canRegister: Bool, canUseForNostr: Bool) {
+    public init(draftName: String, address: String?, backingArkAddress: String?, phase: LightningAddressPhase, errorText: String?, canRegister: Bool, canUseForNostr: Bool) {
         self.draftName = draftName
         self.address = address
+        self.backingArkAddress = backingArkAddress
         self.phase = phase
         self.errorText = errorText
         self.canRegister = canRegister
@@ -1230,6 +1232,7 @@ public struct FfiConverterTypeLightningAddressState: FfiConverterRustBuffer {
             try LightningAddressState(
                 draftName: FfiConverterString.read(from: &buf), 
                 address: FfiConverterOptionString.read(from: &buf), 
+                backingArkAddress: FfiConverterOptionString.read(from: &buf), 
                 phase: FfiConverterTypeLightningAddressPhase.read(from: &buf), 
                 errorText: FfiConverterOptionString.read(from: &buf), 
                 canRegister: FfiConverterBool.read(from: &buf), 
@@ -1240,6 +1243,7 @@ public struct FfiConverterTypeLightningAddressState: FfiConverterRustBuffer {
     public static func write(_ value: LightningAddressState, into buf: inout [UInt8]) {
         FfiConverterString.write(value.draftName, into: &buf)
         FfiConverterOptionString.write(value.address, into: &buf)
+        FfiConverterOptionString.write(value.backingArkAddress, into: &buf)
         FfiConverterTypeLightningAddressPhase.write(value.phase, into: &buf)
         FfiConverterOptionString.write(value.errorText, into: &buf)
         FfiConverterBool.write(value.canRegister, into: &buf)

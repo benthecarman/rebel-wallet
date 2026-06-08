@@ -3,7 +3,12 @@ use bark::subsystem::{RoundMovement, Subsystem};
 
 use crate::{state, ActivityIconKind, ActivityItem, Contact};
 
-pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -> ActivityItem {
+pub(crate) fn activity_from_movement(
+    movement: Movement,
+    contacts: &[Contact],
+    lightning_address: Option<&str>,
+    lightning_address_ark_address: Option<&str>,
+) -> ActivityItem {
     let amount_sat = movement.effective_balance.to_sat();
     let inbound = amount_sat >= 0;
     let destination = if inbound {
@@ -11,18 +16,42 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
     } else {
         movement.sent_to.first()
     };
+    let ark_address = destination
+        .and_then(|destination| ark_address_from_payment_method(&destination.destination))
+        .or_else(|| {
+            let destinations = if inbound {
+                &movement.received_on
+            } else {
+                &movement.sent_to
+            };
+            destinations
+                .iter()
+                .find_map(|destination| ark_address_from_payment_method(&destination.destination))
+        });
+    let is_lightning_address_receive = inbound
+        && ark_address_matches(
+            ark_address.as_deref(),
+            lightning_address_ark_address.filter(|address| !address.trim().is_empty()),
+        );
     let contact = destination
         .and_then(|d| contact_for_payment_method(&d.destination, contacts))
         .cloned();
-    let method = destination
-        .map(|d| {
-            format!(
-                "{} {}",
-                d.destination.type_str(),
-                truncate_middle(&d.destination.value_string(), 28)
-            )
-        })
-        .unwrap_or_else(|| activity_subsystem_label(&movement));
+    let method = if is_lightning_address_receive {
+        match lightning_address.filter(|address| !address.trim().is_empty()) {
+            Some(address) => format!("Lightning address {}", truncate_middle(address, 28)),
+            None => "Lightning address".to_string(),
+        }
+    } else {
+        destination
+            .map(|d| {
+                format!(
+                    "{} {}",
+                    d.destination.type_str(),
+                    truncate_middle(&d.destination.value_string(), 28)
+                )
+            })
+            .unwrap_or_else(|| activity_subsystem_label(&movement))
+    };
     let title = if inbound {
         format!("Received {}", method)
     } else {
@@ -44,7 +73,11 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         "Unknown".to_string()
     };
     let method_icon = activity_method_icon(&method, inbound).to_string();
-    let method_display = activity_method_display(destination.map(|d| &d.destination), &method);
+    let method_display = if is_lightning_address_receive {
+        "Lightning address".to_string()
+    } else {
+        activity_method_display(destination.map(|d| &d.destination), &method)
+    };
     let message_text = activity_message_text(&subtitle);
     let timestamp = movement
         .time
@@ -63,19 +96,6 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         .get("payment_preimage")
         .and_then(|value| value.as_str())
         .map(ToString::to_string);
-    let ark_address = destination
-        .and_then(|destination| ark_address_from_payment_method(&destination.destination))
-        .or_else(|| {
-            let destinations = if inbound {
-                &movement.received_on
-            } else {
-                &movement.sent_to
-            };
-            destinations
-                .iter()
-                .find_map(|destination| ark_address_from_payment_method(&destination.destination))
-        });
-
     ActivityItem {
         id: movement.id.to_string(),
         title,
@@ -109,6 +129,15 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         lightning_invoice,
         lightning_payment_hash,
         lightning_payment_preimage,
+    }
+}
+
+fn ark_address_matches(movement_address: Option<&str>, registered_address: Option<&str>) -> bool {
+    match (movement_address, registered_address) {
+        (Some(movement_address), Some(registered_address)) => {
+            movement_address.trim() == registered_address.trim()
+        }
+        _ => false,
     }
 }
 
@@ -247,7 +276,13 @@ pub(crate) fn truncate_middle(value: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bark::ark::Address as ArkAddress;
+    use bark::movement::MovementDestination;
     use bark::movement::{MovementId, MovementStatus, MovementSubsystem};
+    use bitcoin::{Amount, SignedAmount};
+    use std::str::FromStr;
+
+    const ARK_ADDR: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
 
     #[test]
     fn activity_helpers_return_render_ready_labels() {
@@ -299,5 +334,39 @@ mod tests {
             chrono::Local::now(),
         );
         assert!(is_user_visible_movement(&receive));
+    }
+
+    #[test]
+    fn labels_registered_lnurl_ark_receives_as_lightning_address() {
+        let ark_address = ArkAddress::from_str(ARK_ADDR).unwrap();
+        let mut movement = Movement::new(
+            MovementId(3),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: "bark.arkoor".to_string(),
+                kind: "receive".to_string(),
+            },
+            chrono::Local::now(),
+        );
+        movement.effective_balance = SignedAmount::from_sat(1_000);
+        movement.received_on = vec![MovementDestination::ark(
+            ark_address,
+            Amount::from_sat(1_000),
+        )];
+
+        let item = activity_from_movement(
+            movement,
+            &[],
+            Some("alice@signet.zaps.rebelwallet.app"),
+            Some(ARK_ADDR),
+        );
+
+        assert_eq!(
+            item.title,
+            "Received Lightning address alice@signet...elwallet.app"
+        );
+        assert_eq!(item.method_display, "Lightning address");
+        assert_eq!(item.method_icon, "bolt.fill");
+        assert_eq!(item.ark_address.as_deref(), Some(ARK_ADDR));
     }
 }

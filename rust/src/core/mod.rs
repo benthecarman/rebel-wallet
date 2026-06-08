@@ -76,6 +76,7 @@ fn msats_to_display_sats(msats: u64) -> String {
 async fn wallet_synced_msg(
     wallet: &Wallet,
     contacts: &[Contact],
+    lightning_address: &crate::LightningAddressState,
     maintenance_checked: bool,
 ) -> anyhow::Result<AsyncMsg> {
     let balance = wallet.balance().await.context("balance failed")?;
@@ -83,7 +84,14 @@ async fn wallet_synced_msg(
     let activity = history
         .into_iter()
         .filter(is_user_visible_movement)
-        .map(|movement| activity_from_movement(movement, contacts))
+        .map(|movement| {
+            activity_from_movement(
+                movement,
+                contacts,
+                lightning_address.address.as_deref(),
+                lightning_address.backing_ark_address.as_deref(),
+            )
+        })
         .collect();
     Ok(AsyncMsg::WalletSynced {
         balance_sat: balance.spendable.to_sat(),
@@ -99,7 +107,7 @@ async fn register_lightning_address_request(
     wallet: Wallet,
     lnurl_server: &str,
     name: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<(String, String)> {
     let base = reqwest::Url::parse(lnurl_server).context("LNURL server is not a valid URL")?;
     let domain = base
         .host_str()
@@ -144,7 +152,10 @@ async fn register_lightning_address_request(
         .json::<RegisterLightningAddressResponse>()
         .await
         .context("failed to parse LNURL registration response")?;
-    Ok(format!("{}@{}", registered.name, domain))
+    Ok((
+        format!("{}@{}", registered.name, domain),
+        request.ark_address,
+    ))
 }
 
 pub(crate) fn spawn_actor(
@@ -544,8 +555,12 @@ impl AppCore {
                 }
                 self.maintain_vtxos();
             }
-            AsyncMsg::LightningAddressRegistered { address } => {
+            AsyncMsg::LightningAddressRegistered {
+                address,
+                ark_address,
+            } => {
                 self.state.lightning_address.address = Some(address.clone());
+                self.state.lightning_address.backing_ark_address = Some(ark_address);
                 self.state.lightning_address.phase = LightningAddressPhase::Registered;
                 self.state.lightning_address.error_text = None;
                 self.state.toast = Some(format!("Lightning address claimed: {address}"));
@@ -840,7 +855,10 @@ impl AppCore {
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let msg = match register_lightning_address_request(wallet, &lnurl_server, &name).await {
-                Ok(address) => AsyncMsg::LightningAddressRegistered { address },
+                Ok((address, ark_address)) => AsyncMsg::LightningAddressRegistered {
+                    address,
+                    ark_address,
+                },
                 Err(e) => AsyncMsg::Error(format!("Lightning address registration failed: {e:#}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
@@ -876,10 +894,11 @@ impl AppCore {
         self.state.busy.syncing_wallet = true;
         let tx = self.tx.clone();
         let contacts = self.state.nostr.contacts.clone();
+        let lightning_address = self.state.lightning_address.clone();
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
-                wallet_synced_msg(&wallet, &contacts, false).await
+                wallet_synced_msg(&wallet, &contacts, &lightning_address, false).await
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("Sync failed: {e:#}")));
@@ -910,6 +929,7 @@ impl AppCore {
         self.state.busy.maintaining_vtxos = true;
         let tx = self.tx.clone();
         let contacts = self.state.nostr.contacts.clone();
+        let lightning_address = self.state.lightning_address.clone();
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
@@ -932,7 +952,7 @@ impl AppCore {
                         .context("delegated refresh scheduling failed")?;
                 }
 
-                wallet_synced_msg(&wallet, &contacts, true).await
+                wallet_synced_msg(&wallet, &contacts, &lightning_address, true).await
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("VTXO refresh check failed: {e:#}")));
@@ -1997,6 +2017,11 @@ impl AppCore {
                         self.state.lightning_address.phase = LightningAddressPhase::Registered;
                     }
                 }
+                if let Some(ark_address) = data.lightning_address_ark_address {
+                    if !ark_address.trim().is_empty() {
+                        self.state.lightning_address.backing_ark_address = Some(ark_address);
+                    }
+                }
             }
             Err(e) => {
                 self.state.toast = Some(format!("Could not load local app data: {e}"));
@@ -2027,6 +2052,7 @@ impl AppCore {
                 currency: self.state.wallet.price_currency.clone(),
             },
             lightning_address: self.state.lightning_address.address.clone(),
+            lightning_address_ark_address: self.state.lightning_address.backing_ark_address.clone(),
         };
         if let Ok(raw) = serde_json::to_string_pretty(&data) {
             let _ = std::fs::create_dir_all(&self.data_dir);

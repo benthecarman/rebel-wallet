@@ -176,6 +176,7 @@ pub struct WalletState {
 pub struct LightningAddressState {
     pub draft_name: String,
     pub address: Option<String>,
+    pub backing_ark_address: Option<String>,
     pub phase: LightningAddressPhase,
     pub error_text: Option<String>,
     pub can_register: bool,
@@ -384,6 +385,7 @@ impl AppState {
             lightning_address: LightningAddressState {
                 draft_name: String::new(),
                 address: None,
+                backing_ark_address: None,
                 phase: LightningAddressPhase::Idle,
                 error_text: None,
                 can_register: false,
