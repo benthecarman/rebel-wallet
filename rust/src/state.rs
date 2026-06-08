@@ -1,7 +1,7 @@
 use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
-use crate::{SIGNET_ESPLORA, SIGNET_SERVER};
+use crate::{SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER};
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
@@ -13,6 +13,7 @@ pub struct AppState {
     pub supported_price_currencies: Vec<CurrencyOption>,
     pub receive: ReceiveState,
     pub send: SendState,
+    pub lightning_address: LightningAddressState,
     pub nostr: NostrState,
     pub direct_messages: Vec<NostrMessage>,
     pub activity: Vec<ActivityItem>,
@@ -40,6 +41,7 @@ pub struct BusyState {
     pub publishing_nostr: bool,
     pub maintaining_vtxos: bool,
     pub refreshing_contacts: bool,
+    pub registering_lightning_address: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
@@ -147,8 +149,10 @@ pub struct WalletState {
     pub network: String,
     pub default_server_address: String,
     pub default_esplora_address: String,
+    pub default_lnurl_server_address: String,
     pub server_address: String,
     pub esplora_address: String,
+    pub lnurl_server_address: String,
     pub price_currency: PriceCurrency,
     pub price_currency_code: String,
     pub price_currency_name: String,
@@ -166,6 +170,23 @@ pub struct WalletState {
     pub pending_refresh_display: String,
     pub pending_refresh_fiat_display: Option<String>,
     pub last_sync: Option<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct LightningAddressState {
+    pub draft_name: String,
+    pub address: Option<String>,
+    pub phase: LightningAddressPhase,
+    pub error_text: Option<String>,
+    pub can_register: bool,
+    pub can_use_for_nostr: bool,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum LightningAddressPhase {
+    Idle,
+    Registering,
+    Registered,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -308,8 +329,10 @@ impl AppState {
                 network: "Signet".to_string(),
                 default_server_address: SIGNET_SERVER.to_string(),
                 default_esplora_address: SIGNET_ESPLORA.to_string(),
+                default_lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
                 server_address: SIGNET_SERVER.to_string(),
                 esplora_address: SIGNET_ESPLORA.to_string(),
+                lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
                 price_currency: PriceCurrency::BTC,
                 price_currency_code: PriceCurrency::BTC.code().to_string(),
                 price_currency_name: PriceCurrency::BTC.display_name().to_string(),
@@ -357,6 +380,14 @@ impl AppState {
                 success_amount_display: format_sats(0),
                 can_submit: false,
                 error_text: None,
+            },
+            lightning_address: LightningAddressState {
+                draft_name: String::new(),
+                address: None,
+                phase: LightningAddressPhase::Idle,
+                error_text: None,
+                can_register: false,
+                can_use_for_nostr: false,
             },
             nostr: NostrState {
                 npub: None,
@@ -442,6 +473,21 @@ impl AppState {
             && self.send.error_text.is_none()
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);
+
+        self.lightning_address.can_register = self.lightning_address.phase
+            != LightningAddressPhase::Registering
+            && self.lightning_address.address.is_none()
+            && lightning_address_name_error(&self.lightning_address.draft_name).is_none();
+        self.lightning_address.can_use_for_nostr = self
+            .lightning_address
+            .address
+            .as_ref()
+            .map(|address| {
+                !address.trim().is_empty()
+                    && self.nostr.lud16.trim() != address.trim()
+                    && self.nostr.npub.is_some()
+            })
+            .unwrap_or(false);
     }
 
     pub(crate) fn reset_receive_draft(&mut self) {
@@ -455,6 +501,27 @@ impl AppState {
         self.receive.lightning_paid = false;
         self.receive.amount_sat = 0;
     }
+}
+
+pub(crate) fn normalize_lightning_address_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+pub(crate) fn lightning_address_name_error(name: &str) -> Option<String> {
+    let name = normalize_lightning_address_name(name);
+    if name.is_empty() {
+        return Some("Enter a Lightning address name.".to_string());
+    }
+    if name.starts_with('.') || name.ends_with('.') {
+        return Some("Name cannot start or end with a dot.".to_string());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+    {
+        return Some("Use lowercase letters, numbers, dots, underscores, or hyphens.".to_string());
+    }
+    None
 }
 
 fn supported_price_currencies() -> Vec<CurrencyOption> {
@@ -966,5 +1033,33 @@ mod tests {
         assert_eq!(state.send.search_results[0].name, "same");
         assert_eq!(state.send.search_results[1].npub, "npub-b");
         assert_eq!(state.send.search_results[1].name, "Same");
+    }
+
+    #[test]
+    fn validates_lightning_address_names() {
+        assert_eq!(normalize_lightning_address_name(" Alice_1 "), "alice_1");
+        assert_eq!(lightning_address_name_error("alice-1"), None);
+        assert!(lightning_address_name_error("").is_some());
+        assert!(lightning_address_name_error(".alice").is_some());
+        assert!(lightning_address_name_error("alice!").is_some());
+    }
+
+    #[test]
+    fn derives_lightning_address_controls() {
+        let mut state = AppState::initial();
+        state.lightning_address.draft_name = "alice".to_string();
+        state.refresh_derived();
+        assert!(state.lightning_address.can_register);
+        assert!(!state.lightning_address.can_use_for_nostr);
+
+        state.lightning_address.address = Some("alice@example.com".to_string());
+        state.nostr.npub = Some("npub1".to_string());
+        state.refresh_derived();
+        assert!(!state.lightning_address.can_register);
+        assert!(state.lightning_address.can_use_for_nostr);
+
+        state.nostr.lud16 = "alice@example.com".to_string();
+        state.refresh_derived();
+        assert!(!state.lightning_address.can_use_for_nostr);
     }
 }

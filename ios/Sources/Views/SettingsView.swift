@@ -205,22 +205,25 @@ struct ServersView: View {
     @Bindable var manager: AppManager
     @State private var serverAddress = ""
     @State private var esploraAddress = ""
+    @State private var lnurlServerAddress = ""
 
     private var canSave: Bool {
         !serverAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !esploraAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !lnurlServerAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !manager.state.busy.openingWallet
     }
 
     private var hasChanges: Bool {
         normalized(serverAddress) != manager.state.wallet.serverAddress ||
-            normalized(esploraAddress) != manager.state.wallet.esploraAddress
+            normalized(esploraAddress) != manager.state.wallet.esploraAddress ||
+            normalized(lnurlServerAddress) != manager.state.wallet.lnurlServerAddress
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Configure the Ark and Esplora endpoints used by this Signet wallet.")
+                Text("Configure the Ark, Esplora, and Lightning address endpoints used by this Signet wallet.")
                     .font(.body)
                     .foregroundStyle(mutedText)
 
@@ -228,6 +231,8 @@ struct ServersView: View {
                     ServerTextField(title: "Ark server", text: $serverAddress)
                     SettingsDivider()
                     ServerTextField(title: "Esplora", text: $esploraAddress)
+                    SettingsDivider()
+                    ServerTextField(title: "LNURL server", text: $lnurlServerAddress)
                 }
 
                 if manager.state.busy.openingWallet {
@@ -243,6 +248,7 @@ struct ServersView: View {
                     Button {
                         serverAddress = manager.state.wallet.defaultServerAddress
                         esploraAddress = manager.state.wallet.defaultEsploraAddress
+                        lnurlServerAddress = manager.state.wallet.defaultLnurlServerAddress
                     } label: {
                         Label("Defaults", systemImage: "arrow.counterclockwise")
                             .frame(maxWidth: .infinity)
@@ -252,7 +258,8 @@ struct ServersView: View {
                     Button {
                         manager.dispatch(.configureServers(
                             serverAddress: normalized(serverAddress),
-                            esploraAddress: normalized(esploraAddress)
+                            esploraAddress: normalized(esploraAddress),
+                            lnurlServerAddress: normalized(lnurlServerAddress)
                         ))
                     } label: {
                         Label("Save", systemImage: "checkmark")
@@ -271,6 +278,7 @@ struct ServersView: View {
         .onAppear {
             serverAddress = manager.state.wallet.serverAddress
             esploraAddress = manager.state.wallet.esploraAddress
+            lnurlServerAddress = manager.state.wallet.lnurlServerAddress
         }
     }
 

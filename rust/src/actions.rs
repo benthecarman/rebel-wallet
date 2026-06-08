@@ -20,6 +20,7 @@ pub enum AppAction {
     ConfigureServers {
         server_address: String,
         esplora_address: String,
+        lnurl_server_address: String,
     },
     SelectTab {
         tab: MainTab,
@@ -63,6 +64,11 @@ pub enum AppAction {
     SetSendMemo {
         memo: String,
     },
+    SetLightningAddressName {
+        name: String,
+    },
+    RegisterLightningAddress,
+    UseLightningAddressForNostr,
     PayDestination,
     PayLightningInvoice {
         invoice: String,

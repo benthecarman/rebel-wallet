@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ProfileView: View {
     @Bindable var manager: AppManager
@@ -77,8 +78,109 @@ struct ProfileSummaryPanel: View {
                 }
             }
 
+            LightningAddressPanel(manager: manager)
             BalancePanel(wallet: manager.state.wallet)
         }
+    }
+}
+
+struct LightningAddressPanel: View {
+    @Bindable var manager: AppManager
+
+    private var isRegistering: Bool {
+        manager.state.lightningAddress.phase == .registering
+    }
+
+    private var claimedAddress: String? {
+        manager.state.lightningAddress.address
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.badge.checkmark")
+                    .foregroundStyle(rebelGreen)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Lightning Address")
+                        .font(.headline)
+                    Text(manager.state.wallet.lnurlServerAddress)
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+
+            if let claimedAddress {
+                Text(claimedAddress)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+
+                HStack(spacing: 10) {
+                    Button {
+                        UIPasteboard.general.string = claimedAddress
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+
+                    ShareLink(item: claimedAddress) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+
+                Button {
+                    manager.dispatch(.useLightningAddressForNostr)
+                } label: {
+                    Label("Use in Nostr profile", systemImage: "person.badge.key")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(!manager.state.lightningAddress.canUseForNostr)
+            } else {
+                TextField("Name", text: Binding(
+                    get: { manager.state.lightningAddress.draftName },
+                    set: { manager.dispatch(.setLightningAddressName(name: $0)) }
+                ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
+                .profileField()
+
+                Button {
+                    manager.dispatch(.registerLightningAddress)
+                } label: {
+                    HStack(spacing: 8) {
+                        if isRegistering {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "checkmark.seal.fill")
+                        }
+                        Text(isRegistering ? "Claiming..." : "Claim address")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
+                .disabled(!manager.state.lightningAddress.canRegister)
+            }
+
+            if let errorText = manager.state.lightningAddress.errorText {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(rebelRed)
+            }
+        }
+        .padding(14)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
     }
 }
 

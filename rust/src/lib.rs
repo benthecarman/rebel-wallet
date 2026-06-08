@@ -21,9 +21,9 @@ mod wallet;
 pub use actions::AppAction;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, CurrencyOption, MainTab, NostrMessage, NostrState, PriceCurrency, ReceiveMethod,
-    ReceivePhase, ReceiveState, Router, Screen, SendDestinationKind, SendPhase, SendState,
-    SetupState, WalletState,
+    Contact, CurrencyOption, LightningAddressPhase, LightningAddressState, MainTab, NostrMessage,
+    NostrState, PriceCurrency, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
+    SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -32,6 +32,7 @@ uniffi::setup_scaffolding!();
 
 pub(crate) const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
 pub(crate) const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
+pub(crate) const SIGNET_LNURL_SERVER: &str = "https://signet.zaps.rebelwallet.app";
 
 #[uniffi::export(callback_interface)]
 pub trait AppReconciler: Send + Sync + 'static {

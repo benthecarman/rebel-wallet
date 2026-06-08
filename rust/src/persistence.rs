@@ -1,7 +1,9 @@
 use nostr_sdk::prelude::Url;
 use serde::{Deserialize, Serialize};
 
-use crate::{NostrState, PriceCurrency, WalletState, SIGNET_ESPLORA, SIGNET_SERVER};
+use crate::{
+    NostrState, PriceCurrency, WalletState, SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct PersistedAppData {
@@ -12,6 +14,8 @@ pub(crate) struct PersistedAppData {
     pub(crate) servers: ServerConfig,
     #[serde(default = "default_price_currency")]
     pub(crate) price_currency: PersistedPriceCurrency,
+    #[serde(default)]
+    pub(crate) lightning_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,6 +29,8 @@ pub(crate) struct PersistedPriceCurrency {
 pub(crate) struct ServerConfig {
     pub(crate) server_address: String,
     pub(crate) esplora_address: String,
+    #[serde(default = "default_lnurl_server_address")]
+    pub(crate) lnurl_server_address: String,
 }
 
 impl ServerConfig {
@@ -32,6 +38,7 @@ impl ServerConfig {
         Self {
             server_address: wallet.server_address.clone(),
             esplora_address: wallet.esplora_address.clone(),
+            lnurl_server_address: wallet.lnurl_server_address.clone(),
         }
     }
 }
@@ -48,7 +55,12 @@ fn default_server_config() -> ServerConfig {
     ServerConfig {
         server_address: SIGNET_SERVER.to_string(),
         esplora_address: SIGNET_ESPLORA.to_string(),
+        lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
     }
+}
+
+fn default_lnurl_server_address() -> String {
+    SIGNET_LNURL_SERVER.to_string()
 }
 
 fn default_price_currency() -> PersistedPriceCurrency {
@@ -81,5 +93,45 @@ mod price_currency_serde {
             "GBP" => Ok(PriceCurrency::GBP),
             _ => Ok(PriceCurrency::BTC),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_data_defaults_missing_lnurl_server_and_lightning_address() {
+        let raw = r#"{
+            "nostr": {
+                "npub": null,
+                "name": "Rebel",
+                "about": "",
+                "picture": "",
+                "lud16": "",
+                "nip05": "",
+                "contacts": []
+            },
+            "receive_amount_sat": 0,
+            "receive_memo": "",
+            "servers": {
+                "server_address": "https://ark.example.com",
+                "esplora_address": "https://esplora.example.com"
+            },
+            "price_currency": "BTC"
+        }"#;
+
+        let data: PersistedAppData = serde_json::from_str(raw).unwrap();
+
+        assert_eq!(data.servers.lnurl_server_address, SIGNET_LNURL_SERVER);
+        assert_eq!(data.lightning_address, None);
+    }
+
+    #[test]
+    fn validates_http_server_urls() {
+        assert!(validate_server_url("LNURL server", "https://example.com").is_ok());
+        assert!(validate_server_url("LNURL server", "http://example.com").is_ok());
+        assert!(validate_server_url("LNURL server", "ftp://example.com").is_err());
+        assert!(validate_server_url("LNURL server", "not a url").is_err());
     }
 }
