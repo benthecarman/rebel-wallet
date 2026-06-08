@@ -29,9 +29,7 @@ use crate::payments::{
     is_lnurl_pay_destination, monitor_ark_receive, monitor_lightning_receive,
     parse_send_destination, resolve_lnurl_pay_invoice,
 };
-use crate::persistence::{
-    validate_server_url, PersistedAppData, PersistedPriceCurrency, ServerConfig,
-};
+use crate::persistence::{PersistedAppData, PersistedPriceCurrency, ServerConfig};
 use crate::price::fetch_bitcoin_price;
 use crate::profile_cache::{
     clear_profile_cache, clear_profile_picture_dir, download_profile_picture,
@@ -44,7 +42,7 @@ use crate::wallet::{open_bark_wallet, WalletOpenMode};
 use crate::{
     AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind, Contact,
     LightningAddressPhase, MainTab, NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase,
-    Screen, SecretStore, SendPhase, SetupState,
+    Screen, SecretStore, SendPhase, SetupState, WalletNetwork,
 };
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
@@ -261,11 +259,7 @@ impl AppCore {
             AppAction::MaintainVtxos => self.maintain_vtxos(),
             AppAction::RefreshPrice => self.refresh_price(),
             AppAction::SetPriceCurrency { currency } => self.set_price_currency(currency),
-            AppAction::ConfigureServers {
-                server_address,
-                esplora_address,
-                lnurl_server_address,
-            } => self.configure_servers(server_address, esplora_address, lnurl_server_address),
+            AppAction::SelectNetwork { network } => self.select_network(network),
             AppAction::SelectTab { tab } => self.state.router.selected_tab = tab,
             AppAction::PushScreen { screen } => {
                 if screen == Screen::Receive {
@@ -769,36 +763,18 @@ impl AppCore {
         });
     }
 
-    fn configure_servers(
-        &mut self,
-        server_address: String,
-        esplora_address: String,
-        lnurl_server_address: String,
-    ) {
-        let server_address = server_address.trim().trim_end_matches('/').to_string();
-        let esplora_address = esplora_address.trim().trim_end_matches('/').to_string();
-        let lnurl_server_address = lnurl_server_address
-            .trim()
-            .trim_end_matches('/')
-            .to_string();
-
-        if let Err(message) = validate_server_url("Ark server", &server_address) {
-            self.state.toast = Some(message);
-            return;
-        }
-        if let Err(message) = validate_server_url("Esplora", &esplora_address) {
-            self.state.toast = Some(message);
-            return;
-        }
-        if let Err(message) = validate_server_url("LNURL server", &lnurl_server_address) {
-            self.state.toast = Some(message);
-            return;
-        }
+    fn select_network(&mut self, network: WalletNetwork) {
+        let server_config = ServerConfig::for_network(network.clone());
+        let server_address = server_config.server_address;
+        let esplora_address = server_config.esplora_address;
+        let lnurl_server_address = server_config.lnurl_server_address;
 
         let wallet_server_changed = self.state.wallet.server_address != server_address
             || self.state.wallet.esplora_address != esplora_address;
-        let changed =
-            wallet_server_changed || self.state.wallet.lnurl_server_address != lnurl_server_address;
+        let changed = self.state.wallet.network != network
+            || wallet_server_changed
+            || self.state.wallet.lnurl_server_address != lnurl_server_address;
+        self.state.wallet.network = network;
         self.state.wallet.server_address = server_address;
         self.state.wallet.esplora_address = esplora_address;
         self.state.wallet.lnurl_server_address = lnurl_server_address;
@@ -809,14 +785,14 @@ impl AppCore {
                 self.wallet = None;
                 self.state.busy.opening_wallet = true;
                 self.open_wallet(seed, WalletOpenMode::Open);
-                self.state.toast = Some("Servers saved. Reconnecting wallet.".to_string());
+                self.state.toast = Some("Network changed. Reconnecting wallet.".to_string());
             } else {
-                self.state.toast = Some("Servers saved.".to_string());
+                self.state.toast = Some("Network changed.".to_string());
             }
         } else if changed {
-            self.state.toast = Some("Servers saved.".to_string());
+            self.state.toast = Some("Network changed.".to_string());
         } else {
-            self.state.toast = Some("Servers already up to date.".to_string());
+            self.state.toast = Some("Network already selected.".to_string());
         }
     }
 
@@ -2007,9 +1983,11 @@ impl AppCore {
                 self.hydrate_cached_profile_pictures();
                 self.state.receive.amount_sat = data.receive_amount_sat;
                 self.state.receive.memo = data.receive_memo;
-                self.state.wallet.server_address = data.servers.server_address;
-                self.state.wallet.esplora_address = data.servers.esplora_address;
-                self.state.wallet.lnurl_server_address = data.servers.lnurl_server_address;
+                self.state.wallet.network = data.network;
+                let server_config = ServerConfig::for_network(self.state.wallet.network.clone());
+                self.state.wallet.server_address = server_config.server_address;
+                self.state.wallet.esplora_address = server_config.esplora_address;
+                self.state.wallet.lnurl_server_address = server_config.lnurl_server_address;
                 self.state.wallet.price_currency = data.price_currency.currency;
                 if let Some(address) = data.lightning_address {
                     if !address.trim().is_empty() {
@@ -2047,6 +2025,7 @@ impl AppCore {
             nostr,
             receive_amount_sat: self.state.receive.amount_sat,
             receive_memo: self.state.receive.memo.clone(),
+            network: self.state.wallet.network.clone(),
             servers: ServerConfig::from_wallet(&self.state.wallet),
             price_currency: PersistedPriceCurrency {
                 currency: self.state.wallet.price_currency.clone(),

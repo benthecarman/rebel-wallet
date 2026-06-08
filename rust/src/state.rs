@@ -1,7 +1,10 @@
 use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
-use crate::{SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER};
+use crate::{
+    MAINNET_ESPLORA, MAINNET_LNURL_SERVER, MAINNET_SERVER, MAINNET_SERVER_ACCESS_TOKEN,
+    SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER,
+};
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
@@ -10,6 +13,7 @@ pub struct AppState {
     pub router: Router,
     pub setup: SetupState,
     pub wallet: WalletState,
+    pub supported_networks: Vec<NetworkOption>,
     pub supported_price_currencies: Vec<CurrencyOption>,
     pub receive: ReceiveState,
     pub send: SendState,
@@ -28,6 +32,13 @@ pub struct CurrencyOption {
     pub currency: PriceCurrency,
     pub code: String,
     pub name: String,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct NetworkOption {
+    pub network: WalletNetwork,
+    pub name: String,
+    pub caption: String,
 }
 
 #[derive(uniffi::Record, Clone, Debug, Default)]
@@ -81,7 +92,7 @@ pub enum Screen {
     Profile,
     Backup,
     Restore,
-    Servers,
+    Network,
     Currency,
     ContactDetail { contact_id: String },
 }
@@ -99,6 +110,70 @@ pub enum PriceCurrency {
     USD,
     EUR,
     GBP,
+}
+
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WalletNetwork {
+    Mainnet,
+    Signet,
+}
+
+impl WalletNetwork {
+    pub(crate) fn display_name(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "Mainnet",
+            Self::Signet => "Signet",
+        }
+    }
+
+    fn caption(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "Real bitcoin network",
+            Self::Signet => "Test bitcoin network",
+        }
+    }
+
+    pub(crate) fn bitcoin_network(&self) -> bitcoin::Network {
+        match self {
+            Self::Mainnet => bitcoin::Network::Bitcoin,
+            Self::Signet => bitcoin::Network::Signet,
+        }
+    }
+
+    pub(crate) fn db_file_name(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "rebel-wallet-mainnet.sqlite",
+            Self::Signet => "rebel-wallet-signet.sqlite",
+        }
+    }
+
+    pub(crate) fn server_address(&self) -> &'static str {
+        match self {
+            Self::Mainnet => MAINNET_SERVER,
+            Self::Signet => SIGNET_SERVER,
+        }
+    }
+
+    pub(crate) fn server_access_token(&self) -> Option<&'static str> {
+        match self {
+            Self::Mainnet => Some(MAINNET_SERVER_ACCESS_TOKEN),
+            Self::Signet => None,
+        }
+    }
+
+    pub(crate) fn esplora_address(&self) -> &'static str {
+        match self {
+            Self::Mainnet => MAINNET_ESPLORA,
+            Self::Signet => SIGNET_ESPLORA,
+        }
+    }
+
+    pub(crate) fn lnurl_server_address(&self) -> &'static str {
+        match self {
+            Self::Mainnet => MAINNET_LNURL_SERVER,
+            Self::Signet => SIGNET_LNURL_SERVER,
+        }
+    }
 }
 
 impl PriceCurrency {
@@ -146,7 +221,8 @@ impl PriceCurrency {
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct WalletState {
-    pub network: String,
+    pub network: WalletNetwork,
+    pub network_name: String,
     pub default_server_address: String,
     pub default_esplora_address: String,
     pub default_lnurl_server_address: String,
@@ -328,13 +404,16 @@ impl AppState {
             },
             setup: SetupState::NeedsSetup,
             wallet: WalletState {
-                network: "Signet".to_string(),
-                default_server_address: SIGNET_SERVER.to_string(),
-                default_esplora_address: SIGNET_ESPLORA.to_string(),
-                default_lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
-                server_address: SIGNET_SERVER.to_string(),
-                esplora_address: SIGNET_ESPLORA.to_string(),
-                lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
+                network: WalletNetwork::Signet,
+                network_name: WalletNetwork::Signet.display_name().to_string(),
+                default_server_address: WalletNetwork::Signet.server_address().to_string(),
+                default_esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
+                default_lnurl_server_address: WalletNetwork::Signet
+                    .lnurl_server_address()
+                    .to_string(),
+                server_address: WalletNetwork::Signet.server_address().to_string(),
+                esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
+                lnurl_server_address: WalletNetwork::Signet.lnurl_server_address().to_string(),
                 price_currency: PriceCurrency::BTC,
                 price_currency_code: PriceCurrency::BTC.code().to_string(),
                 price_currency_name: PriceCurrency::BTC.display_name().to_string(),
@@ -401,6 +480,7 @@ impl AppState {
                 nip05: String::new(),
                 contacts: vec![],
             },
+            supported_networks: supported_networks(),
             supported_price_currencies: supported_price_currencies(),
             direct_messages: vec![],
             activity: vec![],
@@ -413,6 +493,12 @@ impl AppState {
 
     pub(crate) fn refresh_derived(&mut self) {
         self.show_launch_splash = should_show_launch_splash(self);
+        self.supported_networks = supported_networks();
+        self.wallet.network_name = self.wallet.network.display_name().to_string();
+        self.wallet.default_server_address = self.wallet.network.server_address().to_string();
+        self.wallet.default_esplora_address = self.wallet.network.esplora_address().to_string();
+        self.wallet.default_lnurl_server_address =
+            self.wallet.network.lnurl_server_address().to_string();
         self.supported_price_currencies = supported_price_currencies();
         self.wallet.price_currency_code = self.wallet.price_currency.code().to_string();
         self.wallet.price_currency_name = self.wallet.price_currency.display_name().to_string();
@@ -550,6 +636,17 @@ fn supported_price_currencies() -> Vec<CurrencyOption> {
         currency,
     })
     .collect()
+}
+
+fn supported_networks() -> Vec<NetworkOption> {
+    [WalletNetwork::Signet, WalletNetwork::Mainnet]
+        .into_iter()
+        .map(|network| NetworkOption {
+            name: network.display_name().to_string(),
+            caption: network.caption().to_string(),
+            network,
+        })
+        .collect()
 }
 
 fn should_show_launch_splash(state: &AppState) -> bool {
@@ -888,6 +985,30 @@ mod tests {
         state.wallet.last_sync = None;
         state.refresh_derived();
         assert!(state.show_launch_splash);
+    }
+
+    #[test]
+    fn derives_network_profiles() {
+        let mut state = AppState::initial();
+        state.refresh_derived();
+
+        assert_eq!(state.supported_networks.len(), 2);
+        assert!(state
+            .supported_networks
+            .iter()
+            .any(|network| network.network == WalletNetwork::Signet));
+        assert!(state
+            .supported_networks
+            .iter()
+            .any(|network| network.network == WalletNetwork::Mainnet));
+        assert_eq!(
+            WalletNetwork::Signet.db_file_name(),
+            "rebel-wallet-signet.sqlite"
+        );
+        assert_eq!(
+            WalletNetwork::Mainnet.db_file_name(),
+            "rebel-wallet-mainnet.sqlite"
+        );
     }
 
     #[test]

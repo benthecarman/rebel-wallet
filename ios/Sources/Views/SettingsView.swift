@@ -28,8 +28,8 @@ struct SettingsView: View {
                         manager.dispatch(.pushScreen(screen: .restore))
                     }
                     SettingsDivider()
-                    SettingsRow(title: "Servers", caption: manager.state.wallet.serverAddress) {
-                        manager.dispatch(.pushScreen(screen: .servers))
+                    SettingsRow(title: "Network", caption: manager.state.wallet.networkName) {
+                        manager.dispatch(.pushScreen(screen: .network))
                     }
                 }
 
@@ -202,38 +202,52 @@ struct CurrencyView: View {
     }
 }
 
-struct ServersView: View {
+struct NetworkView: View {
     @Bindable var manager: AppManager
-    @State private var serverAddress = ""
-    @State private var esploraAddress = ""
-    @State private var lnurlServerAddress = ""
-
-    private var canSave: Bool {
-        !serverAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !esploraAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !lnurlServerAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !manager.state.busy.openingWallet
-    }
+    @State private var selectedNetwork: WalletNetwork = .signet
 
     private var hasChanges: Bool {
-        normalized(serverAddress) != manager.state.wallet.serverAddress ||
-            normalized(esploraAddress) != manager.state.wallet.esploraAddress ||
-            normalized(lnurlServerAddress) != manager.state.wallet.lnurlServerAddress
+        selectedNetwork != manager.state.wallet.network
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Configure the Ark, Esplora, and Lightning address endpoints used by this Signet wallet.")
+                Text("Choose the Bitcoin network this wallet connects to.")
                     .font(.body)
                     .foregroundStyle(mutedText)
 
-                SettingsCard(title: "Network") {
-                    ServerTextField(title: "Ark server", text: $serverAddress)
-                    SettingsDivider()
-                    ServerTextField(title: "Esplora", text: $esploraAddress)
-                    SettingsDivider()
-                    ServerTextField(title: "LNURL server", text: $lnurlServerAddress)
+                SettingsCard(title: "Select network") {
+                    ForEach(Array(manager.state.supportedNetworks.enumerated()), id: \.element.network) { index, option in
+                        Button {
+                            selectedNetwork = option.network
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(option.name)
+                                        .font(.body)
+                                        .foregroundStyle(primaryText)
+                                    Text(option.caption)
+                                        .font(.caption)
+                                        .foregroundStyle(mutedText)
+                                }
+                                Spacer()
+                                if selectedNetwork == option.network {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(rebelGreen)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < manager.state.supportedNetworks.count - 1 {
+                            SettingsDivider()
+                        }
+                    }
                 }
 
                 if manager.state.busy.openingWallet {
@@ -245,68 +259,24 @@ struct ServersView: View {
                     }
                 }
 
-                HStack(spacing: 12) {
-                    Button {
-                        serverAddress = manager.state.wallet.defaultServerAddress
-                        esploraAddress = manager.state.wallet.defaultEsploraAddress
-                        lnurlServerAddress = manager.state.wallet.defaultLnurlServerAddress
-                    } label: {
-                        Label("Defaults", systemImage: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-
-                    Button {
-                        manager.dispatch(.configureServers(
-                            serverAddress: normalized(serverAddress),
-                            esploraAddress: normalized(esploraAddress),
-                            lnurlServerAddress: normalized(lnurlServerAddress)
-                        ))
-                    } label: {
-                        Label("Save", systemImage: "checkmark")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
-                    .disabled(!canSave || !hasChanges)
+                Button {
+                    manager.dispatch(.selectNetwork(network: selectedNetwork))
+                    manager.dispatch(.popScreen)
+                } label: {
+                    Label("Select network", systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(!hasChanges || manager.state.busy.openingWallet)
             }
             .padding(16)
         }
-        .navigationTitle("Servers")
+        .navigationTitle("Network")
         .scrollContentBackground(.hidden)
         .background(pageBackground)
         .foregroundStyle(primaryText)
         .onAppear {
-            serverAddress = manager.state.wallet.serverAddress
-            esploraAddress = manager.state.wallet.esploraAddress
-            lnurlServerAddress = manager.state.wallet.lnurlServerAddress
+            selectedNetwork = manager.state.wallet.network
         }
-    }
-
-    private func normalized(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    }
-
-}
-
-struct ServerTextField: View {
-    let title: String
-    @Binding var text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption.bold())
-                .foregroundStyle(mutedText)
-            TextField(title, text: $text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .font(.body.monospaced())
-                .foregroundStyle(primaryText)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
     }
 }

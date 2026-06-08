@@ -24,43 +24,29 @@ pub(crate) async fn open_bark_wallet(
     server_config: ServerConfig,
 ) -> anyhow::Result<Wallet> {
     std::fs::create_dir_all(&data_dir)?;
-    let db_path = data_dir.join("rebel-wallet.sqlite");
+    let network = server_config.network.bitcoin_network();
+    let db_path = data_dir.join(server_config.network.db_file_name());
     if matches!(mode, WalletOpenMode::Replace) {
         remove_wallet_database_files(&db_path)?;
     }
     let db = Arc::new(SqliteClient::open(&db_path)?);
     let config = Config {
         server_address: server_config.server_address,
+        server_access_token: server_config.server_access_token,
         esplora_address: Some(server_config.esplora_address),
-        ..Config::network_default(bitcoin::Network::Signet)
+        ..Config::network_default(network)
     };
     let lock_manager = Box::new(MemoryLockManager::new());
     match mode {
         WalletOpenMode::Create | WalletOpenMode::Replace => {
-            Wallet::create(
-                mnemonic,
-                bitcoin::Network::Signet,
-                config,
-                db,
-                lock_manager,
-                false,
-            )
-            .await
+            Wallet::create(mnemonic, network, config, db, lock_manager, false).await
         }
         WalletOpenMode::Open => Wallet::open(mnemonic, db, config, lock_manager).await,
         WalletOpenMode::Restore => {
             if db.read_properties().await?.is_some() {
                 Wallet::open(mnemonic, db, config, lock_manager).await
             } else {
-                Wallet::create(
-                    mnemonic,
-                    bitcoin::Network::Signet,
-                    config,
-                    db,
-                    lock_manager,
-                    false,
-                )
-                .await
+                Wallet::create(mnemonic, network, config, db, lock_manager, false).await
             }
         }
     }

@@ -89,8 +89,8 @@ struct ContentView: View {
             BackupView(manager: manager)
         case .restore:
             RestoreWalletView(manager: manager)
-        case .servers:
-            ServersView(manager: manager)
+        case .network:
+            NetworkView(manager: manager)
         case .currency:
             CurrencyView(manager: manager)
         case .contactDetail(let contactId):

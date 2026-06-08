@@ -21,9 +21,9 @@ mod wallet;
 pub use actions::AppAction;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, CurrencyOption, LightningAddressPhase, LightningAddressState, MainTab, NostrMessage,
-    NostrState, PriceCurrency, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
-    SendDestinationKind, SendPhase, SendState, SetupState, WalletState,
+    Contact, CurrencyOption, LightningAddressPhase, LightningAddressState, MainTab, NetworkOption,
+    NostrMessage, NostrState, PriceCurrency, ReceiveMethod, ReceivePhase, ReceiveState, Router,
+    Screen, SendDestinationKind, SendPhase, SendState, SetupState, WalletNetwork, WalletState,
 };
 pub use updates::AppUpdate;
 pub(crate) use updates::{AsyncMsg, CoreMsg};
@@ -33,6 +33,10 @@ uniffi::setup_scaffolding!();
 pub(crate) const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
 pub(crate) const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
 pub(crate) const SIGNET_LNURL_SERVER: &str = "https://signet.zaps.rebelwallet.app";
+pub(crate) const MAINNET_SERVER: &str = "https://ark.second.tech";
+pub(crate) const MAINNET_ESPLORA: &str = "https://mempool.second.tech/api";
+pub(crate) const MAINNET_LNURL_SERVER: &str = "https://signet.zaps.rebelwallet.app";
+pub(crate) const MAINNET_SERVER_ACCESS_TOKEN: &str = "M8RIRSU3X5156RABFMJQKO6VYXK2N371";
 
 #[uniffi::export(callback_interface)]
 pub trait AppReconciler: Send + Sync + 'static {

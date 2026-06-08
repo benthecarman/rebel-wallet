@@ -18,7 +18,7 @@ fn main() {
 
     println!(
         "rebel-wallet core smoke: network={}, default_screen={:?}, contacts={}",
-        state.wallet.network,
+        state.wallet.network_name,
         state.router.default_screen,
         state.nostr.contacts.len()
     );

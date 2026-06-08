@@ -1,15 +1,16 @@
+#[cfg(test)]
 use nostr_sdk::prelude::Url;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    NostrState, PriceCurrency, WalletState, SIGNET_ESPLORA, SIGNET_LNURL_SERVER, SIGNET_SERVER,
-};
+use crate::{NostrState, PriceCurrency, WalletNetwork, WalletState};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct PersistedAppData {
     pub(crate) nostr: NostrState,
     pub(crate) receive_amount_sat: u64,
     pub(crate) receive_memo: String,
+    #[serde(default = "default_network")]
+    pub(crate) network: WalletNetwork,
     #[serde(default = "default_server_config")]
     pub(crate) servers: ServerConfig,
     #[serde(default = "default_price_currency")]
@@ -29,23 +30,40 @@ pub(crate) struct PersistedPriceCurrency {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ServerConfig {
+    #[serde(default = "default_network")]
+    pub(crate) network: WalletNetwork,
     pub(crate) server_address: String,
+    #[serde(skip)]
+    pub(crate) server_access_token: Option<String>,
     pub(crate) esplora_address: String,
     #[serde(default = "default_lnurl_server_address")]
     pub(crate) lnurl_server_address: String,
 }
 
 impl ServerConfig {
+    pub(crate) fn for_network(network: WalletNetwork) -> Self {
+        Self {
+            network,
+            server_address: network.server_address().to_string(),
+            server_access_token: network.server_access_token().map(str::to_string),
+            esplora_address: network.esplora_address().to_string(),
+            lnurl_server_address: network.lnurl_server_address().to_string(),
+        }
+    }
+
     pub(crate) fn from_wallet(wallet: &WalletState) -> Self {
         Self {
+            network: wallet.network,
             server_address: wallet.server_address.clone(),
+            server_access_token: wallet.network.server_access_token().map(str::to_string),
             esplora_address: wallet.esplora_address.clone(),
             lnurl_server_address: wallet.lnurl_server_address.clone(),
         }
     }
 }
 
-pub(crate) fn validate_server_url(label: &str, raw: &str) -> Result<(), String> {
+#[cfg(test)]
+fn validate_server_url(label: &str, raw: &str) -> Result<(), String> {
     let parsed = Url::parse(raw).map_err(|_| format!("{label} must be a valid URL."))?;
     match parsed.scheme() {
         "http" | "https" => Ok(()),
@@ -54,15 +72,15 @@ pub(crate) fn validate_server_url(label: &str, raw: &str) -> Result<(), String> 
 }
 
 fn default_server_config() -> ServerConfig {
-    ServerConfig {
-        server_address: SIGNET_SERVER.to_string(),
-        esplora_address: SIGNET_ESPLORA.to_string(),
-        lnurl_server_address: SIGNET_LNURL_SERVER.to_string(),
-    }
+    ServerConfig::for_network(WalletNetwork::Signet)
 }
 
 fn default_lnurl_server_address() -> String {
-    SIGNET_LNURL_SERVER.to_string()
+    WalletNetwork::Signet.lnurl_server_address().to_string()
+}
+
+fn default_network() -> WalletNetwork {
+    WalletNetwork::Signet
 }
 
 fn default_price_currency() -> PersistedPriceCurrency {
@@ -125,7 +143,11 @@ mod tests {
 
         let data: PersistedAppData = serde_json::from_str(raw).unwrap();
 
-        assert_eq!(data.servers.lnurl_server_address, SIGNET_LNURL_SERVER);
+        assert_eq!(data.network, WalletNetwork::Signet);
+        assert_eq!(
+            data.servers.lnurl_server_address,
+            WalletNetwork::Signet.lnurl_server_address()
+        );
         assert_eq!(data.lightning_address, None);
         assert_eq!(data.lightning_address_ark_address, None);
     }

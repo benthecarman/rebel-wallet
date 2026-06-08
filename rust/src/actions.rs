@@ -1,4 +1,4 @@
-use crate::{MainTab, PriceCurrency, ReceiveMethod, Screen};
+use crate::{MainTab, PriceCurrency, ReceiveMethod, Screen, WalletNetwork};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppAction {
@@ -17,10 +17,8 @@ pub enum AppAction {
     SetPriceCurrency {
         currency: PriceCurrency,
     },
-    ConfigureServers {
-        server_address: String,
-        esplora_address: String,
-        lnurl_server_address: String,
+    SelectNetwork {
+        network: WalletNetwork,
     },
     SelectTab {
         tab: MainTab,
