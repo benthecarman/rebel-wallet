@@ -315,8 +315,10 @@ struct ReceiveMethodPicker: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(method == option ? raisedSurface : Color.clear)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
