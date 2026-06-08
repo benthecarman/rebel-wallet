@@ -67,6 +67,7 @@ struct RestoreWalletView: View {
     @Bindable var manager: AppManager
     @State private var phrase = ""
     @State private var confirmingReplace = false
+    @Environment(\.walletAccent) private var walletAccent
 
     private var normalizedPhrase: String {
         phrase
@@ -99,7 +100,7 @@ struct RestoreWalletView: View {
                     if replacingCurrentWallet {
                         Text("This clears local Bark wallet data before opening the restored wallet. Your Nostr profile and contacts stay on this device.")
                             .font(.body)
-                            .foregroundStyle(rebelRed)
+                            .foregroundStyle(walletAccent)
                     }
                 }
 
@@ -132,13 +133,13 @@ struct RestoreWalletView: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(PrimaryButtonStyle(color: replacingCurrentWallet ? rebelRed : rebelGreen))
+                .buttonStyle(PrimaryButtonStyle(color: replacingCurrentWallet ? walletAccent : rebelGreen))
                 .disabled(!canRestore)
 
                 if case .error(let message) = manager.state.setup {
                     Text(message)
                         .font(.footnote)
-                        .foregroundStyle(rebelRed)
+                        .foregroundStyle(walletAccent)
                         .multilineTextAlignment(.leading)
                 }
             }
@@ -161,13 +162,14 @@ struct RestoreWalletView: View {
 
 struct SecureMultilineTextView: UIViewRepresentable {
     @Binding var text: String
+    @Environment(\.walletAccent) private var walletAccent
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
         textView.textColor = UIColor(primaryText)
-        textView.tintColor = UIColor(rebelRed)
+        textView.tintColor = UIColor(walletAccent)
         textView.font = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
         textView.adjustsFontForContentSizeCategory = true
         textView.autocapitalizationType = .none
@@ -192,6 +194,7 @@ struct SecureMultilineTextView: UIViewRepresentable {
         if textView.text != text {
             textView.text = text
         }
+        textView.tintColor = UIColor(walletAccent)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -215,6 +218,7 @@ struct SeedWordsPanel: View {
     let words: [String]
     @Binding var revealed: Bool
     @Binding var copied: Bool
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(spacing: 16) {
@@ -256,7 +260,7 @@ struct SeedWordsPanel: View {
             }
         }
         .padding(16)
-        .background(rebelRed, in: RoundedRectangle(cornerRadius: 12))
+        .background(walletAccent, in: RoundedRectangle(cornerRadius: 12))
         .foregroundStyle(primaryText)
     }
 }
@@ -264,6 +268,7 @@ struct SeedWordsPanel: View {
 struct BackupCheckBox: View {
     @Binding var checked: Bool
     let text: String
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         Button {
@@ -272,7 +277,7 @@ struct BackupCheckBox: View {
             HStack(spacing: 12) {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")
                     .font(.title3)
-                    .foregroundStyle(checked ? rebelRed : mutedText)
+                    .foregroundStyle(checked ? walletAccent : mutedText)
                 Text(text)
                     .foregroundStyle(primaryText)
                 Spacer()

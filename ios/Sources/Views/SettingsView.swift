@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var manager: AppManager
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         ScrollView {
@@ -23,7 +24,7 @@ struct SettingsView: View {
                         manager.dispatch(.pushScreen(screen: .backup))
                     }
                     SettingsDivider()
-                    SettingsRow(title: "Restore", caption: "Replace this wallet from seed words", accent: rebelRed) {
+                    SettingsRow(title: "Restore", caption: "Replace this wallet from seed words", accent: walletAccent) {
                         manager.dispatch(.pushScreen(screen: .restore))
                     }
                     SettingsDivider()

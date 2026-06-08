@@ -7,6 +7,7 @@ struct ContactsView: View {
     @State private var name = ""
     @State private var lightningAddress = ""
     @State private var adding = false
+    @Environment(\.walletAccent) private var walletAccent
 
     private var contacts: [Contact] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -70,7 +71,7 @@ struct ContactsView: View {
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: adding ? "minus" : "plus")
-                            .foregroundStyle(rebelRed)
+                            .foregroundStyle(walletAccent)
                             .frame(width: 28)
                         Text(adding ? "Hide new contact" : "New contact")
                             .font(.headline)

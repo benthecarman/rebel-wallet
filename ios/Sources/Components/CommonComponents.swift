@@ -3,14 +3,49 @@ import UIKit
 
 struct RebelMark: View {
     let size: CGFloat
+    @Environment(\.walletUsesDellLogo) private var usesDellLogo
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
-        Image("RebelMark")
-            .renderingMode(.original)
-            .resizable()
-            .scaledToFit()
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.16))
+        Group {
+            if usesDellLogo {
+                DellMark(size: size, color: walletAccent)
+            } else {
+                Image("RebelMark")
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.16))
+            }
+        }
         .frame(width: size, height: size)
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: usesDellLogo)
+    }
+}
+
+private struct DellMark: View {
+    let size: CGFloat
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color)
+            Circle()
+                .stroke(primaryText, lineWidth: max(1.5, size * 0.045))
+                .padding(size * 0.09)
+            HStack(spacing: max(0, size * -0.015)) {
+                Text("D")
+                Text("E")
+                    .rotationEffect(.degrees(-35))
+                    .offset(y: size * -0.01)
+                Text("L")
+                Text("L")
+            }
+            .font(.system(size: size * 0.29, weight: .bold, design: .rounded))
+            .foregroundStyle(primaryText)
+            .minimumScaleFactor(0.5)
+        }
     }
 }
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SendView: View {
     @Bindable var manager: AppManager
+    @Environment(\.walletAccent) private var walletAccent
 
     private var destination: String {
         manager.state.send.destination.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,7 +81,7 @@ struct SendView: View {
                     if let errorText = manager.state.send.errorText {
                         Text(errorText)
                             .font(.caption)
-                            .foregroundStyle(rebelRed)
+                            .foregroundStyle(walletAccent)
                     }
                 }
             }

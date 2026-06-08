@@ -127,6 +127,7 @@ struct HomeView: View {
 private struct HomeActivityRefreshIndicator: View {
     let progress: CGFloat
     let refreshing: Bool
+    @Environment(\.walletAccent) private var walletAccent
 
     private var normalizedProgress: CGFloat {
         min(1, max(0, progress))
@@ -146,7 +147,7 @@ private struct HomeActivityRefreshIndicator: View {
                     .trim(from: 0, to: refreshing ? 0.34 : 0.16 + normalizedProgress * 0.66)
                     .stroke(
                         AngularGradient(
-                            colors: [rebelRed, rebelBlue, rebelGreen, rebelRed],
+                            colors: [walletAccent, rebelBlue, rebelGreen, walletAccent],
                             center: .center
                         ),
                         style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
@@ -155,7 +156,7 @@ private struct HomeActivityRefreshIndicator: View {
 
                 Image(systemName: refreshing ? "bolt.fill" : "arrow.down")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(refreshing ? rebelRed : primaryText)
+                    .foregroundStyle(refreshing ? walletAccent : primaryText)
                     .rotationEffect(.degrees(refreshing ? 0 : normalizedProgress * 180))
                     .scaleEffect(0.78 + normalizedProgress * 0.22)
             }
@@ -303,6 +304,7 @@ struct MutinyEmptyHome: View {
 struct MutinyFab: View {
     @Bindable var manager: AppManager
     @State private var open = false
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 14) {
@@ -331,7 +333,7 @@ struct MutinyFab: View {
             Button {
                 open.toggle()
             } label: {
-                MutinyCircle(size: 64, color: rebelRed) {
+                MutinyCircle(size: 64, color: walletAccent) {
                     Image(systemName: "plus")
                         .font(.system(size: 30, weight: .semibold))
                 }

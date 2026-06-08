@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SetupView: View {
     @Bindable var manager: AppManager
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(spacing: 22) {
@@ -36,7 +37,7 @@ struct SetupView: View {
             if case .error(let message) = manager.state.setup {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(rebelRed)
+                    .foregroundStyle(walletAccent)
                     .multilineTextAlignment(.center)
             }
 

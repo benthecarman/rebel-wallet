@@ -13,6 +13,7 @@
 		11A29977382725FC272B253A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08790D56E6532CF87DC5EAF5 /* ContentView.swift */; };
 		2491CE80085619618553486A /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8285F313C1C4D80E03963B /* QRScanner.swift */; };
 		288007FEAC5B508686DAF685 /* ReceiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */; };
+		2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */; };
 		2F71F386BE8E65B77B9C4A44 /* MainWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */; };
 		326333CB48C83D5B4722E8C9 /* ButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */; };
 		430B05A25E1EBA780E5F7A16 /* ContactDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82FC9EE794A5E7927FEE7DF8 /* ContactDetailView.swift */; };
@@ -33,6 +34,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletEasterEgg.swift; sourceTree = "<group>"; };
 		084A69637C40DAFB20690CE9 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		08790D56E6532CF87DC5EAF5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		0BEE4097AE328C49061CF79C /* BackupRestoreViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreViews.swift; sourceTree = "<group>"; };
@@ -97,6 +99,7 @@
 				EC33CB686ACF317A895B9BB7 /* Assets.xcassets */,
 				08790D56E6532CF87DC5EAF5 /* ContentView.swift */,
 				D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */,
+				07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */,
 				9BED51F3FB75136969C70004 /* Capabilities */,
 				ECD83B51022EE290BFCC4280 /* Components */,
 				8EB165A1A41A6C1DBA2779EF /* Services */,
@@ -256,6 +259,7 @@
 				B757D13B7C830FB1E21C287A /* SendView.swift in Sources */,
 				09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */,
 				E621BAA395FB93293F83B59E /* SetupView.swift in Sources */,
+				2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */,
 				7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

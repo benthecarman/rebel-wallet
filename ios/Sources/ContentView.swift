@@ -6,6 +6,7 @@ struct ContentView: View {
     @Bindable var manager: AppManager
     @State private var navPath: [Screen] = []
     @State private var selectedCapabilityPhoto: PhotosPickerItem?
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -14,7 +15,7 @@ struct ContentView: View {
                     screenView(for: screen)
                 }
         }
-        .tint(rebelRed)
+        .tint(walletAccent)
         .foregroundStyle(primaryText)
         .background(pageBackground.ignoresSafeArea())
         .onChange(of: manager.state.router.screenStack) { _, new in

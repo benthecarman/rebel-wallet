@@ -46,6 +46,7 @@ enum ProfileMode {
 struct ProfileSummaryPanel: View {
     @Bindable var manager: AppManager
     @Binding var mode: ProfileMode
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(spacing: 18) {
@@ -70,7 +71,7 @@ struct ProfileSummaryPanel: View {
             .padding(.vertical, 10)
 
             VStack(spacing: 10) {
-                ProfileActionRow(icon: "pencil", title: "Edit Profile", color: rebelRed) {
+                ProfileActionRow(icon: "pencil", title: "Edit Profile", color: walletAccent) {
                     mode = .edit
                 }
                 ProfileActionRow(icon: "key.fill", title: "Nostr Keys", color: rebelBlue) {
@@ -86,6 +87,7 @@ struct ProfileSummaryPanel: View {
 
 struct LightningAddressPanel: View {
     @Bindable var manager: AppManager
+    @Environment(\.walletAccent) private var walletAccent
 
     private var isRegistering: Bool {
         manager.state.lightningAddress.phase == .registering
@@ -175,7 +177,7 @@ struct LightningAddressPanel: View {
             if let errorText = manager.state.lightningAddress.errorText {
                 Text(errorText)
                     .font(.caption)
-                    .foregroundStyle(rebelRed)
+                    .foregroundStyle(walletAccent)
             }
         }
         .padding(14)
@@ -192,6 +194,7 @@ struct EditProfilePanel: View {
     @State private var picture = ""
     @State private var lud16 = ""
     @State private var nip05 = ""
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -210,7 +213,7 @@ struct EditProfilePanel: View {
                         Image(systemName: "pencil")
                             .font(.headline)
                             .padding(10)
-                            .background(rebelRed, in: Circle())
+                            .background(walletAccent, in: Circle())
                     }
                 }
                 .buttonStyle(.plain)

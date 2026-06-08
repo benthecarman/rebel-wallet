@@ -4,6 +4,7 @@ struct ContactDetailView: View {
     @Bindable var manager: AppManager
     let contactId: String
     @State private var message = ""
+    @Environment(\.walletAccent) private var walletAccent
 
     var contact: Contact? {
         manager.state.nostr.contacts.first { $0.id == contactId }
@@ -30,7 +31,7 @@ struct ContactDetailView: View {
                             } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: "message.badge")
-                                        .foregroundStyle(rebelRed)
+                                        .foregroundStyle(walletAccent)
                                     Text("Send a message or request a payment to start this chat.")
                                         .font(.subheadline)
                                         .multilineTextAlignment(.leading)
@@ -58,7 +59,7 @@ struct ContactDetailView: View {
                     } label: {
                         Image(systemName: "plus")
                             .font(.title3)
-                            .foregroundStyle(rebelRed)
+                            .foregroundStyle(walletAccent)
                             .frame(width: 36, height: 36)
                     }
                     .disabled(contact.lightningAddress.isEmpty)
@@ -96,6 +97,7 @@ struct ContactDetailView: View {
 struct ContactChatHeader: View {
     @Bindable var manager: AppManager
     let contact: Contact
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(spacing: 12) {
@@ -138,7 +140,7 @@ struct ContactChatHeader: View {
                 } label: {
                     Label(contact.followed ? "Unfollow" : "Follow", systemImage: contact.followed ? "xmark" : "checkmark")
                 }
-                .foregroundStyle(contact.followed ? rebelRed : primaryText)
+                .foregroundStyle(contact.followed ? walletAccent : primaryText)
 
                 Spacer()
 

@@ -22,6 +22,7 @@ struct LaunchSplashView: View {
 struct RebelLoadingText: View {
     let text: String
     @State private var shimmer = false
+    @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         Text(text)
@@ -34,9 +35,9 @@ struct RebelLoadingText: View {
                     LinearGradient(
                         colors: [
                             .clear,
-                            rebelRed.opacity(0.35),
-                            rebelRed,
-                            rebelRed.opacity(0.35),
+                            walletAccent.opacity(0.35),
+                            walletAccent,
+                            walletAccent.opacity(0.35),
                             .clear
                         ],
                         startPoint: .leading,
