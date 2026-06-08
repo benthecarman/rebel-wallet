@@ -12,6 +12,9 @@ default:
 doctor:
   rmp doctor
 
+install-hooks:
+  git config core.hooksPath .githooks
+
 # Build Rust core for the host (needed for uniffi-bindgen).
 rust-build-host:
   ./tools/cargo-with-xcode build -p {{CORE_CRATE}} --release

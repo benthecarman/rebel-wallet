@@ -52,7 +52,9 @@ pub(crate) fn activity_from_movement(movement: Movement, contacts: &[Contact]) -
         .unwrap_or(movement.time.updated_at)
         .format("%b %-d, %-I:%M %p")
         .to_string();
-    let lightning_invoice = movement.lightning_invoice().map(|invoice| invoice.to_string());
+    let lightning_invoice = movement
+        .lightning_invoice()
+        .map(|invoice| invoice.to_string());
     let lightning_payment_hash = movement
         .lightning_payment_hash()
         .map(|payment_hash| payment_hash.to_string());
