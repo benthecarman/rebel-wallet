@@ -9,7 +9,7 @@ pub(crate) fn activity_from_movement(
     lightning_address: Option<&str>,
     lightning_address_ark_address: Option<&str>,
 ) -> ActivityItem {
-    let amount_sat = movement.effective_balance.to_sat();
+    let amount_sat = activity_amount_sat(&movement);
     let inbound = amount_sat >= 0;
     let destination = if inbound {
         movement.received_on.first()
@@ -131,6 +131,25 @@ pub(crate) fn activity_from_movement(
         lightning_payment_hash,
         lightning_payment_preimage,
     }
+}
+
+fn activity_amount_sat(movement: &Movement) -> i64 {
+    if movement.effective_balance.to_sat() >= 0 {
+        return movement.effective_balance.to_sat();
+    }
+
+    let sent_amount_sat: u64 = movement
+        .sent_to
+        .iter()
+        .map(|destination| destination.amount.to_sat())
+        .sum();
+    if sent_amount_sat == 0 {
+        return movement.effective_balance.to_sat();
+    }
+
+    i64::try_from(sent_amount_sat)
+        .map(|amount| -amount)
+        .unwrap_or_else(|_| movement.effective_balance.to_sat())
 }
 
 fn ark_address_matches(movement_address: Option<&str>, registered_address: Option<&str>) -> bool {
@@ -335,6 +354,33 @@ mod tests {
             chrono::Local::now(),
         );
         assert!(is_user_visible_movement(&receive));
+    }
+
+    #[test]
+    fn outbound_activity_amount_excludes_fee() {
+        let mut movement = Movement::new(
+            MovementId(4),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: "bark.lightning".to_string(),
+                kind: "send".to_string(),
+            },
+            chrono::Local::now(),
+        );
+        movement.effective_balance = SignedAmount::from_sat(-75);
+        movement.offchain_fee = Amount::from_sat(20);
+        movement.sent_to = vec![MovementDestination::custom(
+            "lnbc1invoice".to_string(),
+            Amount::from_sat(55),
+        )];
+
+        let item = activity_from_movement(movement, &[], None, None);
+
+        assert_eq!(item.amount_sat, -55);
+        assert_eq!(item.amount_display, "55 sats");
+        assert_eq!(item.signed_amount_display, "-55 sats");
+        assert_eq!(item.subtitle, "20 sats fee");
+        assert_eq!(item.message_text.as_deref(), Some("20 sats fee"));
     }
 
     #[test]
