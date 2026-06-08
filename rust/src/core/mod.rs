@@ -23,7 +23,8 @@ use tokio::runtime::Runtime;
 
 use crate::activity::{activity_from_movement, is_user_visible_movement, truncate_middle};
 use crate::nostr_support::{
-    contact_id, merge_contacts, metadata_from_state, nostr_client, primal_follow_contacts,
+    apply_metadata_content, contact_id, deleted_profile_content, mark_profile_deleted,
+    merge_contacts, metadata_from_state, nostr_client, primal_follow_contacts,
     primal_profile_contacts, primal_search_profiles, public_key_from_npub_or_hex,
     upload_profile_picture, PrimalProfileContact,
 };
@@ -320,11 +321,16 @@ impl AppCore {
                 lud16,
                 nip05,
             } => {
+                if self.state.nostr.deleted {
+                    self.state.toast = Some("Deleted profiles cannot be edited.".to_string());
+                    return;
+                }
                 self.state.nostr.name = name;
                 self.state.nostr.about = about;
                 self.state.nostr.picture = picture;
                 self.state.nostr.lud16 = lud16;
                 self.state.nostr.nip05 = nip05;
+                self.state.nostr.deleted = false;
                 self.state.toast = Some("Nostr profile saved locally.".to_string());
                 self.save_app_data();
             }
@@ -522,6 +528,7 @@ impl AppCore {
                 self.state.nostr.picture = nostr.picture;
                 self.state.nostr.lud16 = nostr.lud16;
                 self.state.nostr.nip05 = nostr.nip05;
+                self.state.nostr.deleted = nostr.deleted;
                 self.save_app_data();
             }
             AsyncMsg::NostrContactsLoaded(contacts) => {
@@ -1439,6 +1446,7 @@ impl AppCore {
             self.state.nostr.picture.clear();
             self.state.nostr.lud16.clear();
             self.state.nostr.nip05.clear();
+            self.state.nostr.deleted = false;
             self.state.nostr.contacts.clear();
             self.state.direct_messages.clear();
         }
@@ -1515,6 +1523,7 @@ impl AppCore {
         self.state.nostr.picture.clear();
         self.state.nostr.lud16.clear();
         self.state.nostr.nip05.clear();
+        self.state.nostr.deleted = false;
         self.state.nostr.contacts.clear();
         self.state.direct_messages.clear();
     }
@@ -1528,6 +1537,11 @@ impl AppCore {
     }
 
     fn publish_nostr_profile(&mut self) {
+        if self.state.nostr.deleted {
+            self.delete_nostr_profile();
+            return;
+        }
+
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {
@@ -1582,15 +1596,7 @@ impl AppCore {
                     .timeout(Duration::from_secs(10))
                     .await?;
                 if let Some(event) = events.iter().max_by_key(|event| event.created_at.as_secs()) {
-                    let metadata = Metadata::from_json(event.content.clone())?;
-                    nostr.name = metadata
-                        .display_name
-                        .or(metadata.name)
-                        .unwrap_or(nostr.name);
-                    nostr.about = metadata.about.unwrap_or_default();
-                    nostr.picture = metadata.picture.map(|u| u.to_string()).unwrap_or_default();
-                    nostr.lud16 = metadata.lud16.unwrap_or_default();
-                    nostr.nip05 = metadata.nip05.unwrap_or_default();
+                    apply_metadata_content(&mut nostr, &event.content)?;
                 }
                 Ok::<_, anyhow::Error>(AsyncMsg::NostrProfileLoaded(nostr))
             }
@@ -1610,12 +1616,14 @@ impl AppCore {
                 return;
             }
         };
+        mark_profile_deleted(&mut self.state.nostr);
+        self.save_app_data();
         self.state.busy.publishing_nostr = true;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let result = async {
                 let client = nostr_client().await?;
-                let content = serde_json::json!({ "deleted": true }).to_string();
+                let content = deleted_profile_content();
                 let event = EventBuilder::new(Kind::Metadata, content).finalize(&keys)?;
                 let out = client.send_event(&event).await?;
                 Ok::<_, anyhow::Error>(AsyncMsg::NostrPublished(format!(
@@ -1630,6 +1638,11 @@ impl AppCore {
     }
 
     fn upload_nostr_profile_picture(&mut self, image_base64: String) {
+        if self.state.nostr.deleted {
+            self.state.toast = Some("Deleted profiles cannot be edited.".to_string());
+            return;
+        }
+
         let keys = match self.nostr_keys() {
             Ok(keys) => keys,
             Err(e) => {

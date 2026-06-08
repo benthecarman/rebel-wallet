@@ -82,8 +82,12 @@ struct ProfileSummaryPanel: View {
             .padding(.vertical, 10)
 
             VStack(spacing: 10) {
-                ProfileActionRow(icon: "pencil", title: "Edit Profile", color: walletAccent) {
-                    mode = .edit
+                if manager.state.nostr.deleted {
+                    DeletedProfileNotice()
+                } else {
+                    ProfileActionRow(icon: "pencil", title: "Edit Profile", color: walletAccent) {
+                        mode = .edit
+                    }
                 }
                 ProfileActionRow(icon: "key.fill", title: "Nostr Keys", color: rebelBlue) {
                     mode = .keys
@@ -182,6 +186,7 @@ struct EditProfilePanel: View {
     @State private var picture = ""
     @State private var lightningAddress = ""
     @State private var nip05 = ""
+    @State private var confirmDelete = false
     @Environment(\.walletAccent) private var walletAccent
 
     private var arkLightningAddress: String? {
@@ -258,10 +263,28 @@ struct EditProfilePanel: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Label("Delete Profile", systemImage: "person.crop.circle.badge.xmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(manager.state.nostr.npub == nil)
             }
             .padding(14)
             .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+        }
+        .confirmationDialog("Delete profile?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete profile", role: .destructive) {
+                manager.dispatch(.deleteNostrProfile)
+                done()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This publishes a deleted profile to Nostr relays and permanently disables profile editing in this app.")
         }
         .onAppear {
             name = manager.state.nostr.name
@@ -280,7 +303,6 @@ struct NostrKeysPanel: View {
     @Bindable var manager: AppManager
     let done: () -> Void
     @State private var secret = ""
-    @State private var confirmDelete = false
     @State private var confirmClearCache = false
 
     var body: some View {
@@ -327,15 +349,6 @@ struct NostrKeysPanel: View {
                 .disabled(manager.state.nostr.npub == nil)
 
                 Button(role: .destructive) {
-                    confirmDelete = true
-                } label: {
-                    Label("Delete published profile", systemImage: "person.crop.circle.badge.xmark")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SecondaryButtonStyle())
-                .disabled(manager.state.nostr.npub == nil)
-
-                Button(role: .destructive) {
                     confirmClearCache = true
                 } label: {
                     Label("Clear profile cache", systemImage: "xmark.bin")
@@ -356,14 +369,6 @@ struct NostrKeysPanel: View {
             .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
         }
-        .confirmationDialog("Delete published Nostr profile?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete published profile", role: .destructive) {
-                manager.dispatch(.deleteNostrProfile)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This publishes a deletion event to configured relays.")
-        }
         .confirmationDialog("Clear cached Nostr profiles?", isPresented: $confirmClearCache, titleVisibility: .visible) {
             Button("Clear profile cache", role: .destructive) {
                 manager.dispatch(.clearNostrProfileCache)
@@ -372,6 +377,22 @@ struct NostrKeysPanel: View {
         } message: {
             Text("This deletes cached profile metadata and downloaded profile pictures from this device. Your key and contacts stay linked.")
         }
+    }
+}
+
+struct DeletedProfileNotice: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.xmark")
+                .foregroundStyle(mutedText)
+                .frame(width: 28)
+            Text("Profile deleted")
+                .font(.headline)
+            Spacer()
+        }
+        .padding(14)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
     }
 }
 

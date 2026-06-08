@@ -404,6 +404,51 @@ pub(crate) fn metadata_from_state(nostr: &NostrState) -> anyhow::Result<Metadata
     Ok(metadata)
 }
 
+pub(crate) fn deleted_profile_content() -> String {
+    json!({
+        "name": "Deleted",
+        "display_name": "Deleted",
+        "displayname": "Deleted",
+        "about": "Deleted",
+        "picture": Value::Null,
+        "lud16": Value::Null,
+        "nip05": Value::Null,
+        "website": Value::Null,
+        "banner": Value::Null,
+        "deleted": true,
+    })
+    .to_string()
+}
+
+pub(crate) fn apply_metadata_content(nostr: &mut NostrState, content: &str) -> anyhow::Result<()> {
+    let raw: Value = serde_json::from_str(content)?;
+    if raw.get("deleted").and_then(Value::as_bool).unwrap_or(false) {
+        mark_profile_deleted(nostr);
+        return Ok(());
+    }
+
+    let metadata = Metadata::from_json(content.to_string())?;
+    nostr.name = metadata
+        .display_name
+        .or(metadata.name)
+        .unwrap_or(nostr.name.clone());
+    nostr.about = metadata.about.unwrap_or_default();
+    nostr.picture = metadata.picture.map(|u| u.to_string()).unwrap_or_default();
+    nostr.lud16 = metadata.lud16.unwrap_or_default();
+    nostr.nip05 = metadata.nip05.unwrap_or_default();
+    nostr.deleted = false;
+    Ok(())
+}
+
+pub(crate) fn mark_profile_deleted(nostr: &mut NostrState) {
+    nostr.name = "Deleted".to_string();
+    nostr.about = "Deleted".to_string();
+    nostr.picture.clear();
+    nostr.lud16.clear();
+    nostr.nip05.clear();
+    nostr.deleted = true;
+}
+
 pub(crate) fn public_key_from_npub_or_hex(value: &str) -> anyhow::Result<NostrPublicKey> {
     let trimmed = value.trim();
     if trimmed.starts_with("npub") {
@@ -532,5 +577,42 @@ mod tests {
         merge_contacts(&mut existing, fetched);
 
         assert_eq!(existing[0].lightning_address, "alice@example.com");
+    }
+
+    #[test]
+    fn deleted_profile_content_tombstones_profile_fields() {
+        let content: Value = serde_json::from_str(&deleted_profile_content()).unwrap();
+
+        assert_eq!(content["name"], "Deleted");
+        assert_eq!(content["display_name"], "Deleted");
+        assert_eq!(content["displayname"], "Deleted");
+        assert_eq!(content["about"], "Deleted");
+        assert_eq!(content["picture"], Value::Null);
+        assert_eq!(content["lud16"], Value::Null);
+        assert_eq!(content["nip05"], Value::Null);
+        assert_eq!(content["deleted"], true);
+    }
+
+    #[test]
+    fn apply_metadata_content_marks_deleted_profile() {
+        let mut nostr = NostrState {
+            npub: None,
+            name: "Alice".to_string(),
+            about: "hello".to_string(),
+            picture: "https://example.com/a.png".to_string(),
+            lud16: "alice@example.com".to_string(),
+            nip05: "alice@example.com".to_string(),
+            deleted: false,
+            contacts: vec![],
+        };
+
+        apply_metadata_content(&mut nostr, &deleted_profile_content()).unwrap();
+
+        assert_eq!(nostr.name, "Deleted");
+        assert_eq!(nostr.about, "Deleted");
+        assert!(nostr.picture.is_empty());
+        assert!(nostr.lud16.is_empty());
+        assert!(nostr.nip05.is_empty());
+        assert!(nostr.deleted);
     }
 }

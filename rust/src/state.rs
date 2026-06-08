@@ -314,6 +314,8 @@ pub struct NostrState {
     pub picture: String,
     pub lud16: String,
     pub nip05: String,
+    #[serde(default)]
+    pub deleted: bool,
     pub contacts: Vec<Contact>,
 }
 
@@ -446,6 +448,7 @@ impl AppState {
                 picture: String::new(),
                 lud16: String::new(),
                 nip05: String::new(),
+                deleted: false,
                 contacts: vec![],
             },
             supported_networks: supported_networks(),

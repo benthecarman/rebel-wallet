@@ -1383,17 +1383,19 @@ public struct NostrState: Equatable, Hashable {
     public var picture: String
     public var lud16: String
     public var nip05: String
+    public var deleted: Bool
     public var contacts: [Contact]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(npub: String?, name: String, about: String, picture: String, lud16: String, nip05: String, contacts: [Contact]) {
+    public init(npub: String?, name: String, about: String, picture: String, lud16: String, nip05: String, deleted: Bool, contacts: [Contact]) {
         self.npub = npub
         self.name = name
         self.about = about
         self.picture = picture
         self.lud16 = lud16
         self.nip05 = nip05
+        self.deleted = deleted
         self.contacts = contacts
     }
 
@@ -1419,6 +1421,7 @@ public struct FfiConverterTypeNostrState: FfiConverterRustBuffer {
                 picture: FfiConverterString.read(from: &buf), 
                 lud16: FfiConverterString.read(from: &buf), 
                 nip05: FfiConverterString.read(from: &buf), 
+                deleted: FfiConverterBool.read(from: &buf), 
                 contacts: FfiConverterSequenceTypeContact.read(from: &buf)
         )
     }
@@ -1430,6 +1433,7 @@ public struct FfiConverterTypeNostrState: FfiConverterRustBuffer {
         FfiConverterString.write(value.picture, into: &buf)
         FfiConverterString.write(value.lud16, into: &buf)
         FfiConverterString.write(value.nip05, into: &buf)
+        FfiConverterBool.write(value.deleted, into: &buf)
         FfiConverterSequenceTypeContact.write(value.contacts, into: &buf)
     }
 }

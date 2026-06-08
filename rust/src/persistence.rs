@@ -124,5 +124,6 @@ mod tests {
 
         assert_eq!(data.network, WalletNetwork::Signet);
         assert_eq!(data.lightning_address_ark_address, None);
+        assert!(!data.nostr.deleted);
     }
 }
