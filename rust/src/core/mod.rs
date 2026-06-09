@@ -32,7 +32,9 @@ use crate::payments::{
     is_lnurl_pay_destination, monitor_ark_receive, monitor_lightning_receive,
     parse_send_destination, resolve_lnurl_pay_invoice,
 };
-use crate::persistence::{PersistedAppData, PersistedPriceCurrency, ServerConfig};
+use crate::persistence::{
+    PaymentAnnotation, PersistedAppData, PersistedPriceCurrency, ServerConfig, ZapReceiptRecord,
+};
 use crate::price::fetch_bitcoin_price;
 use crate::profile_cache::{
     clear_profile_cache, clear_profile_picture_dir, download_profile_picture,
@@ -43,10 +45,11 @@ use crate::profile_cache::{
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
+use crate::zaps::{check_zap_endpoint, fetch_received_zap_receipts, request_zap_invoice};
 use crate::{
-    AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind, Contact, MainTab,
-    NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase, Screen, SecretStore, SendPhase,
-    SetupState, WalletNetwork,
+    ActivityItem, AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
+    Contact, MainTab, NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase, Screen,
+    SecretStore, SendPhase, SetupState, WalletNetwork,
 };
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
@@ -114,11 +117,13 @@ async fn wallet_synced_msg(
     wallet: &Wallet,
     contacts: &[Contact],
     lightning_address: &crate::LightningAddressState,
+    payment_annotations: &[PaymentAnnotation],
+    zap_receipts: &[ZapReceiptRecord],
     maintenance_checked: bool,
 ) -> anyhow::Result<AsyncMsg> {
     let balance = wallet.balance().await.context("balance failed")?;
     let history = wallet.history().await.context("history failed")?;
-    let activity = history
+    let mut activity: Vec<_> = history
         .into_iter()
         .filter(is_user_visible_movement)
         .map(|movement| {
@@ -130,6 +135,7 @@ async fn wallet_synced_msg(
             )
         })
         .collect();
+    apply_activity_metadata(&mut activity, contacts, payment_annotations, zap_receipts);
     Ok(AsyncMsg::WalletSynced {
         balance_sat: balance.spendable.to_sat(),
         pending_receive_sat: balance.claimable_lightning_receive.to_sat(),
@@ -174,6 +180,8 @@ struct AppCore {
     profile_picture_downloads: HashSet<String>,
     profile_picture_download_semaphore: Arc<tokio::sync::Semaphore>,
     profile_info_requests: HashSet<String>,
+    payment_annotations: Vec<PaymentAnnotation>,
+    zap_receipts: Vec<ZapReceiptRecord>,
     rev: u64,
     next_capability_id: u64,
     send_fee_estimate_request_id: u64,
@@ -201,6 +209,8 @@ impl AppCore {
             profile_picture_downloads: HashSet::new(),
             profile_picture_download_semaphore: new_profile_picture_download_semaphore(),
             profile_info_requests: HashSet::new(),
+            payment_annotations: Vec::new(),
+            zap_receipts: Vec::new(),
             rev: 0,
             next_capability_id: 0,
             send_fee_estimate_request_id: 0,
@@ -285,18 +295,25 @@ impl AppCore {
             }
             AppAction::ContinueSendSearch => {
                 let query = self.state.send.search_query.clone();
+                self.clear_send_contact_selection();
                 self.set_send_destination(query);
             }
             AppAction::SelectSendContact { contact_id } => self.select_send_contact(contact_id),
             AppAction::PrefetchProfilePictures { contact_ids } => {
                 self.prefetch_profile_pictures(contact_ids)
             }
-            AppAction::SetSendDestination { destination } => self.set_send_destination(destination),
+            AppAction::SetSendDestination { destination } => {
+                self.clear_send_contact_selection();
+                self.set_send_destination(destination);
+            }
             AppAction::SetSendAmount { amount_sat } => {
                 self.state.send.amount_sat = amount_sat;
                 self.request_send_fee_estimate();
             }
             AppAction::SetSendMemo { memo } => self.state.send.memo = memo,
+            AppAction::SetSendZapEnabled { enabled } => {
+                self.state.send.zap_enabled = enabled && self.state.send.zap_available;
+            }
             AppAction::PayDestination => self.pay_destination(),
             AppAction::PayLightningInvoice {
                 invoice,
@@ -326,6 +343,7 @@ impl AppCore {
             AppAction::CompleteQrScan { value } => {
                 self.state.capability_request = None;
                 if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.clear_send_contact_selection();
                     self.set_send_destination(value);
                     if self.state.router.screen_stack.last() != Some(&Screen::Send) {
                         self.state.router.screen_stack.push(Screen::Send);
@@ -335,6 +353,7 @@ impl AppCore {
             AppAction::CompleteClipboardRead { value } => {
                 self.state.capability_request = None;
                 if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.clear_send_contact_selection();
                     self.set_send_destination(value);
                 }
             }
@@ -493,6 +512,7 @@ impl AppCore {
                 self.state.wallet.pending_refresh_sat = pending_refresh_sat;
                 self.state.wallet.last_sync = Some(now_label());
                 self.state.activity = activity;
+                self.scan_zap_receipts();
             }
             AsyncMsg::ArkAddress(address) => {
                 self.state.receive.ark_address = Some(address);
@@ -592,11 +612,35 @@ impl AppCore {
                     self.state.send.fee_estimate_error = Some(error);
                 }
             }
-            AsyncMsg::Paid(result) => {
+            AsyncMsg::Paid { result, annotation } => {
+                if let Some(annotation) = annotation {
+                    self.upsert_payment_annotation(annotation);
+                    self.save_app_data();
+                }
                 self.state.send.phase = SendPhase::Success;
                 self.state.send.success_amount_display = self.state.send.amount_display.clone();
                 self.state.send.last_result = Some(result);
                 self.maintain_vtxos();
+            }
+            AsyncMsg::ZapAvailabilityChecked {
+                contact_id,
+                available,
+            } => {
+                if self.state.send.selected_contact_id.as_deref() == Some(contact_id.as_str()) {
+                    self.state.send.zap_available = available;
+                    if !available {
+                        self.state.send.zap_enabled = false;
+                    }
+                }
+            }
+            AsyncMsg::ZapReceiptsLoaded { receipts, records } => {
+                let contacts = self.cache_primal_profile_contacts(records);
+                merge_contacts(&mut self.state.nostr.contacts, contacts);
+                for receipt in receipts {
+                    self.upsert_zap_receipt(receipt);
+                }
+                self.save_app_data();
+                self.sync_wallet();
             }
             AsyncMsg::Seed(seed) => {
                 self.state.recovery_phrase = Some(seed);
@@ -724,7 +768,7 @@ impl AppCore {
             AsyncMsg::ArkAddress(_) | AsyncMsg::LightningInvoice { .. } => {
                 self.state.busy.creating_invoice = false;
             }
-            AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
+            AsyncMsg::Paid { .. } => self.state.busy.sending_payment = false,
             AsyncMsg::LightningAddressReady(_)
             | AsyncMsg::SendFeeEstimateDue { .. }
             | AsyncMsg::SendFeeEstimated { .. }
@@ -740,6 +784,8 @@ impl AppCore {
             AsyncMsg::ArkReceiveConfirmed { .. }
             | AsyncMsg::LightningReceiveStatus { .. }
             | AsyncMsg::LightningReceiveClaimed { .. }
+            | AsyncMsg::ZapAvailabilityChecked { .. }
+            | AsyncMsg::ZapReceiptsLoaded { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
             | AsyncMsg::DirectMessageSent(_)
@@ -898,10 +944,20 @@ impl AppCore {
         let tx = self.tx.clone();
         let contacts = self.state.nostr.contacts.clone();
         let lightning_address = self.state.lightning_address.clone();
+        let payment_annotations = self.payment_annotations.clone();
+        let zap_receipts = self.zap_receipts.clone();
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
-                wallet_synced_msg(&wallet, &contacts, &lightning_address, false).await
+                wallet_synced_msg(
+                    &wallet,
+                    &contacts,
+                    &lightning_address,
+                    &payment_annotations,
+                    &zap_receipts,
+                    false,
+                )
+                .await
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("Sync failed: {e:#}")));
@@ -933,6 +989,8 @@ impl AppCore {
         let tx = self.tx.clone();
         let contacts = self.state.nostr.contacts.clone();
         let lightning_address = self.state.lightning_address.clone();
+        let payment_annotations = self.payment_annotations.clone();
+        let zap_receipts = self.zap_receipts.clone();
         self.rt.spawn(async move {
             let result = async {
                 wallet.sync().await;
@@ -955,7 +1013,15 @@ impl AppCore {
                         .context("delegated refresh scheduling failed")?;
                 }
 
-                wallet_synced_msg(&wallet, &contacts, &lightning_address, true).await
+                wallet_synced_msg(
+                    &wallet,
+                    &contacts,
+                    &lightning_address,
+                    &payment_annotations,
+                    &zap_receipts,
+                    true,
+                )
+                .await
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("VTXO refresh check failed: {e:#}")));
@@ -1032,7 +1098,9 @@ impl AppCore {
             return;
         }
         let lower = destination.to_lowercase();
-        if is_lnurl_pay_destination(&destination) {
+        if self.state.send.zap_enabled {
+            self.pay_zap_destination(destination, self.state.send.amount_sat);
+        } else if is_lnurl_pay_destination(&destination) {
             self.pay_lnurl_destination(destination, self.state.send.amount_sat);
         } else if lower.starts_with("lightning:") || lower.starts_with("ln") {
             let invoice = destination
@@ -1120,14 +1188,23 @@ impl AppCore {
         }
 
         contact.last_used = now_unix();
+        self.state.send.selected_contact_id = Some(contact.id.clone());
+        self.state.send.zap_enabled = false;
+        self.state.send.zap_available = false;
+        let contact_id = contact.id.clone();
+        let npub = contact.npub.clone();
         self.save_app_data();
         self.set_send_destination(destination);
+        self.check_send_zap_availability(contact_id, npub, self.state.send.destination.clone());
     }
 
     fn reset_send_draft(&mut self) {
         self.state.send.destination.clear();
         self.state.send.search_query.clear();
         self.state.send.global_search_results.clear();
+        self.state.send.selected_contact_id = None;
+        self.state.send.zap_enabled = false;
+        self.state.send.zap_available = false;
         self.state.send.amount_sat = 0;
         self.state.send.memo.clear();
         self.state.send.last_result = None;
@@ -1224,6 +1301,105 @@ impl AppCore {
         self.send_fee_estimate_request_id == request_id
             && self.state.send.destination.trim() == destination
             && self.state.send.amount_sat == amount_sat
+    }
+
+    fn clear_send_contact_selection(&mut self) {
+        self.state.send.selected_contact_id = None;
+        self.state.send.zap_enabled = false;
+        self.state.send.zap_available = false;
+    }
+
+    fn check_send_zap_availability(&self, contact_id: String, npub: String, destination: String) {
+        if public_key_from_npub_or_hex(&npub).is_err() || destination.trim().is_empty() {
+            return;
+        }
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let available = check_zap_endpoint(&destination).await.is_ok();
+            let _ = tx.send(CoreMsg::Async(AsyncMsg::ZapAvailabilityChecked {
+                contact_id,
+                available,
+            }));
+        });
+    }
+
+    fn selected_send_contact(&self) -> Option<Contact> {
+        let contact_id = self.state.send.selected_contact_id.as_ref()?;
+        self.state
+            .nostr
+            .contacts
+            .iter()
+            .find(|contact| &contact.id == contact_id)
+            .cloned()
+    }
+
+    fn payment_annotation(
+        &self,
+        destination: String,
+        invoice: Option<String>,
+        amount_sat: i64,
+        zap: bool,
+    ) -> Option<PaymentAnnotation> {
+        let contact_id = self.state.send.selected_contact_id.clone()?;
+        Some(PaymentAnnotation {
+            contact_id: Some(contact_id),
+            destination,
+            invoice,
+            payment_hash: None,
+            amount_sat,
+            outbound: amount_sat < 0,
+            zap,
+            created_at: now_unix(),
+        })
+    }
+
+    fn upsert_payment_annotation(&mut self, annotation: PaymentAnnotation) {
+        let duplicate = self.payment_annotations.iter().any(|existing| {
+            existing.payment_hash.is_some() && existing.payment_hash == annotation.payment_hash
+                || existing.invoice.is_some() && existing.invoice == annotation.invoice
+        });
+        if !duplicate {
+            self.payment_annotations.push(annotation);
+        }
+    }
+
+    fn upsert_zap_receipt(&mut self, receipt: ZapReceiptRecord) {
+        if !self
+            .zap_receipts
+            .iter()
+            .any(|existing| existing.event_id == receipt.event_id)
+        {
+            self.zap_receipts.push(receipt);
+        }
+    }
+
+    fn scan_zap_receipts(&self) {
+        let keys = match self.nostr_keys() {
+            Ok(keys) => keys,
+            Err(_) => return,
+        };
+        let existing = self.zap_receipts.clone();
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let Ok(receipts) = fetch_received_zap_receipts(keys.public_key(), &existing).await
+            else {
+                return;
+            };
+            if receipts.is_empty() {
+                return;
+            }
+            let pubkeys = receipts
+                .iter()
+                .filter_map(|receipt| NostrPublicKey::from_hex(&receipt.sender_pubkey).ok())
+                .collect::<Vec<_>>();
+            let records = primal_profile_contacts(pubkeys, false)
+                .await
+                .unwrap_or_default();
+            let _ = tx.send(CoreMsg::Async(AsyncMsg::ZapReceiptsLoaded {
+                receipts,
+                records,
+            }));
+        });
     }
 
     fn request_capability(&mut self, kind: CapabilityRequestKind) {
@@ -1459,17 +1635,32 @@ impl AppCore {
         self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
+        let annotation = self.payment_annotation(
+            String::new(),
+            Some(invoice.clone()),
+            amount_sat.map(|amount| -(amount as i64)).unwrap_or(0),
+            false,
+        );
         self.rt.spawn(async move {
             let user_amount = amount_sat.filter(|a| *a > 0).map(Amount::from_sat);
             let parsed = Bolt11Invoice::from_str(&invoice);
             let msg = match parsed {
-                Ok(invoice) => match wallet
-                    .pay_lightning_invoice(invoice, user_amount, true)
-                    .await
-                {
-                    Ok(_) => AsyncMsg::Paid("Lightning invoice paid.".to_string()),
-                    Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
-                },
+                Ok(invoice) => {
+                    let annotation = annotation.map(|mut annotation| {
+                        annotation.payment_hash = Some(invoice.payment_hash().to_string());
+                        annotation
+                    });
+                    match wallet
+                        .pay_lightning_invoice(invoice, user_amount, true)
+                        .await
+                    {
+                        Ok(_) => AsyncMsg::Paid {
+                            result: "Lightning invoice paid.".to_string(),
+                            annotation,
+                        },
+                        Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
+                    }
+                }
                 Err(e) => AsyncMsg::Error(format!("Invalid Lightning invoice: {e}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
@@ -1494,26 +1685,37 @@ impl AppCore {
         self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
+        let annotation =
+            self.payment_annotation(destination.clone(), None, -(amount_sat as i64), false);
         self.rt.spawn(async move {
             let msg = match resolve_lnurl_pay_invoice(&destination, amount_sat).await {
                 Ok(invoice) => match Bolt11Invoice::from_str(&invoice) {
                     Ok(invoice) => match amount_sat.checked_mul(1_000) {
                         Some(requested_msat) => match invoice.amount_milli_satoshis() {
-                            Some(invoice_msat) if invoice_msat == requested_msat => match wallet
-                                .pay_lightning_invoice(
-                                    invoice,
-                                    Some(Amount::from_sat(amount_sat)),
-                                    true,
-                                )
-                                .await
-                            {
-                                Ok(_) => {
-                                    AsyncMsg::Paid("Lightning address payment sent.".to_string())
+                            Some(invoice_msat) if invoice_msat == requested_msat => {
+                                let invoice_text = invoice.to_string();
+                                let payment_hash = invoice.payment_hash().to_string();
+                                match wallet
+                                    .pay_lightning_invoice(
+                                        invoice,
+                                        Some(Amount::from_sat(amount_sat)),
+                                        true,
+                                    )
+                                    .await
+                                {
+                                    Ok(_) => AsyncMsg::Paid {
+                                        result: "Lightning address payment sent.".to_string(),
+                                        annotation: annotation.map(|mut annotation| {
+                                            annotation.invoice = Some(invoice_text);
+                                            annotation.payment_hash = Some(payment_hash);
+                                            annotation
+                                        }),
+                                    },
+                                    Err(e) => {
+                                        AsyncMsg::Error(format!("Lightning payment failed: {e:#}"))
+                                    }
                                 }
-                                Err(e) => {
-                                    AsyncMsg::Error(format!("Lightning payment failed: {e:#}"))
-                                }
-                            },
+                            }
                             Some(invoice_msat) => AsyncMsg::Error(format!(
                                 "LNURL invoice amount mismatch: requested {} sats, got {} sats.",
                                 amount_sat,
@@ -1535,6 +1737,98 @@ impl AppCore {
         });
     }
 
+    fn pay_zap_destination(&mut self, destination: String, amount_sat: u64) {
+        if amount_sat == 0 {
+            self.state.toast = Some("Enter an amount before sending a zap.".to_string());
+            return;
+        }
+        if amount_sat > self.state.wallet.balance_sat {
+            self.state.toast = Some("Insufficient balance for this zap.".to_string());
+            return;
+        }
+        let Some(wallet) = self.wallet.clone() else {
+            self.state.toast = Some("Wallet is not ready yet.".to_string());
+            return;
+        };
+        let keys = match self.nostr_keys() {
+            Ok(keys) => keys,
+            Err(e) => {
+                self.state.toast = Some(format!("{e:#}"));
+                return;
+            }
+        };
+        let Some(contact) = self.selected_send_contact() else {
+            self.state.toast = Some("Select a zap-capable contact before zapping.".to_string());
+            return;
+        };
+        let recipient_pubkey = match public_key_from_npub_or_hex(&contact.npub) {
+            Ok(pubkey) => pubkey,
+            Err(e) => {
+                self.state.toast = Some(format!("Invalid contact Nostr key: {e:#}"));
+                return;
+            }
+        };
+
+        self.state.busy.sending_payment = true;
+        self.state.send.phase = SendPhase::Sending;
+        self.state.send.last_result = None;
+        let tx = self.tx.clone();
+        let memo = self.state.send.memo.clone();
+        let annotation =
+            self.payment_annotation(destination.clone(), None, -(amount_sat as i64), true);
+        self.rt.spawn(async move {
+            let msg =
+                match request_zap_invoice(&destination, recipient_pubkey, amount_sat, &memo, &keys)
+                    .await
+                {
+                    Ok(invoice) => match Bolt11Invoice::from_str(&invoice) {
+                        Ok(invoice) => match amount_sat.checked_mul(1_000) {
+                            Some(requested_msat) => match invoice.amount_milli_satoshis() {
+                                Some(invoice_msat) if invoice_msat == requested_msat => {
+                                    let invoice_text = invoice.to_string();
+                                    let payment_hash = invoice.payment_hash().to_string();
+                                    match wallet
+                                        .pay_lightning_invoice(
+                                            invoice,
+                                            Some(Amount::from_sat(amount_sat)),
+                                            true,
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => AsyncMsg::Paid {
+                                            result: "Zap sent.".to_string(),
+                                            annotation: annotation.map(|mut annotation| {
+                                                annotation.invoice = Some(invoice_text);
+                                                annotation.payment_hash = Some(payment_hash);
+                                                annotation
+                                            }),
+                                        },
+                                        Err(e) => {
+                                            AsyncMsg::Error(format!("Zap payment failed: {e:#}"))
+                                        }
+                                    }
+                                }
+                                Some(invoice_msat) => AsyncMsg::Error(format!(
+                                    "Zap invoice amount mismatch: requested {} sats, got {} sats.",
+                                    amount_sat,
+                                    msats_to_display_sats(invoice_msat)
+                                )),
+                                None => AsyncMsg::Error(
+                                    "Zap invoice did not include an amount.".to_string(),
+                                ),
+                            },
+                            None => {
+                                AsyncMsg::Error("Zap failed: send amount is too large.".to_string())
+                            }
+                        },
+                        Err(e) => AsyncMsg::Error(format!("Invalid zap invoice: {e}")),
+                    },
+                    Err(e) => AsyncMsg::Error(format!("Zap failed: {e:#}")),
+                };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
+    }
+
     fn pay_ark_address(&mut self, address: String, amount_sat: u64) {
         if amount_sat == 0 {
             self.state.toast = Some("Enter an amount before sending.".to_string());
@@ -1552,13 +1846,18 @@ impl AppCore {
         self.state.send.phase = SendPhase::Sending;
         self.state.send.last_result = None;
         let tx = self.tx.clone();
+        let annotation =
+            self.payment_annotation(address.clone(), None, -(amount_sat as i64), false);
         self.rt.spawn(async move {
             let msg = match address.parse() {
                 Ok(address) => match wallet
                     .send_arkoor_payment(&address, Amount::from_sat(amount_sat))
                     .await
                 {
-                    Ok(_) => AsyncMsg::Paid("Ark payment sent.".to_string()),
+                    Ok(_) => AsyncMsg::Paid {
+                        result: "Ark payment sent.".to_string(),
+                        annotation,
+                    },
                     Err(e) => AsyncMsg::Error(format!("Ark payment failed: {e:#}")),
                 },
                 Err(e) => AsyncMsg::Error(format!("Invalid Ark address: {e}")),
@@ -2154,6 +2453,8 @@ impl AppCore {
                 self.state.lightning_address.backing_ark_address = data
                     .lightning_address_ark_address
                     .filter(|address| !address.trim().is_empty());
+                self.payment_annotations = data.payment_annotations;
+                self.zap_receipts = data.zap_receipts;
             }
             Err(e) => {
                 self.state.toast = Some(format!("Could not load local app data: {e}"));
@@ -2185,6 +2486,8 @@ impl AppCore {
                 currency: self.state.wallet.price_currency.clone(),
             },
             lightning_address_ark_address: None,
+            payment_annotations: self.payment_annotations.clone(),
+            zap_receipts: self.zap_receipts.clone(),
         };
         if let Ok(raw) = serde_json::to_string_pretty(&data) {
             let _ = std::fs::create_dir_all(&self.data_dir);
@@ -2219,6 +2522,117 @@ fn hydrate_contact_picture(
     if contact.picture.is_empty() {
         contact.picture = entry.picture_remote_url;
     }
+}
+
+fn apply_activity_metadata(
+    activity: &mut [ActivityItem],
+    contacts: &[Contact],
+    annotations: &[PaymentAnnotation],
+    zap_receipts: &[ZapReceiptRecord],
+) {
+    for item in activity {
+        if item.amount_sat < 0 {
+            if let Some(annotation) = annotations
+                .iter()
+                .find(|annotation| annotation_matches_activity(annotation, item))
+            {
+                if let Some(contact) = annotation
+                    .contact_id
+                    .as_ref()
+                    .and_then(|id| contacts.iter().find(|contact| &contact.id == id))
+                    .cloned()
+                {
+                    apply_activity_contact(item, contact);
+                }
+            }
+        } else if let Some(receipt) = zap_receipts
+            .iter()
+            .find(|receipt| zap_receipt_matches_activity(receipt, item))
+        {
+            if let Some(contact) = contacts
+                .iter()
+                .find(|contact| {
+                    contact_pubkey_hex(contact).as_deref() == Some(&receipt.sender_pubkey)
+                })
+                .cloned()
+            {
+                apply_activity_contact(item, contact);
+            }
+            if item.message_text.is_none() {
+                item.message_text = receipt.comment.clone();
+            }
+            item.method_display = "Zap".to_string();
+            item.method_icon = "bolt.fill".to_string();
+        }
+    }
+}
+
+fn annotation_matches_activity(annotation: &PaymentAnnotation, item: &ActivityItem) -> bool {
+    if annotation.outbound != (item.amount_sat < 0) {
+        return false;
+    }
+    if let (Some(a), Some(b)) = (&annotation.payment_hash, &item.lightning_payment_hash) {
+        if !a.is_empty() && a == b {
+            return true;
+        }
+    }
+    if let (Some(a), Some(b)) = (&annotation.invoice, &item.lightning_invoice) {
+        if !a.is_empty() && a == b {
+            return true;
+        }
+    }
+    if !annotation.destination.trim().is_empty() {
+        if item
+            .ark_address
+            .as_ref()
+            .is_some_and(|address| address == &annotation.destination)
+        {
+            return true;
+        }
+    }
+    annotation.amount_sat == item.amount_sat
+}
+
+fn zap_receipt_matches_activity(receipt: &ZapReceiptRecord, item: &ActivityItem) -> bool {
+    if item.amount_sat <= 0 {
+        return false;
+    }
+    if let (Some(a), Some(b)) = (&receipt.payment_hash, &item.lightning_payment_hash) {
+        if !a.is_empty() && a == b {
+            return true;
+        }
+    }
+    if let (Some(a), Some(b)) = (&receipt.invoice, &item.lightning_invoice) {
+        if !a.is_empty() && a == b {
+            return true;
+        }
+    }
+    receipt
+        .amount_msat
+        .map(|msat| msat / 1_000 == item.amount_sat.unsigned_abs())
+        .unwrap_or(false)
+}
+
+fn apply_activity_contact(item: &mut ActivityItem, contact: Contact) {
+    let name = if contact.name.trim().is_empty() {
+        "Unknown".to_string()
+    } else {
+        contact.name.clone()
+    };
+    if item.amount_sat >= 0 {
+        item.display_primary_name = name;
+        item.display_secondary_name = "you".to_string();
+    } else {
+        item.display_primary_name = "You".to_string();
+        item.display_secondary_name = name;
+    }
+    item.counterparty = Some(contact);
+}
+
+fn contact_pubkey_hex(contact: &Contact) -> Option<String> {
+    public_key_from_npub_or_hex(&contact.npub)
+        .ok()
+        .map(|pubkey| pubkey.to_hex())
 }
 
 fn sanitize_persisted_contact_pictures(

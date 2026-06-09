@@ -15,6 +15,34 @@ pub(crate) struct PersistedAppData {
     pub(crate) price_currency: PersistedPriceCurrency,
     #[serde(default, skip_serializing)]
     pub(crate) lightning_address_ark_address: Option<String>,
+    #[serde(default)]
+    pub(crate) payment_annotations: Vec<PaymentAnnotation>,
+    #[serde(default)]
+    pub(crate) zap_receipts: Vec<ZapReceiptRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct PaymentAnnotation {
+    pub(crate) contact_id: Option<String>,
+    pub(crate) destination: String,
+    pub(crate) invoice: Option<String>,
+    pub(crate) payment_hash: Option<String>,
+    pub(crate) amount_sat: i64,
+    pub(crate) outbound: bool,
+    pub(crate) zap: bool,
+    pub(crate) created_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ZapReceiptRecord {
+    pub(crate) event_id: String,
+    pub(crate) sender_pubkey: String,
+    pub(crate) recipient_pubkey: String,
+    pub(crate) invoice: Option<String>,
+    pub(crate) payment_hash: Option<String>,
+    pub(crate) amount_msat: Option<u64>,
+    pub(crate) comment: Option<String>,
+    pub(crate) created_at: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -124,6 +152,8 @@ mod tests {
 
         assert_eq!(data.network, WalletNetwork::Signet);
         assert_eq!(data.lightning_address_ark_address, None);
+        assert!(data.payment_annotations.is_empty());
+        assert!(data.zap_receipts.is_empty());
         assert!(!data.nostr.deleted);
     }
 }

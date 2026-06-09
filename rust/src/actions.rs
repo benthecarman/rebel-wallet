@@ -62,6 +62,9 @@ pub enum AppAction {
     SetSendMemo {
         memo: String,
     },
+    SetSendZapEnabled {
+        enabled: bool,
+    },
     PayDestination,
     PayLightningInvoice {
         invoice: String,

@@ -62,6 +62,21 @@ struct SendView: View {
 
                     SendFeeSummary(send: manager.state.send)
 
+                    if manager.state.send.zapAvailable {
+                        Toggle(isOn: Binding(
+                            get: { manager.state.send.zapEnabled },
+                            set: { manager.dispatch(.setSendZapEnabled(enabled: $0)) }
+                        )) {
+                            Label("Zap", systemImage: "bolt.fill")
+                                .font(.headline)
+                        }
+                        .toggleStyle(.switch)
+                        .padding(14)
+                        .foregroundStyle(primaryText)
+                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                    }
+
                     if let result = manager.state.send.lastResult {
                         SendResultPanel(result: result)
                     }

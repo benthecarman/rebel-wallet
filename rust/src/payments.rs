@@ -202,7 +202,7 @@ pub(crate) async fn resolve_lnurl_pay_invoice(
         .ok_or_else(|| anyhow!("LNURL endpoint did not return an invoice"))
 }
 
-fn lnurl_pay_url(destination: &str) -> anyhow::Result<reqwest::Url> {
+pub(crate) fn lnurl_pay_url(destination: &str) -> anyhow::Result<reqwest::Url> {
     let destination = strip_lightning_prefix(destination.trim());
     if is_valid_lightning_address(destination) {
         let (local, domain) = destination
@@ -266,7 +266,7 @@ fn is_valid_lightning_address(address: &str) -> bool {
     })
 }
 
-fn msats_to_display_sats(msats: u64) -> String {
+pub(crate) fn msats_to_display_sats(msats: u64) -> String {
     if msats % 1_000 == 0 {
         (msats / 1_000).to_string()
     } else {

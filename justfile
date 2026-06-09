@@ -5,6 +5,7 @@ LIB_NAME := "rebel_wallet_core"
 XCF_NAME := "RebelWalletCore"
 ICED_PACKAGE := "rebel-wallet_core_desktop_iced"
 DYLIB_EXT := if os() == "macos" { "dylib" } else { "so" }
+IOS_BUNDLE_ID := "com.rebelwallet.app"
 
 default:
   @just --list
@@ -26,6 +27,34 @@ bindings:
 
 run-ios:
   rmp run ios
+
+run-ios-phone bundle_id=IOS_BUNDLE_ID: ios-rust ios-xcframework ios-xcodeproj
+  #!/usr/bin/env bash
+  set -euo pipefail
+  DEVICE_ID="$(xcrun devicectl list devices | awk '
+    NR > 2 {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "connected") {
+          print $(i - 1)
+          exit
+        }
+      }
+    }
+  ')"
+  if [ -z "$DEVICE_ID" ]; then
+    echo "No connected iOS device found." >&2
+    exit 1
+  fi
+  DERIVED_DATA="build/ios-phone-derived"
+  ./tools/xcode-run xcodebuild build \
+    -project ios/App.xcodeproj -scheme App \
+    -destination "generic/platform=iOS" \
+    -configuration Debug \
+    -derivedDataPath "$DERIVED_DATA" \
+    PRODUCT_BUNDLE_IDENTIFIER="{{bundle_id}}"
+  APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/App.app"
+  xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
+  xcrun devicectl device process launch --device "$DEVICE_ID" "{{bundle_id}}"
 
 ios-gen-swift: rust-build-host
   cargo run -p uniffi-bindgen -- generate \

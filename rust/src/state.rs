@@ -282,6 +282,9 @@ pub struct SendState {
     pub search_results: Vec<Contact>,
     pub global_search_results: Vec<Contact>,
     pub can_continue_search: bool,
+    pub selected_contact_id: Option<String>,
+    pub zap_enabled: bool,
+    pub zap_available: bool,
     pub amount_sat: u64,
     pub amount_display: String,
     pub estimating_fee: bool,
@@ -437,6 +440,9 @@ impl AppState {
                 search_results: vec![],
                 global_search_results: vec![],
                 can_continue_search: false,
+                selected_contact_id: None,
+                zap_enabled: false,
+                zap_available: false,
                 amount_sat: 0,
                 amount_display: format_sats(0),
                 estimating_fee: false,
@@ -566,6 +572,9 @@ impl AppState {
             && self.send.error_text.is_none()
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);
+        if !self.send.zap_available {
+            self.send.zap_enabled = false;
+        }
 
         self.lightning_address.address = self
             .lightning_address
@@ -907,6 +916,19 @@ mod tests {
             state.send.error_text.as_deref(),
             Some("Insufficient balance for this send.")
         );
+    }
+
+    #[test]
+    fn hides_zap_when_not_available() {
+        let mut state = AppState::initial();
+        state.send.destination = "lnbc1example".to_string();
+        state.send.zap_available = false;
+        state.send.zap_enabled = true;
+
+        state.refresh_derived();
+
+        assert!(!state.send.zap_available);
+        assert!(!state.send.zap_enabled);
     }
 
     #[test]

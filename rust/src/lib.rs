@@ -17,6 +17,7 @@ mod state;
 mod time;
 mod updates;
 mod wallet;
+mod zaps;
 
 pub use actions::AppAction;
 pub use state::{

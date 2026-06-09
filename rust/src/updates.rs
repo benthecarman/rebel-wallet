@@ -1,6 +1,7 @@
 use bark::Wallet;
 
 use crate::nostr_support::PrimalProfileContact;
+use crate::persistence::ZapReceiptRecord;
 use crate::{ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency};
 
 #[derive(uniffi::Enum, Clone, Debug)]
@@ -64,7 +65,18 @@ pub(crate) enum AsyncMsg {
         amount_sat: u64,
         error: String,
     },
-    Paid(String),
+    Paid {
+        result: String,
+        annotation: Option<crate::persistence::PaymentAnnotation>,
+    },
+    ZapAvailabilityChecked {
+        contact_id: String,
+        available: bool,
+    },
+    ZapReceiptsLoaded {
+        receipts: Vec<ZapReceiptRecord>,
+        records: Vec<PrimalProfileContact>,
+    },
     Seed(String),
     NostrProfileLoaded(NostrState),
     NostrContactsLoaded(Vec<Contact>),

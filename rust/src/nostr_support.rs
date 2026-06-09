@@ -15,7 +15,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::time::now_unix;
 use crate::{Contact, NostrState};
 
-const NOSTR_RELAYS: [&str; 3] = [
+pub(crate) const NOSTR_RELAYS: [&str; 3] = [
     "wss://relay.damus.io",
     "wss://nostr.wine",
     "wss://relay.primal.net",
