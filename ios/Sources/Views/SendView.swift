@@ -3,6 +3,8 @@ import SwiftUI
 struct SendView: View {
     @Bindable var manager: AppManager
     @Environment(\.walletAccent) private var walletAccent
+    @State private var amountText = ""
+    @FocusState private var amountFieldFocused: Bool
 
     private var destination: String {
         manager.state.send.destination.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -29,11 +31,12 @@ struct SendView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Amount")
                             .font(.headline)
-                        TextField("Sats", value: Binding(
-                            get: { manager.state.send.amountSat },
-                            set: { manager.dispatch(.setSendAmount(amountSat: $0)) }
-                        ), format: .number)
+                        TextField("Sats", text: Binding(
+                            get: { amountText },
+                            set: { setAmountText($0) }
+                        ))
                         .keyboardType(.numberPad)
+                        .focused($amountFieldFocused)
                         .padding(12)
                         .foregroundStyle(primaryText)
                         .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
@@ -92,6 +95,24 @@ struct SendView: View {
         .navigationTitle("Send")
         .background(pageBackground)
         .foregroundStyle(primaryText)
+        .onAppear {
+            syncAmountTextFromState()
+        }
+        .onChange(of: manager.state.send.amountSat) { _, _ in
+            if !amountFieldFocused {
+                syncAmountTextFromState()
+            }
+        }
+        .onChange(of: destination) { _, _ in
+            if !amountFieldFocused {
+                syncAmountTextFromState()
+            }
+        }
+        .onChange(of: amountFieldFocused) { _, focused in
+            if !focused {
+                syncAmountTextFromState()
+            }
+        }
         .fullScreenCover(isPresented: Binding(
             get: { manager.state.send.phase == .success },
             set: { if !$0 { manager.dispatch(.dismissPaymentSuccess) } }
@@ -111,6 +132,16 @@ struct SendView: View {
         manager.dispatch(.resetSendDraft)
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
+    }
+
+    private func setAmountText(_ value: String) {
+        let digits = value.filter(\.isNumber)
+        amountText = digits
+        manager.dispatch(.setSendAmount(amountSat: UInt64(digits) ?? 0))
+    }
+
+    private func syncAmountTextFromState() {
+        amountText = manager.state.send.amountSat == 0 ? "" : String(manager.state.send.amountSat)
     }
 }
 
