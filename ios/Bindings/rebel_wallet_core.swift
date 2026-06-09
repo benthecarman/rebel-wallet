@@ -1616,6 +1616,14 @@ public struct SendState: Equatable, Hashable {
     public var canContinueSearch: Bool
     public var amountSat: UInt64
     public var amountDisplay: String
+    public var estimatingFee: Bool
+    public var feeEstimateSat: UInt64?
+    public var feeEstimateDisplay: String?
+    public var feeEstimateFiatDisplay: String?
+    public var totalCostSat: UInt64?
+    public var totalCostDisplay: String?
+    public var totalCostFiatDisplay: String?
+    public var feeEstimateError: String?
     public var memo: String
     public var lastResult: String?
     public var successAmountDisplay: String
@@ -1624,7 +1632,7 @@ public struct SendState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(destination: String, destinationKind: SendDestinationKind, phase: SendPhase, searchQuery: String, searchResults: [Contact], globalSearchResults: [Contact], canContinueSearch: Bool, amountSat: UInt64, amountDisplay: String, memo: String, lastResult: String?, successAmountDisplay: String, canSubmit: Bool, errorText: String?) {
+    public init(destination: String, destinationKind: SendDestinationKind, phase: SendPhase, searchQuery: String, searchResults: [Contact], globalSearchResults: [Contact], canContinueSearch: Bool, amountSat: UInt64, amountDisplay: String, estimatingFee: Bool, feeEstimateSat: UInt64?, feeEstimateDisplay: String?, feeEstimateFiatDisplay: String?, totalCostSat: UInt64?, totalCostDisplay: String?, totalCostFiatDisplay: String?, feeEstimateError: String?, memo: String, lastResult: String?, successAmountDisplay: String, canSubmit: Bool, errorText: String?) {
         self.destination = destination
         self.destinationKind = destinationKind
         self.phase = phase
@@ -1634,6 +1642,14 @@ public struct SendState: Equatable, Hashable {
         self.canContinueSearch = canContinueSearch
         self.amountSat = amountSat
         self.amountDisplay = amountDisplay
+        self.estimatingFee = estimatingFee
+        self.feeEstimateSat = feeEstimateSat
+        self.feeEstimateDisplay = feeEstimateDisplay
+        self.feeEstimateFiatDisplay = feeEstimateFiatDisplay
+        self.totalCostSat = totalCostSat
+        self.totalCostDisplay = totalCostDisplay
+        self.totalCostFiatDisplay = totalCostFiatDisplay
+        self.feeEstimateError = feeEstimateError
         self.memo = memo
         self.lastResult = lastResult
         self.successAmountDisplay = successAmountDisplay
@@ -1666,6 +1682,14 @@ public struct FfiConverterTypeSendState: FfiConverterRustBuffer {
                 canContinueSearch: FfiConverterBool.read(from: &buf), 
                 amountSat: FfiConverterUInt64.read(from: &buf), 
                 amountDisplay: FfiConverterString.read(from: &buf), 
+                estimatingFee: FfiConverterBool.read(from: &buf), 
+                feeEstimateSat: FfiConverterOptionUInt64.read(from: &buf), 
+                feeEstimateDisplay: FfiConverterOptionString.read(from: &buf), 
+                feeEstimateFiatDisplay: FfiConverterOptionString.read(from: &buf), 
+                totalCostSat: FfiConverterOptionUInt64.read(from: &buf), 
+                totalCostDisplay: FfiConverterOptionString.read(from: &buf), 
+                totalCostFiatDisplay: FfiConverterOptionString.read(from: &buf), 
+                feeEstimateError: FfiConverterOptionString.read(from: &buf), 
                 memo: FfiConverterString.read(from: &buf), 
                 lastResult: FfiConverterOptionString.read(from: &buf), 
                 successAmountDisplay: FfiConverterString.read(from: &buf), 
@@ -1684,6 +1708,14 @@ public struct FfiConverterTypeSendState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.canContinueSearch, into: &buf)
         FfiConverterUInt64.write(value.amountSat, into: &buf)
         FfiConverterString.write(value.amountDisplay, into: &buf)
+        FfiConverterBool.write(value.estimatingFee, into: &buf)
+        FfiConverterOptionUInt64.write(value.feeEstimateSat, into: &buf)
+        FfiConverterOptionString.write(value.feeEstimateDisplay, into: &buf)
+        FfiConverterOptionString.write(value.feeEstimateFiatDisplay, into: &buf)
+        FfiConverterOptionUInt64.write(value.totalCostSat, into: &buf)
+        FfiConverterOptionString.write(value.totalCostDisplay, into: &buf)
+        FfiConverterOptionString.write(value.totalCostFiatDisplay, into: &buf)
+        FfiConverterOptionString.write(value.feeEstimateError, into: &buf)
         FfiConverterString.write(value.memo, into: &buf)
         FfiConverterOptionString.write(value.lastResult, into: &buf)
         FfiConverterString.write(value.successAmountDisplay, into: &buf)

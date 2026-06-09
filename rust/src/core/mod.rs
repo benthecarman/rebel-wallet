@@ -65,6 +65,35 @@ fn msats_to_display_sats(msats: u64) -> String {
     }
 }
 
+fn send_fee_estimate_request(destination: &str, amount_sat: u64) -> Option<(u64, bool)> {
+    let destination = destination.trim();
+    if destination.is_empty() {
+        return None;
+    }
+
+    if is_lnurl_pay_destination(destination) {
+        return (amount_sat > 0).then_some((amount_sat, true));
+    }
+
+    let lower = destination.to_lowercase();
+    if lower.starts_with("lightning:") || lower.starts_with("ln") {
+        if amount_sat > 0 {
+            return Some((amount_sat, true));
+        }
+
+        let invoice = destination
+            .strip_prefix("lightning:")
+            .or_else(|| destination.strip_prefix("LIGHTNING:"))
+            .unwrap_or(destination);
+        let invoice = Bolt11Invoice::from_str(invoice).ok()?;
+        let invoice_msat = invoice.amount_milli_satoshis()?;
+        let invoice_sat = invoice_msat.checked_add(999)? / 1_000;
+        return (invoice_sat > 0).then_some((invoice_sat, true));
+    }
+
+    (amount_sat > 0).then_some((amount_sat, false))
+}
+
 fn derive_nostr_keys_from_mnemonic(mnemonic: &str) -> anyhow::Result<Keys> {
     let mnemonic = Mnemonic::from_str(mnemonic).context("invalid recovery phrase")?;
     let seed = mnemonic.to_seed("");
@@ -260,7 +289,10 @@ impl AppCore {
                 self.prefetch_profile_pictures(contact_ids)
             }
             AppAction::SetSendDestination { destination } => self.set_send_destination(destination),
-            AppAction::SetSendAmount { amount_sat } => self.state.send.amount_sat = amount_sat,
+            AppAction::SetSendAmount { amount_sat } => {
+                self.state.send.amount_sat = amount_sat;
+                self.request_send_fee_estimate();
+            }
             AppAction::SetSendMemo { memo } => self.state.send.memo = memo,
             AppAction::PayDestination => self.pay_destination(),
             AppAction::PayLightningInvoice {
@@ -513,6 +545,31 @@ impl AppCore {
                 self.save_lightning_address_ark_address(&ark_address);
                 self.save_app_data();
             }
+            AsyncMsg::SendFeeEstimated {
+                destination,
+                amount_sat,
+                fee_sat,
+                total_sat,
+            } => {
+                if self.send_fee_estimate_is_current(&destination, amount_sat) {
+                    self.state.send.estimating_fee = false;
+                    self.state.send.fee_estimate_sat = Some(fee_sat);
+                    self.state.send.total_cost_sat = Some(total_sat);
+                    self.state.send.fee_estimate_error = None;
+                }
+            }
+            AsyncMsg::SendFeeEstimateFailed {
+                destination,
+                amount_sat,
+                error,
+            } => {
+                if self.send_fee_estimate_is_current(&destination, amount_sat) {
+                    self.state.send.estimating_fee = false;
+                    self.state.send.fee_estimate_sat = None;
+                    self.state.send.total_cost_sat = None;
+                    self.state.send.fee_estimate_error = Some(error);
+                }
+            }
             AsyncMsg::Paid(result) => {
                 self.state.send.phase = SendPhase::Success;
                 self.state.send.success_amount_display = self.state.send.amount_display.clone();
@@ -646,7 +703,9 @@ impl AppCore {
                 self.state.busy.creating_invoice = false;
             }
             AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
-            AsyncMsg::LightningAddressReady(_) => {}
+            AsyncMsg::LightningAddressReady(_)
+            | AsyncMsg::SendFeeEstimated { .. }
+            | AsyncMsg::SendFeeEstimateFailed { .. } => {}
             AsyncMsg::NostrProfilePictureUploaded(_) => {
                 self.state.busy.uploading_profile_picture = false;
             }
@@ -940,7 +999,12 @@ impl AppCore {
             self.state.toast = Some("Enter a destination first.".to_string());
             return;
         }
-        if self.state.send.amount_sat > self.state.wallet.balance_sat {
+        let total_cost_sat = self
+            .state
+            .send
+            .total_cost_sat
+            .unwrap_or(self.state.send.amount_sat);
+        if total_cost_sat > self.state.wallet.balance_sat {
             self.state.toast = Some("Insufficient balance for this send.".to_string());
             return;
         }
@@ -986,6 +1050,7 @@ impl AppCore {
         }
         self.state.send.search_query = raw;
         self.state.send.phase = SendPhase::Editing;
+        self.request_send_fee_estimate();
     }
 
     fn select_send_contact(&mut self, contact_id: String) {
@@ -1044,6 +1109,64 @@ impl AppCore {
         self.state.send.memo.clear();
         self.state.send.last_result = None;
         self.state.send.phase = SendPhase::Drafting;
+        self.clear_send_fee_estimate();
+    }
+
+    fn request_send_fee_estimate(&mut self) {
+        self.clear_send_fee_estimate();
+
+        let destination = self.state.send.destination.trim().to_string();
+        if destination.is_empty() {
+            return;
+        }
+
+        let Some(wallet) = self.wallet.clone() else {
+            return;
+        };
+
+        let amount_sat = self.state.send.amount_sat;
+        let Some((estimate_amount_sat, is_lightning)) =
+            send_fee_estimate_request(&destination, amount_sat)
+        else {
+            return;
+        };
+
+        self.state.send.estimating_fee = true;
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let estimate_amount = Amount::from_sat(estimate_amount_sat);
+            let result = if is_lightning {
+                wallet.estimate_lightning_send_fee(estimate_amount).await
+            } else {
+                wallet.estimate_arkoor_payment_fee(estimate_amount).await
+            };
+            let msg = match result {
+                Ok(estimate) => AsyncMsg::SendFeeEstimated {
+                    destination,
+                    amount_sat,
+                    fee_sat: estimate.fee.to_sat(),
+                    total_sat: estimate.gross_amount.to_sat(),
+                },
+                Err(e) => AsyncMsg::SendFeeEstimateFailed {
+                    destination,
+                    amount_sat,
+                    error: format!("{e:#}"),
+                },
+            };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
+    }
+
+    fn clear_send_fee_estimate(&mut self) {
+        self.state.send.estimating_fee = false;
+        self.state.send.fee_estimate_sat = None;
+        self.state.send.total_cost_sat = None;
+        self.state.send.fee_estimate_error = None;
+    }
+
+    fn send_fee_estimate_is_current(&self, destination: &str, amount_sat: u64) -> bool {
+        self.state.send.destination.trim() == destination
+            && self.state.send.amount_sat == amount_sat
     }
 
     fn request_capability(&mut self, kind: CapabilityRequestKind) {

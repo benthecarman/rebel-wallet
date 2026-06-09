@@ -57,6 +57,8 @@ struct SendView: View {
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
                     }
 
+                    SendFeeSummary(send: manager.state.send)
+
                     if let result = manager.state.send.lastResult {
                         SendResultPanel(result: result)
                     }
@@ -109,6 +111,74 @@ struct SendView: View {
         manager.dispatch(.resetSendDraft)
         manager.dispatch(.selectTab(tab: .home))
         manager.dispatch(.updateScreenStack(stack: []))
+    }
+}
+
+struct SendFeeSummary: View {
+    let send: SendState
+
+    var body: some View {
+        if send.estimatingFee || send.feeEstimateDisplay != nil || send.feeEstimateError != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                if send.estimatingFee {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Estimating fee...")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(mutedText)
+                } else if let fee = send.feeEstimateDisplay, let total = send.totalCostDisplay {
+                    FeeSummaryRow(
+                        label: "Estimated fee",
+                        value: fee,
+                        fiatValue: send.feeEstimateFiatDisplay
+                    )
+                    FeeSummaryRow(
+                        label: "Total",
+                        value: total,
+                        fiatValue: send.totalCostFiatDisplay
+                    )
+                } else if let error = send.feeEstimateError {
+                    Text("Fee estimate unavailable")
+                        .font(.subheadline.weight(.semibold))
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
+                        .lineLimit(2)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(primaryText)
+            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+        }
+    }
+}
+
+struct FeeSummaryRow: View {
+    let label: String
+    let value: String
+    let fiatValue: String?
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(mutedText)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(value)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                if let fiatValue {
+                    Text(fiatValue)
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .font(.subheadline)
     }
 }
 

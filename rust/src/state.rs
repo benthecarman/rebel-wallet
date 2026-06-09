@@ -284,6 +284,14 @@ pub struct SendState {
     pub can_continue_search: bool,
     pub amount_sat: u64,
     pub amount_display: String,
+    pub estimating_fee: bool,
+    pub fee_estimate_sat: Option<u64>,
+    pub fee_estimate_display: Option<String>,
+    pub fee_estimate_fiat_display: Option<String>,
+    pub total_cost_sat: Option<u64>,
+    pub total_cost_display: Option<String>,
+    pub total_cost_fiat_display: Option<String>,
+    pub fee_estimate_error: Option<String>,
     pub memo: String,
     pub last_result: Option<String>,
     pub success_amount_display: String,
@@ -431,6 +439,14 @@ impl AppState {
                 can_continue_search: false,
                 amount_sat: 0,
                 amount_display: format_sats(0),
+                estimating_fee: false,
+                fee_estimate_sat: None,
+                fee_estimate_display: None,
+                fee_estimate_fiat_display: None,
+                total_cost_sat: None,
+                total_cost_display: None,
+                total_cost_fiat_display: None,
+                fee_estimate_error: None,
                 memo: String::new(),
                 last_result: None,
                 success_amount_display: format_sats(0),
@@ -519,6 +535,14 @@ impl AppState {
         };
 
         self.send.amount_display = format_sats(self.send.amount_sat);
+        self.send.fee_estimate_display = self.send.fee_estimate_sat.map(format_sats);
+        self.send.total_cost_display = self.send.total_cost_sat.map(format_sats);
+        self.send.fee_estimate_fiat_display = self.send.fee_estimate_sat.and_then(|amount| {
+            format_non_btc_fiat_sats(amount, self.wallet.btc_price, &self.wallet.price_currency)
+        });
+        self.send.total_cost_fiat_display = self.send.total_cost_sat.and_then(|amount| {
+            format_non_btc_fiat_sats(amount, self.wallet.btc_price, &self.wallet.price_currency)
+        });
         self.send.search_results = send_search_results(
             &self.send.search_query,
             &self.nostr.contacts,
@@ -533,6 +557,7 @@ impl AppState {
         self.send.error_text = send_error_text(
             self.send.destination_kind.clone(),
             self.send.amount_sat,
+            self.send.total_cost_sat,
             self.wallet.balance_sat,
         );
         self.send.can_submit = !self.send.destination.trim().is_empty()
@@ -639,6 +664,17 @@ fn format_fiat_sats(
     let price = btc_price?;
     let value = amount_sat as f64 / 100_000_000.0 * price;
     Some(format_fiat(value, currency))
+}
+
+fn format_non_btc_fiat_sats(
+    amount_sat: u64,
+    btc_price: Option<f64>,
+    currency: &PriceCurrency,
+) -> Option<String> {
+    if *currency == PriceCurrency::BTC {
+        return None;
+    }
+    format_fiat_sats(amount_sat, btc_price, currency)
 }
 
 fn format_fiat(value: f64, currency: &PriceCurrency) -> String {
@@ -784,9 +820,10 @@ fn normalize_search(value: &str) -> String {
 fn send_error_text(
     destination_kind: SendDestinationKind,
     amount_sat: u64,
+    total_cost_sat: Option<u64>,
     balance_sat: u64,
 ) -> Option<String> {
-    if amount_sat > balance_sat {
+    if total_cost_sat.unwrap_or(amount_sat) > balance_sat {
         return Some("Insufficient balance for this send.".to_string());
     }
     if destination_kind == SendDestinationKind::Ark && amount_sat == 0 {
@@ -860,6 +897,15 @@ mod tests {
         state.refresh_derived();
         assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
         assert!(state.send.can_submit);
+
+        state.send.amount_sat = 900;
+        state.send.total_cost_sat = Some(1_001);
+        state.refresh_derived();
+        assert!(!state.send.can_submit);
+        assert_eq!(
+            state.send.error_text.as_deref(),
+            Some("Insufficient balance for this send.")
+        );
     }
 
     #[test]
