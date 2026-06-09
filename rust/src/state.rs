@@ -562,6 +562,7 @@ impl AppState {
         );
         self.send.can_submit = !self.send.destination.trim().is_empty()
             && self.send.phase != SendPhase::Sending
+            && !self.send.estimating_fee
             && self.send.error_text.is_none()
             && (self.send.destination_kind == SendDestinationKind::Lightning
                 || self.send.amount_sat > 0);

@@ -52,6 +52,7 @@ use crate::{
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
 const NOSTR_DERIVATION_PATH: &str = "m/44'/1237'/0'/0/0";
+const SEND_FEE_ESTIMATE_DEBOUNCE: Duration = Duration::from_millis(350);
 
 fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
     format!("{pubkey}:{remote_url}")
@@ -175,6 +176,7 @@ struct AppCore {
     profile_info_requests: HashSet<String>,
     rev: u64,
     next_capability_id: u64,
+    send_fee_estimate_request_id: u64,
 }
 
 impl AppCore {
@@ -201,6 +203,7 @@ impl AppCore {
             profile_info_requests: HashSet::new(),
             rev: 0,
             next_capability_id: 0,
+            send_fee_estimate_request_id: 0,
         }
     }
 
@@ -545,13 +548,31 @@ impl AppCore {
                 self.save_lightning_address_ark_address(&ark_address);
                 self.save_app_data();
             }
+            AsyncMsg::SendFeeEstimateDue {
+                request_id,
+                destination,
+                amount_sat,
+                estimate_amount_sat,
+                is_lightning,
+            } => {
+                if self.send_fee_estimate_is_current(request_id, &destination, amount_sat) {
+                    self.perform_send_fee_estimate(
+                        request_id,
+                        destination,
+                        amount_sat,
+                        estimate_amount_sat,
+                        is_lightning,
+                    );
+                }
+            }
             AsyncMsg::SendFeeEstimated {
+                request_id,
                 destination,
                 amount_sat,
                 fee_sat,
                 total_sat,
             } => {
-                if self.send_fee_estimate_is_current(&destination, amount_sat) {
+                if self.send_fee_estimate_is_current(request_id, &destination, amount_sat) {
                     self.state.send.estimating_fee = false;
                     self.state.send.fee_estimate_sat = Some(fee_sat);
                     self.state.send.total_cost_sat = Some(total_sat);
@@ -559,11 +580,12 @@ impl AppCore {
                 }
             }
             AsyncMsg::SendFeeEstimateFailed {
+                request_id,
                 destination,
                 amount_sat,
                 error,
             } => {
-                if self.send_fee_estimate_is_current(&destination, amount_sat) {
+                if self.send_fee_estimate_is_current(request_id, &destination, amount_sat) {
                     self.state.send.estimating_fee = false;
                     self.state.send.fee_estimate_sat = None;
                     self.state.send.total_cost_sat = None;
@@ -704,6 +726,7 @@ impl AppCore {
             }
             AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
             AsyncMsg::LightningAddressReady(_)
+            | AsyncMsg::SendFeeEstimateDue { .. }
             | AsyncMsg::SendFeeEstimated { .. }
             | AsyncMsg::SendFeeEstimateFailed { .. } => {}
             AsyncMsg::NostrProfilePictureUploaded(_) => {
@@ -1113,25 +1136,50 @@ impl AppCore {
     }
 
     fn request_send_fee_estimate(&mut self) {
-        self.clear_send_fee_estimate();
+        self.send_fee_estimate_request_id = self.send_fee_estimate_request_id.saturating_add(1);
 
         let destination = self.state.send.destination.trim().to_string();
         if destination.is_empty() {
+            self.clear_send_fee_estimate();
             return;
         }
-
-        let Some(wallet) = self.wallet.clone() else {
-            return;
-        };
 
         let amount_sat = self.state.send.amount_sat;
         let Some((estimate_amount_sat, is_lightning)) =
             send_fee_estimate_request(&destination, amount_sat)
         else {
+            self.clear_send_fee_estimate();
             return;
         };
 
         self.state.send.estimating_fee = true;
+        let tx = self.tx.clone();
+        let request_id = self.send_fee_estimate_request_id;
+        self.rt.spawn(async move {
+            tokio::time::sleep(SEND_FEE_ESTIMATE_DEBOUNCE).await;
+            let _ = tx.send(CoreMsg::Async(AsyncMsg::SendFeeEstimateDue {
+                request_id,
+                destination,
+                amount_sat,
+                estimate_amount_sat,
+                is_lightning,
+            }));
+        });
+    }
+
+    fn perform_send_fee_estimate(
+        &mut self,
+        request_id: u64,
+        destination: String,
+        amount_sat: u64,
+        estimate_amount_sat: u64,
+        is_lightning: bool,
+    ) {
+        let Some(wallet) = self.wallet.clone() else {
+            self.clear_send_fee_estimate();
+            return;
+        };
+
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let estimate_amount = Amount::from_sat(estimate_amount_sat);
@@ -1142,12 +1190,14 @@ impl AppCore {
             };
             let msg = match result {
                 Ok(estimate) => AsyncMsg::SendFeeEstimated {
+                    request_id,
                     destination,
                     amount_sat,
                     fee_sat: estimate.fee.to_sat(),
                     total_sat: estimate.gross_amount.to_sat(),
                 },
                 Err(e) => AsyncMsg::SendFeeEstimateFailed {
+                    request_id,
                     destination,
                     amount_sat,
                     error: format!("{e:#}"),
@@ -1158,14 +1208,21 @@ impl AppCore {
     }
 
     fn clear_send_fee_estimate(&mut self) {
+        self.send_fee_estimate_request_id = self.send_fee_estimate_request_id.saturating_add(1);
         self.state.send.estimating_fee = false;
         self.state.send.fee_estimate_sat = None;
         self.state.send.total_cost_sat = None;
         self.state.send.fee_estimate_error = None;
     }
 
-    fn send_fee_estimate_is_current(&self, destination: &str, amount_sat: u64) -> bool {
-        self.state.send.destination.trim() == destination
+    fn send_fee_estimate_is_current(
+        &self,
+        request_id: u64,
+        destination: &str,
+        amount_sat: u64,
+    ) -> bool {
+        self.send_fee_estimate_request_id == request_id
+            && self.state.send.destination.trim() == destination
             && self.state.send.amount_sat == amount_sat
     }
 

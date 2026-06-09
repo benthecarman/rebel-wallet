@@ -44,13 +44,22 @@ pub(crate) enum AsyncMsg {
         payment_hash: String,
     },
     LightningAddressReady(String),
+    SendFeeEstimateDue {
+        request_id: u64,
+        destination: String,
+        amount_sat: u64,
+        estimate_amount_sat: u64,
+        is_lightning: bool,
+    },
     SendFeeEstimated {
+        request_id: u64,
         destination: String,
         amount_sat: u64,
         fee_sat: u64,
         total_sat: u64,
     },
     SendFeeEstimateFailed {
+        request_id: u64,
         destination: String,
         amount_sat: u64,
         error: String,

@@ -151,16 +151,9 @@ struct SendFeeSummary: View {
     var body: some View {
         if send.estimatingFee || send.feeEstimateDisplay != nil || send.feeEstimateError != nil {
             VStack(alignment: .leading, spacing: 10) {
-                if send.estimatingFee {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("Estimating fee...")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(mutedText)
-                } else if let fee = send.feeEstimateDisplay, let total = send.totalCostDisplay {
+                if let fee = send.feeEstimateDisplay, let total = send.totalCostDisplay {
                     FeeSummaryRow(
-                        label: "Estimated fee",
+                        label: send.estimatingFee ? "Estimated fee updating" : "Estimated fee",
                         value: fee,
                         fiatValue: send.feeEstimateFiatDisplay
                     )
@@ -169,6 +162,13 @@ struct SendFeeSummary: View {
                         value: total,
                         fiatValue: send.totalCostFiatDisplay
                     )
+                } else if send.estimatingFee {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Estimating fee...")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(mutedText)
                 } else if let error = send.feeEstimateError {
                     Text("Fee estimate unavailable")
                         .font(.subheadline.weight(.semibold))
