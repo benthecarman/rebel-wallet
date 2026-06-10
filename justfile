@@ -12,6 +12,9 @@ default:
 doctor:
   rmp doctor
 
+ios-tailnet-doctor *args:
+  ./tools/ios-tailnet-doctor {{args}}
+
 install-hooks:
   git config core.hooksPath .githooks
 
@@ -75,6 +78,25 @@ ios-build:
     -project ios/App.xcodeproj -scheme App \
     -destination "generic/platform=iOS Simulator" \
     -configuration Debug CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+
+# Build the iOS app for a paired physical device that Xcode/CoreDevice can see.
+ios-device-build device_id derived_data="build/ios-device":
+  ./tools/xcode-run xcodebuild build \
+    -project ios/App.xcodeproj -scheme App \
+    -destination "id={{device_id}}" \
+    -configuration Debug \
+    -derivedDataPath "{{derived_data}}"
+
+# Install the last physical-device build onto a paired device.
+ios-device-install device_id derived_data="build/ios-device":
+  xcrun devicectl device install app \
+    --device "{{device_id}}" \
+    "{{derived_data}}/Build/Products/Debug-iphoneos/App.app"
+
+# Build and install onto a paired physical device.
+ios-device-deploy device_id derived_data="build/ios-device":
+  just ios-device-build "{{device_id}}" "{{derived_data}}"
+  just ios-device-install "{{device_id}}" "{{derived_data}}"
 
 # Full iOS pipeline: host build → bindings → cross-compile → xcframework → xcodegen → build.
 ios-full: ios-gen-swift ios-rust ios-xcframework ios-xcodeproj ios-build

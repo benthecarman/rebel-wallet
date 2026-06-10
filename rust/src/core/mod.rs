@@ -249,6 +249,7 @@ impl AppCore {
             }
             AppAction::SyncWallet => self.sync_wallet(),
             AppAction::MaintainVtxos => self.maintain_vtxos(),
+            AppAction::StartUnilateralExit => self.start_unilateral_exit(),
             AppAction::RefreshPrice => self.refresh_price(),
             AppAction::SetPriceCurrency { currency } => self.set_price_currency(currency),
             AppAction::SelectNetwork { network } => self.select_network(network),
@@ -598,6 +599,15 @@ impl AppCore {
                 self.state.send.last_result = Some(result);
                 self.maintain_vtxos();
             }
+            AsyncMsg::UnilateralExitStarted { exit_count } => {
+                self.state.toast = Some(if exit_count == 0 {
+                    "No eligible VTXOs found to exit.".to_string()
+                } else if exit_count == 1 {
+                    "Unilateral exit started for 1 VTXO.".to_string()
+                } else {
+                    format!("Unilateral exit started for {exit_count} VTXOs.")
+                });
+            }
             AsyncMsg::Seed(seed) => {
                 self.state.recovery_phrase = Some(seed);
             }
@@ -725,6 +735,9 @@ impl AppCore {
                 self.state.busy.creating_invoice = false;
             }
             AsyncMsg::Paid(_) => self.state.busy.sending_payment = false,
+            AsyncMsg::UnilateralExitStarted { .. } => {
+                self.state.busy.starting_unilateral_exit = false;
+            }
             AsyncMsg::LightningAddressReady(_)
             | AsyncMsg::SendFeeEstimateDue { .. }
             | AsyncMsg::SendFeeEstimated { .. }
@@ -960,6 +973,59 @@ impl AppCore {
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("VTXO refresh check failed: {e:#}")));
             let _ = tx.send(CoreMsg::Async(result));
+        });
+    }
+
+    fn start_unilateral_exit(&mut self) {
+        let Some(wallet) = self.wallet.clone() else {
+            self.state.toast = Some("Open a wallet before starting an exit.".to_string());
+            return;
+        };
+        if self.state.busy.starting_unilateral_exit || self.state.busy.sending_payment {
+            return;
+        }
+
+        self.state.busy.starting_unilateral_exit = true;
+        let tx = self.tx.clone();
+        let contacts = self.state.nostr.contacts.clone();
+        let lightning_address = self.state.lightning_address.clone();
+        self.rt.spawn(async move {
+            let result = async {
+                wallet.sync().await;
+                wallet
+                    .exit_mgr()
+                    .start_exit_for_entire_wallet()
+                    .await
+                    .context("exit start failed")?;
+                let _ = wallet
+                    .exit_mgr()
+                    .progress_exits(&wallet)
+                    .await
+                    .context("exit progress failed")?;
+                wallet.sync_exits().await.context("exit sync failed")?;
+                let exit_count = wallet.exit_mgr().get_exit_vtxos().await.len() as u64;
+                Ok::<_, anyhow::Error>(exit_count)
+            }
+            .await;
+
+            match result {
+                Ok(exit_count) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::UnilateralExitStarted {
+                        exit_count,
+                    }));
+                    let sync = wallet_synced_msg(&wallet, &contacts, &lightning_address, false)
+                        .await
+                        .unwrap_or_else(|e| {
+                            AsyncMsg::Error(format!("Post-exit sync failed: {e:#}"))
+                        });
+                    let _ = tx.send(CoreMsg::Async(sync));
+                }
+                Err(e) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::Error(format!(
+                        "Unilateral exit failed: {e:#}"
+                    ))));
+                }
+            }
         });
     }
 

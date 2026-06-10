@@ -65,6 +65,9 @@ pub(crate) enum AsyncMsg {
         error: String,
     },
     Paid(String),
+    UnilateralExitStarted {
+        exit_count: u64,
+    },
     Seed(String),
     NostrProfileLoaded(NostrState),
     NostrContactsLoaded(Vec<Contact>),

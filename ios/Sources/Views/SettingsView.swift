@@ -47,6 +47,12 @@ struct SettingsView: View {
                     }
                 }
 
+                SettingsCard(title: "Recovery") {
+                    SettingsRow(title: "Unilateral exit", caption: "Review Ark exit options", accent: rebelGreen) {
+                        manager.dispatch(.pushScreen(screen: .unilateralExit))
+                    }
+                }
+
                 Text("Secrets are stored in iOS Keychain. Wallet data uses local sqlite.")
                     .font(.caption)
                     .foregroundStyle(mutedText)
@@ -199,6 +205,173 @@ struct CurrencyView: View {
         .onAppear {
             selectedCurrency = manager.state.wallet.priceCurrency
         }
+    }
+}
+
+struct UnilateralExitView: View {
+    @Bindable var manager: AppManager
+    @State private var showingExitConfirmation = false
+
+    private var canStartExit: Bool {
+        manager.state.wallet.balanceSat > 0 && !manager.state.busy.startingUnilateralExit
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(rebelGreen.opacity(0.18))
+                            Image(systemName: "lock.open.trianglebadge.exclamationmark")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(rebelGreen)
+                        }
+                        .frame(width: 52, height: 52)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Unilateral exit")
+                                .font(.title3.bold())
+                            Text("Recover Ark funds without relying on the server.")
+                                .font(.subheadline)
+                                .foregroundStyle(mutedText)
+                        }
+                    }
+
+                    Text("A unilateral exit lets you settle Ark funds on Bitcoin if the Ark server is unavailable or uncooperative. Starting an exit marks eligible VTXOs and begins moving them on-chain.")
+                        .font(.body)
+                        .foregroundStyle(primaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                SettingsCard(title: "What to know") {
+                    UnilateralExitInfoRow(
+                        icon: "clock",
+                        title: "Timing matters",
+                        caption: "Ark coins have expiry and refresh windows. Keep the wallet online periodically so VTXOs can be refreshed before they expire."
+                    )
+                    SettingsDivider()
+                    UnilateralExitInfoRow(
+                        icon: "bitcoinsign.circle",
+                        title: "Bitcoin fees apply",
+                        caption: "An exit settles on-chain, so confirmation time and miner fees depend on the Bitcoin network."
+                    )
+                    SettingsDivider()
+                    UnilateralExitInfoRow(
+                        icon: "key",
+                        title: "Seed required",
+                        caption: "Your recovery phrase is still the root backup. Store it offline and never share it."
+                    )
+                }
+
+                SettingsCard(title: "Current status") {
+                    StatusLine(title: "Network", value: manager.state.wallet.networkName)
+                    SettingsDivider()
+                    StatusLine(title: "Balance", value: manager.state.wallet.balanceDisplay)
+                    SettingsDivider()
+                    StatusLine(
+                        title: "VTXO maintenance",
+                        value: manager.state.busy.maintainingVtxos ? "Refreshing" : "Idle"
+                    )
+                }
+
+                Button {
+                    showingExitConfirmation = true
+                } label: {
+                    Label(
+                        manager.state.busy.startingUnilateralExit ? "Starting exit" : "Start exit",
+                        systemImage: "rectangle.portrait.and.arrow.right"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelRed))
+                .disabled(!canStartExit)
+
+                Button {
+                    manager.dispatch(.maintainVtxos)
+                } label: {
+                    Label(
+                        manager.state.busy.maintainingVtxos ? "Refreshing VTXOs" : "Refresh VTXOs",
+                        systemImage: "arrow.clockwise"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                .disabled(manager.state.busy.maintainingVtxos)
+
+                Text("Final claim and fee-bump controls still need on-chain wallet support.")
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 24)
+            }
+            .padding(16)
+        }
+        .navigationTitle("Unilateral Exit")
+        .scrollContentBackground(.hidden)
+        .background(pageBackground)
+        .foregroundStyle(primaryText)
+        .confirmationDialog(
+            "Start unilateral exit?",
+            isPresented: $showingExitConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Start exit", role: .destructive) {
+                manager.dispatch(.startUnilateralExit)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This marks eligible Ark VTXOs for unilateral exit and begins moving them on-chain. Use this only if you need to recover without the Ark server.")
+        }
+    }
+}
+
+private struct UnilateralExitInfoRow: View {
+    let icon: String
+    let title: String
+    let caption: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(rebelGreen)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(primaryText)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct StatusLine: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(primaryText)
+            Spacer()
+            Text(value)
+                .font(.caption.bold())
+                .foregroundStyle(mutedText)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 }
 

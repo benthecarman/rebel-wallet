@@ -50,6 +50,7 @@ pub struct BusyState {
     pub uploading_profile_picture: bool,
     pub publishing_nostr: bool,
     pub maintaining_vtxos: bool,
+    pub starting_unilateral_exit: bool,
     pub refreshing_contacts: bool,
 }
 
@@ -92,6 +93,7 @@ pub enum Screen {
     Restore,
     Network,
     Currency,
+    UnilateralExit,
     ContactDetail { contact_id: String },
 }
 

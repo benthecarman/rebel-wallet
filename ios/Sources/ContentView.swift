@@ -93,6 +93,8 @@ struct ContentView: View {
             NetworkView(manager: manager)
         case .currency:
             CurrencyView(manager: manager)
+        case .unilateralExit:
+            UnilateralExitView(manager: manager)
         case .contactDetail(let contactId):
             ContactDetailView(manager: manager, contactId: contactId)
         }
