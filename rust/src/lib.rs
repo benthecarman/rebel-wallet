@@ -36,7 +36,6 @@ pub(crate) const SIGNET_SERVER: &str = "https://ark.signet.2nd.dev";
 pub(crate) const SIGNET_ESPLORA: &str = "https://esplora.signet.2nd.dev";
 pub(crate) const MAINNET_SERVER: &str = "https://ark.second.tech";
 pub(crate) const MAINNET_ESPLORA: &str = "https://mempool.second.tech/api";
-pub(crate) const MAINNET_SERVER_ACCESS_TOKEN: &str = "M8RIRSU3X5156RABFMJQKO6VYXK2N371";
 
 #[uniffi::export(callback_interface)]
 pub trait AppReconciler: Send + Sync + 'static {

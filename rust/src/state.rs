@@ -1,9 +1,7 @@
 use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    MAINNET_ESPLORA, MAINNET_SERVER, MAINNET_SERVER_ACCESS_TOKEN, SIGNET_ESPLORA, SIGNET_SERVER,
-};
+use crate::{MAINNET_ESPLORA, MAINNET_SERVER, SIGNET_ESPLORA, SIGNET_SERVER};
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
@@ -153,10 +151,7 @@ impl WalletNetwork {
     }
 
     pub(crate) fn server_access_token(&self) -> Option<&'static str> {
-        match self {
-            Self::Mainnet => Some(MAINNET_SERVER_ACCESS_TOKEN),
-            Self::Signet => None,
-        }
+        None
     }
 
     pub(crate) fn esplora_address(&self) -> &'static str {
@@ -1030,6 +1025,8 @@ mod tests {
             WalletNetwork::Mainnet.db_file_name(),
             "rebel-wallet-mainnet.sqlite"
         );
+        assert_eq!(WalletNetwork::Signet.server_access_token(), None);
+        assert_eq!(WalletNetwork::Mainnet.server_access_token(), None);
     }
 
     #[test]
