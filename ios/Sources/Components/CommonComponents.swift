@@ -181,7 +181,7 @@ struct ActivityRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Group {
-                if counterpartyHasPicture {
+                if counterpartyKnown {
                     ProfileAvatar(
                         url: item.counterparty?.picture ?? "",
                         size: 48,
