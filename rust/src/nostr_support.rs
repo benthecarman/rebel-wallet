@@ -463,10 +463,10 @@ pub(crate) fn merge_contacts(existing: &mut Vec<Contact>, fetched: Vec<Contact>)
         if let Some(current) = existing.iter_mut().find(|c| c.npub == contact.npub) {
             current.followed = contact.followed;
             current.last_used = now_unix();
-            if current.name.is_empty() {
+            if should_replace_profile_name(&current.name, &contact.name, &contact.npub) {
                 current.name = contact.name;
             }
-            if current.picture.is_empty() {
+            if !contact.picture.trim().is_empty() {
                 current.picture = contact.picture;
             }
             if should_replace_lightning_address(
@@ -475,7 +475,7 @@ pub(crate) fn merge_contacts(existing: &mut Vec<Contact>, fetched: Vec<Contact>)
             ) {
                 current.lightning_address = contact.lightning_address;
             }
-            if current.lnurl.is_empty() {
+            if !contact.lnurl.trim().is_empty() {
                 current.lnurl = contact.lnurl;
             }
         } else {
@@ -483,6 +483,11 @@ pub(crate) fn merge_contacts(existing: &mut Vec<Contact>, fetched: Vec<Contact>)
         }
     }
     existing.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.name.cmp(&b.name)));
+}
+
+fn should_replace_profile_name(current: &str, fetched: &str, npub: &str) -> bool {
+    let fetched = fetched.trim();
+    !fetched.is_empty() && (current.trim().is_empty() || fetched != truncate_pubkey(npub))
 }
 
 pub(crate) fn contact_id(input: &str) -> String {
@@ -501,6 +506,7 @@ pub(crate) fn contact_id(input: &str) -> String {
 fn should_replace_lightning_address(current: &str, fetched: &str) -> bool {
     !fetched.trim().is_empty()
         && (current.trim().is_empty()
+            || fetched != current
             || (!is_valid_lightning_address(current) && is_valid_lightning_address(fetched)))
 }
 
@@ -548,19 +554,43 @@ mod tests {
     }
 
     #[test]
-    fn merge_contacts_preserves_local_names_and_updates_follow_state() {
-        let mut existing = vec![contact("npub1234", "Local Alice", false, 10)];
+    fn merge_contacts_updates_profile_fields_and_follow_state() {
+        let mut existing = vec![Contact {
+            picture: "https://example.com/old.jpg".to_string(),
+            lightning_address: "old@example.com".to_string(),
+            lnurl: "old-lnurl".to_string(),
+            ..contact("npub1234", "Local Alice", false, 10)
+        }];
         let fetched = vec![
-            contact("npub1234", "Remote Alice", true, 1),
+            Contact {
+                picture: "https://example.com/new.jpg".to_string(),
+                lightning_address: "new@example.com".to_string(),
+                lnurl: "new-lnurl".to_string(),
+                ..contact("npub1234", "Remote Alice", true, 1)
+            },
             contact("npub9999", "Bob", true, 2),
         ];
 
         merge_contacts(&mut existing, fetched);
 
         let alice = existing.iter().find(|c| c.npub == "npub1234").unwrap();
-        assert_eq!(alice.name, "Local Alice");
+        assert_eq!(alice.name, "Remote Alice");
+        assert_eq!(alice.picture, "https://example.com/new.jpg");
+        assert_eq!(alice.lightning_address, "new@example.com");
+        assert_eq!(alice.lnurl, "new-lnurl");
         assert!(alice.followed);
         assert_eq!(existing.len(), 2);
+    }
+
+    #[test]
+    fn merge_contacts_does_not_replace_name_with_pubkey_fallback() {
+        let npub = "npub12345678901234567890";
+        let mut existing = vec![contact(npub, "Alice", true, 10)];
+        let fetched = vec![contact(npub, &truncate_pubkey(npub), true, 1)];
+
+        merge_contacts(&mut existing, fetched);
+
+        assert_eq!(existing[0].name, "Alice");
     }
 
     #[test]
