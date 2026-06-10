@@ -310,7 +310,7 @@ struct SendSearchPanel: View {
                             Button {
                                 manager.dispatch(.selectSendContact(contactId: contact.id))
                             } label: {
-                                ContactRow(contact: contact)
+                                ContactRow(contact: contact, imageNormalizer: manager.rust)
                                     .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)

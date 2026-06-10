@@ -232,6 +232,10 @@ fn resize_and_write_profile_picture(bytes: &[u8], dest: &Path) -> anyhow::Result
 }
 
 fn resize_profile_picture_to_jpeg(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+    normalize_profile_picture_to_jpeg(bytes)
+}
+
+pub(crate) fn normalize_profile_picture_to_jpeg(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let img = image::load_from_memory(bytes)?;
     let img = if img.width() > MAX_PROFILE_IMAGE_DIMENSION
         || img.height() > MAX_PROFILE_IMAGE_DIMENSION
@@ -285,6 +289,19 @@ mod tests {
         bytes
     }
 
+    fn webp_bytes(width: u32, height: u32) -> Vec<u8> {
+        let mut img = image::RgbImage::new(width, height);
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            *pixel = image::Rgb([(x % 255) as u8, (y % 255) as u8, 120]);
+        }
+        let mut bytes = Vec::new();
+        let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
+        encoder
+            .encode(img.as_raw(), width, height, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        bytes
+    }
+
     #[test]
     fn resized_profile_picture_is_stored_as_jpeg() {
         let tmp = tempfile::tempdir().unwrap();
@@ -305,6 +322,14 @@ mod tests {
 
         assert!(image.width() <= MAX_PROFILE_IMAGE_DIMENSION);
         assert!(image.height() <= MAX_PROFILE_IMAGE_DIMENSION);
+    }
+
+    #[test]
+    fn webp_profile_picture_is_normalized_to_jpeg() {
+        let output = normalize_profile_picture_to_jpeg(&webp_bytes(32, 32)).unwrap();
+
+        assert!(output.len() > 2);
+        assert_eq!(&output[..2], &[0xff, 0xd8]);
     }
 
     #[test]

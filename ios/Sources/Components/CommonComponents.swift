@@ -115,6 +115,7 @@ struct StatPill: View {
 struct ActivityRow: View {
     let item: ActivityItem
     var balanceDisplayMode: BalanceDisplayMode = .sats
+    var imageNormalizer: FfiApp? = nil
 
     private var inbound: Bool {
         item.iconKind == .received
@@ -137,6 +138,21 @@ struct ActivityRow: View {
 
     private var counterpartyKnown: Bool {
         item.counterparty != nil
+    }
+
+    private var avatarInitial: String {
+        let candidates = [
+            item.counterparty?.name,
+            primaryName,
+            secondaryName,
+        ]
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if let first = trimmed.first {
+                return String(first).uppercased()
+            }
+        }
+        return "R"
     }
 
     private var verb: String {
@@ -166,7 +182,12 @@ struct ActivityRow: View {
         HStack(alignment: .center, spacing: 12) {
             Group {
                 if counterpartyHasPicture {
-                    ProfileAvatar(url: item.counterparty?.picture ?? "", size: 48)
+                    ProfileAvatar(
+                        url: item.counterparty?.picture ?? "",
+                        size: 48,
+                        initial: avatarInitial,
+                        imageNormalizer: imageNormalizer
+                    )
                 } else {
                     ZStack {
                         Circle()
@@ -235,6 +256,7 @@ struct ActivityRow: View {
 
 struct ContactRow: View {
     let contact: Contact
+    var imageNormalizer: FfiApp? = nil
 
     private var displayName: String {
         let trimmed = contact.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -253,7 +275,8 @@ struct ContactRow: View {
             ProfileAvatar(
                 url: contact.picture,
                 size: 42,
-                initial: String(displayName.prefix(1)).uppercased()
+                initial: String(displayName.prefix(1)).uppercased(),
+                imageNormalizer: imageNormalizer
             )
             VStack(alignment: .leading) {
                 Text(displayName)

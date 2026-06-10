@@ -102,7 +102,7 @@ struct ContactChatHeader: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                ContactRow(contact: contact)
+                ContactRow(contact: contact, imageNormalizer: manager.rust)
                 Button {
                     manager.dispatch(.loadDirectMessages(contactId: contact.id))
                 } label: {

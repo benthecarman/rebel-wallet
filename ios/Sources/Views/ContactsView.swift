@@ -118,7 +118,7 @@ struct ContactsView: View {
                             Button {
                                 manager.dispatch(.pushScreen(screen: .contactDetail(contactId: contact.id)))
                             } label: {
-                                ContactRow(contact: contact)
+                                ContactRow(contact: contact, imageNormalizer: manager.rust)
                                     .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)

@@ -27,7 +27,7 @@ final class ProfileImageLoader: ObservableObject {
     private var url: URL?
     private var loadTask: Task<Void, Never>?
 
-    func load(_ nextURL: URL) {
+    func load(_ nextURL: URL, normalizer: FfiApp? = nil) {
         guard Self.canLoad(nextURL) else {
             reset()
             return
@@ -46,7 +46,7 @@ final class ProfileImageLoader: ObservableObject {
         image = nil
         isLoading = true
         loadTask = Task { [weak self] in
-            let loaded = await Self.image(for: nextURL)
+            let loaded = await Self.image(for: nextURL, normalizer: normalizer)
             guard !Task.isCancelled else { return }
             guard let self, self.url == nextURL else { return }
             self.image = loaded
@@ -62,7 +62,7 @@ final class ProfileImageLoader: ObservableObject {
         isLoading = false
     }
 
-    private static func image(for url: URL) async -> UIImage? {
+    private static func image(for url: URL, normalizer: FfiApp?) async -> UIImage? {
         guard canLoad(url) else { return nil }
 
         if let cached = cache.object(forKey: url as NSURL) {
@@ -78,12 +78,11 @@ final class ProfileImageLoader: ObservableObject {
                 let fileURL = URL(fileURLWithPath: url.path)
                 guard
                     let data = try? Data(contentsOf: fileURL),
-                    data.count <= maxImageBytes,
-                    let image = UIImage(data: data)
+                    data.count <= maxImageBytes
                 else {
                     return nil
                 }
-                return image
+                return decodeImage(data, normalizer: normalizer)
             }
 
             var request = URLRequest(url: url)
@@ -93,13 +92,12 @@ final class ProfileImageLoader: ObservableObject {
                 let (data, response) = try? await session.data(for: request),
                 let httpResponse = response as? HTTPURLResponse,
                 200..<300 ~= httpResponse.statusCode,
-                data.count <= maxImageBytes,
-                let image = UIImage(data: data)
+                data.count <= maxImageBytes
             else {
                 return nil
             }
 
-            return image
+            return decodeImage(data, normalizer: normalizer)
         }
 
         inFlight[url] = task
@@ -109,6 +107,18 @@ final class ProfileImageLoader: ObservableObject {
         }
         inFlight[url] = nil
         return loaded
+    }
+
+    private nonisolated static func decodeImage(_ data: Data, normalizer: FfiApp?) -> UIImage? {
+        if let image = UIImage(data: data) {
+            return image
+        }
+        guard
+            let normalized = normalizer?.normalizeProfileImageToJpeg(imageBytes: data)
+        else {
+            return nil
+        }
+        return UIImage(data: normalized)
     }
 
     private static func imageCost(_ image: UIImage) -> Int {

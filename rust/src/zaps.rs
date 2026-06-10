@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -166,24 +166,22 @@ fn zap_relays() -> anyhow::Result<Vec<RelayUrl>> {
 
 pub(crate) async fn fetch_received_zap_receipts(
     own_pubkey: NostrPublicKey,
-    existing: &[ZapReceiptRecord],
 ) -> anyhow::Result<Vec<ZapReceiptRecord>> {
-    let existing_ids = existing
-        .iter()
-        .map(|receipt| receipt.event_id.as_str())
-        .collect::<std::collections::HashSet<_>>();
     let client = nostr_client().await?;
+    add_zap_scan_relays(&client).await;
+
+    let mut receipts = Vec::new();
+    let mut seen = HashSet::new();
     let filter = Filter::new()
         .kind(Kind::ZapReceipt)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::P), own_pubkey.to_hex())
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), own_pubkey.to_hex())
         .limit(200);
     let events = client
         .fetch_events(filter)
         .timeout(Duration::from_secs(10))
         .await?;
-    let mut receipts = Vec::new();
     for event in events.into_iter() {
-        if existing_ids.contains(event.id.to_hex().as_str()) {
+        if !seen.insert(event.id) {
             continue;
         }
         if let Some(receipt) = zap_receipt_from_event(&event, &own_pubkey) {
@@ -193,6 +191,20 @@ pub(crate) async fn fetch_received_zap_receipts(
     Ok(receipts)
 }
 
+async fn add_zap_scan_relays(client: &nostr_sdk::prelude::Client) {
+    for relay in [
+        "wss://nos.lol",
+        "wss://relay.nostr.band",
+        "wss://nostr.mom",
+        "wss://relay.snort.social",
+        "wss://purplepag.es",
+        "wss://relay.benthecarman.com",
+    ] {
+        let _ = client.add_relay(relay).await;
+    }
+    client.connect().await;
+}
+
 pub(crate) fn zap_receipt_from_event(
     event: &Event,
     own_pubkey: &NostrPublicKey,
@@ -200,26 +212,41 @@ pub(crate) fn zap_receipt_from_event(
     if event.kind != Kind::ZapReceipt {
         return None;
     }
-    let tags = tag_map(event);
     let own_hex = own_pubkey.to_hex();
-    let tag_p = tags.get("p").cloned();
-    let tag_upper_p = tags.get("P").cloned();
-    let recipient_pubkey = tag_upper_p
-        .as_deref()
-        .filter(|value| *value == own_hex)
-        .or_else(|| tag_p.as_deref().filter(|value| *value == own_hex))?
-        .to_string();
-    let sender_pubkey = if tag_upper_p.as_deref() == Some(own_hex.as_str()) {
-        tag_p?
-    } else {
-        tag_upper_p?
-    };
-
+    let tags = tag_map(event);
     let description = tags.get("description").cloned();
     let zap_request = description
         .as_deref()
         .and_then(|description| Event::from_json(description).ok());
     let request_tags = zap_request.as_ref().map(tag_map).unwrap_or_default();
+    let tag_p = tag_values(event, "p");
+    let tag_upper_p = tag_values(event, "P");
+    let request_p = zap_request
+        .as_ref()
+        .map(|request| tag_values(request, "p"))
+        .unwrap_or_default();
+    let request_pubkey = zap_request.as_ref().map(|request| request.pubkey.to_hex());
+
+    if !tag_p.iter().any(|value| value == &own_hex) {
+        return None;
+    }
+    if !request_p.is_empty() && !request_p.iter().any(|value| value == &own_hex) {
+        return None;
+    }
+
+    let sender_pubkey = tag_upper_p
+        .first()
+        .cloned()
+        .or_else(|| request_pubkey.clone())?;
+    if request_pubkey
+        .as_ref()
+        .is_some_and(|pubkey| pubkey != &sender_pubkey)
+    {
+        return None;
+    }
+    if sender_pubkey == own_hex {
+        return None;
+    }
     let comment = zap_request
         .as_ref()
         .map(|event| event.content.trim().to_string())
@@ -229,6 +256,7 @@ pub(crate) fn zap_receipt_from_event(
         .or_else(|| request_tags.get("amount"))
         .and_then(|value| value.parse::<u64>().ok());
     let invoice = tags.get("bolt11").cloned();
+    let lnurl = request_tags.get("lnurl").cloned();
     let payment_hash = invoice
         .as_deref()
         .and_then(|invoice| Bolt11Invoice::from_str(invoice).ok())
@@ -237,13 +265,23 @@ pub(crate) fn zap_receipt_from_event(
     Some(ZapReceiptRecord {
         event_id: event.id.to_hex(),
         sender_pubkey,
-        recipient_pubkey,
+        recipient_pubkey: own_hex,
         invoice,
         payment_hash,
         amount_msat,
+        lnurl,
         comment,
         created_at: event.created_at.to_string().parse().unwrap_or_default(),
     })
+}
+
+fn tag_values(event: &Event, kind: &str) -> Vec<String> {
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind().to_string() == kind)
+        .filter_map(|tag| tag.content().map(str::to_string))
+        .collect()
 }
 
 fn tag_map(event: &Event) -> HashMap<String, String> {
@@ -263,7 +301,7 @@ mod tests {
     use nostr_sdk::prelude::Tag;
 
     #[test]
-    fn parses_received_receipt_using_uppercase_p_as_recipient() {
+    fn ignores_receipt_where_only_uppercase_p_matches_own_pubkey() {
         let own = Keys::generate();
         let sender = Keys::generate();
         let receipt = EventBuilder::new(Kind::ZapReceipt, "")
@@ -275,10 +313,125 @@ mod tests {
             .finalize(&Keys::generate())
             .unwrap();
 
+        assert!(zap_receipt_from_event(&receipt, &own.public_key()).is_none());
+    }
+
+    #[test]
+    fn parses_received_receipt_using_lowercase_p_as_recipient_and_uppercase_p_as_sender() {
+        let own = Keys::generate();
+        let sender = Keys::generate();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["P", &sender.public_key().to_hex()]).unwrap(),
+                Tag::parse(["amount", "21000"]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
         let parsed = zap_receipt_from_event(&receipt, &own.public_key()).unwrap();
 
         assert_eq!(parsed.recipient_pubkey, own.public_key().to_hex());
         assert_eq!(parsed.sender_pubkey, sender.public_key().to_hex());
         assert_eq!(parsed.amount_msat, Some(21_000));
+    }
+
+    #[test]
+    fn parses_received_receipt_using_lowercase_p_as_recipient() {
+        let own = Keys::generate();
+        let sender = Keys::generate();
+        let request = EventBuilder::new(Kind::ZapRequest, "thanks")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["amount", "1000000"]).unwrap(),
+            ])
+            .finalize(&sender)
+            .unwrap();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["P", &sender.public_key().to_hex()]).unwrap(),
+                Tag::parse(["description", &request.as_json()]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let parsed = zap_receipt_from_event(&receipt, &own.public_key()).unwrap();
+
+        assert_eq!(parsed.recipient_pubkey, own.public_key().to_hex());
+        assert_eq!(parsed.sender_pubkey, sender.public_key().to_hex());
+        assert_eq!(parsed.amount_msat, Some(1_000_000));
+        assert_eq!(parsed.comment, Some("thanks".to_string()));
+    }
+
+    #[test]
+    fn ignores_outgoing_receipt_indexed_by_uppercase_p() {
+        let own = Keys::generate();
+        let recipient = Keys::generate();
+        let request = EventBuilder::new(Kind::ZapRequest, "")
+            .tags([
+                Tag::parse(["p", &recipient.public_key().to_hex()]).unwrap(),
+                Tag::parse(["amount", "1000000"]).unwrap(),
+            ])
+            .finalize(&own)
+            .unwrap();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags([
+                Tag::parse(["p", &recipient.public_key().to_hex()]).unwrap(),
+                Tag::parse(["P", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["description", &request.as_json()]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        assert!(zap_receipt_from_event(&receipt, &own.public_key()).is_none());
+    }
+
+    #[test]
+    fn ignores_receipt_when_description_recipient_differs_from_own_pubkey() {
+        let own = Keys::generate();
+        let sender = Keys::generate();
+        let other_recipient = Keys::generate();
+        let request = EventBuilder::new(Kind::ZapRequest, "")
+            .tags([
+                Tag::parse(["p", &other_recipient.public_key().to_hex()]).unwrap(),
+                Tag::parse(["amount", "1000000"]).unwrap(),
+            ])
+            .finalize(&sender)
+            .unwrap();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["P", &sender.public_key().to_hex()]).unwrap(),
+                Tag::parse(["description", &request.as_json()]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        assert!(zap_receipt_from_event(&receipt, &own.public_key()).is_none());
+    }
+
+    #[test]
+    fn ignores_receipt_when_sender_tag_conflicts_with_request_author() {
+        let own = Keys::generate();
+        let sender = Keys::generate();
+        let other_sender = Keys::generate();
+        let request = EventBuilder::new(Kind::ZapRequest, "")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["amount", "1000000"]).unwrap(),
+            ])
+            .finalize(&sender)
+            .unwrap();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags([
+                Tag::parse(["p", &own.public_key().to_hex()]).unwrap(),
+                Tag::parse(["P", &other_sender.public_key().to_hex()]).unwrap(),
+                Tag::parse(["description", &request.as_json()]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        assert!(zap_receipt_from_event(&receipt, &own.public_key()).is_none());
     }
 }

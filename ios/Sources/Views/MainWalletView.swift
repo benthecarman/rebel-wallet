@@ -116,7 +116,11 @@ struct HomeView: View {
                             Button {
                                 selectedActivityId = item.id
                             } label: {
-                                ActivityRow(item: item, balanceDisplayMode: balanceDisplayMode)
+                                ActivityRow(
+                                    item: item,
+                                    balanceDisplayMode: balanceDisplayMode,
+                                    imageNormalizer: manager.rust
+                                )
                             }
                             .buttonStyle(.plain)
                             Divider().overlay(borderColor)
@@ -247,7 +251,7 @@ struct WalletHeader: View {
                 Button {
                     openProfile()
                 } label: {
-                    ProfileAvatar(url: manager.state.nostr.picture, size: 48)
+                    ProfileAvatar(url: manager.state.nostr.picture, size: 48, imageNormalizer: manager.rust)
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 8)

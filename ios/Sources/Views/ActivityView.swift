@@ -22,7 +22,7 @@ struct ActivityView: View {
                             Button {
                                 selectedActivityId = item.id
                             } label: {
-                                ActivityRow(item: item)
+                                ActivityRow(item: item, imageNormalizer: manager.rust)
                             }
                             .buttonStyle(.plain)
                         }

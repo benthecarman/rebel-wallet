@@ -535,6 +535,24 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
 
 
 
@@ -543,6 +561,8 @@ public protocol FfiAppProtocol: AnyObject, Sendable {
     func dispatch(action: AppAction) 
     
     func listenForUpdates(reconciler: AppReconciler) 
+    
+    func normalizeProfileImageToJpeg(imageBytes: Data)  -> Data?
     
     func state()  -> AppState
     
@@ -626,6 +646,15 @@ open func listenForUpdates(reconciler: AppReconciler)  {try! rustCall() {
 }
 }
     
+open func normalizeProfileImageToJpeg(imageBytes: Data) -> Data?  {
+    return try!  FfiConverterOptionData.lift(try! rustCall() {
+    uniffi_rebel_wallet_core_fn_method_ffiapp_normalize_profile_image_to_jpeg(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(imageBytes),$0
+    )
+})
+}
+    
 open func state() -> AppState  {
     return try!  FfiConverterTypeAppState_lift(try! rustCall() {
     uniffi_rebel_wallet_core_fn_method_ffiapp_state(
@@ -693,12 +722,14 @@ public struct ActivityItem: Equatable, Hashable {
     public var methodIcon: String
     public var methodDisplay: String
     public var amountSat: Int64
+    public var paymentAmountSat: Int64
     public var amountDisplay: String
     public var amountFiatDisplay: String?
     public var signedAmountDisplay: String
     public var iconKind: ActivityIconKind
     public var status: String
     public var timestamp: String
+    public var completedAtUnix: UInt64
     public var counterparty: Contact?
     public var arkAddress: String?
     public var lightningInvoice: String?
@@ -707,7 +738,7 @@ public struct ActivityItem: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, amountDisplay: String, amountFiatDisplay: String?, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
+    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, paymentAmountSat: Int64, amountDisplay: String, amountFiatDisplay: String?, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, completedAtUnix: UInt64, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -718,12 +749,14 @@ public struct ActivityItem: Equatable, Hashable {
         self.methodIcon = methodIcon
         self.methodDisplay = methodDisplay
         self.amountSat = amountSat
+        self.paymentAmountSat = paymentAmountSat
         self.amountDisplay = amountDisplay
         self.amountFiatDisplay = amountFiatDisplay
         self.signedAmountDisplay = signedAmountDisplay
         self.iconKind = iconKind
         self.status = status
         self.timestamp = timestamp
+        self.completedAtUnix = completedAtUnix
         self.counterparty = counterparty
         self.arkAddress = arkAddress
         self.lightningInvoice = lightningInvoice
@@ -757,12 +790,14 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 methodIcon: FfiConverterString.read(from: &buf), 
                 methodDisplay: FfiConverterString.read(from: &buf), 
                 amountSat: FfiConverterInt64.read(from: &buf), 
+                paymentAmountSat: FfiConverterInt64.read(from: &buf), 
                 amountDisplay: FfiConverterString.read(from: &buf), 
                 amountFiatDisplay: FfiConverterOptionString.read(from: &buf), 
                 signedAmountDisplay: FfiConverterString.read(from: &buf), 
                 iconKind: FfiConverterTypeActivityIconKind.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
                 timestamp: FfiConverterString.read(from: &buf), 
+                completedAtUnix: FfiConverterUInt64.read(from: &buf), 
                 counterparty: FfiConverterOptionTypeContact.read(from: &buf), 
                 arkAddress: FfiConverterOptionString.read(from: &buf), 
                 lightningInvoice: FfiConverterOptionString.read(from: &buf), 
@@ -782,12 +817,14 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.methodIcon, into: &buf)
         FfiConverterString.write(value.methodDisplay, into: &buf)
         FfiConverterInt64.write(value.amountSat, into: &buf)
+        FfiConverterInt64.write(value.paymentAmountSat, into: &buf)
         FfiConverterString.write(value.amountDisplay, into: &buf)
         FfiConverterOptionString.write(value.amountFiatDisplay, into: &buf)
         FfiConverterString.write(value.signedAmountDisplay, into: &buf)
         FfiConverterTypeActivityIconKind.write(value.iconKind, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterString.write(value.timestamp, into: &buf)
+        FfiConverterUInt64.write(value.completedAtUnix, into: &buf)
         FfiConverterOptionTypeContact.write(value.counterparty, into: &buf)
         FfiConverterOptionString.write(value.arkAddress, into: &buf)
         FfiConverterOptionString.write(value.lightningInvoice, into: &buf)
@@ -3811,6 +3848,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
+    typealias SwiftType = Data?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterData.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCapabilityRequest: FfiConverterRustBuffer {
     typealias SwiftType = CapabilityRequest?
 
@@ -4050,6 +4111,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_listen_for_updates() != 17166) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_rebel_wallet_core_checksum_method_ffiapp_normalize_profile_image_to_jpeg() != 8272) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_state() != 28404) {

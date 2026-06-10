@@ -20,6 +20,7 @@ mod wallet;
 mod zaps;
 
 pub use actions::AppAction;
+use profile_cache::normalize_profile_picture_to_jpeg;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
     Contact, CurrencyOption, LightningAddressState, MainTab, NetworkOption, NostrMessage,
@@ -118,5 +119,9 @@ impl FfiApp {
                 reconciler.reconcile(update);
             }
         });
+    }
+
+    pub fn normalize_profile_image_to_jpeg(&self, image_bytes: Vec<u8>) -> Option<Vec<u8>> {
+        normalize_profile_picture_to_jpeg(&image_bytes).ok()
     }
 }

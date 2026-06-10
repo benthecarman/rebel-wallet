@@ -11,6 +11,7 @@ pub(crate) fn activity_from_movement(
 ) -> ActivityItem {
     let amount_sat = activity_amount_sat(&movement);
     let inbound = amount_sat >= 0;
+    let payment_amount_sat = activity_payment_amount_sat(&movement, inbound).unwrap_or(amount_sat);
     let destination = if inbound {
         movement.received_on.first()
     } else {
@@ -79,12 +80,12 @@ pub(crate) fn activity_from_movement(
         activity_method_display(destination.map(|d| &d.destination), &method)
     };
     let message_text = activity_message_text(&subtitle);
-    let timestamp = movement
+    let completed_at = movement
         .time
         .completed_at
-        .unwrap_or(movement.time.updated_at)
-        .format("%b %-d, %-I:%M %p")
-        .to_string();
+        .unwrap_or(movement.time.updated_at);
+    let completed_at_unix = completed_at.timestamp().max(0) as u64;
+    let timestamp = completed_at.format("%b %-d, %-I:%M %p").to_string();
     let lightning_invoice = movement
         .lightning_invoice()
         .map(|invoice| invoice.to_string());
@@ -115,6 +116,7 @@ pub(crate) fn activity_from_movement(
         method_icon,
         method_display,
         amount_sat,
+        payment_amount_sat,
         amount_display: state::format_sats(amount_sat.unsigned_abs()),
         amount_fiat_display: None,
         signed_amount_display: state::format_signed_sats(amount_sat, true),
@@ -125,6 +127,7 @@ pub(crate) fn activity_from_movement(
         },
         status: movement.status.to_string(),
         timestamp,
+        completed_at_unix,
         counterparty: contact,
         ark_address,
         lightning_invoice,
@@ -150,6 +153,23 @@ fn activity_amount_sat(movement: &Movement) -> i64 {
     i64::try_from(sent_amount_sat)
         .map(|amount| -amount)
         .unwrap_or_else(|_| movement.effective_balance.to_sat())
+}
+
+fn activity_payment_amount_sat(movement: &Movement, inbound: bool) -> Option<i64> {
+    let destinations = if inbound {
+        &movement.received_on
+    } else {
+        &movement.sent_to
+    };
+    let amount = destinations
+        .iter()
+        .map(|destination| destination.amount.to_sat())
+        .sum::<u64>();
+    if amount == 0 {
+        return None;
+    }
+    let amount = i64::try_from(amount).ok()?;
+    Some(if inbound { amount } else { -amount })
 }
 
 fn ark_address_matches(movement_address: Option<&str>, registered_address: Option<&str>) -> bool {

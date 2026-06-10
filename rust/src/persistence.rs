@@ -33,7 +33,7 @@ pub(crate) struct PaymentAnnotation {
     pub(crate) created_at: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ZapReceiptRecord {
     pub(crate) event_id: String,
     pub(crate) sender_pubkey: String,
@@ -41,6 +41,8 @@ pub(crate) struct ZapReceiptRecord {
     pub(crate) invoice: Option<String>,
     pub(crate) payment_hash: Option<String>,
     pub(crate) amount_msat: Option<u64>,
+    #[serde(default)]
+    pub(crate) lnurl: Option<String>,
     pub(crate) comment: Option<String>,
     pub(crate) created_at: u64,
 }
