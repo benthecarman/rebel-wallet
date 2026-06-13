@@ -1099,25 +1099,7 @@ impl AppCore {
         let zap_receipts = self.zap_receipts.clone();
         self.rt.spawn(async move {
             let result = async {
-                wallet.sync().await;
-                let _ = wallet.progress_pending_rounds(None).await;
-
-                let pending_round_balance = wallet
-                    .pending_round_balance()
-                    .await
-                    .context("pending round balance failed")?;
-                if pending_round_balance == Amount::ZERO
-                    && !wallet
-                        .get_vtxos_to_refresh()
-                        .await
-                        .context("refresh candidate check failed")?
-                        .is_empty()
-                {
-                    let _ = wallet
-                        .maybe_schedule_maintenance_refresh_delegated()
-                        .await
-                        .context("delegated refresh scheduling failed")?;
-                }
+                wallet.maintenance_delegated().await?;
 
                 wallet_synced_msg(
                     &wallet,
