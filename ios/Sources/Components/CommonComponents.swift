@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct RebelMark: View {
     let size: CGFloat
@@ -63,27 +62,6 @@ struct MutinyCircle<Content: View>: View {
         }
         .frame(width: size, height: size)
         .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-    }
-}
-
-struct NavAction: View {
-    let title: String
-    let icon: String
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.title)
-                Text(title)
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-        }
-        .buttonStyle(PrimaryButtonStyle(color: color))
     }
 }
 
@@ -317,42 +295,6 @@ struct DirectMessageRow: View {
                     .foregroundStyle(mutedText)
             }
             if message.inbound { Spacer(minLength: 48) }
-        }
-    }
-}
-
-struct ReceiveStringBox: View {
-    let text: String?
-    let placeholder: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let text, !text.isEmpty {
-                QRCodeView(text: text)
-                    .frame(maxWidth: .infinity)
-                Text(text)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .foregroundStyle(primaryText)
-                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
-                HStack {
-                    Button {
-                        UIPasteboard.general.string = text
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                    ShareLink(item: text) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                }
-                .buttonStyle(.bordered)
-            } else {
-                Text(placeholder)
-                    .font(.caption)
-                    .foregroundStyle(mutedText)
-            }
         }
     }
 }
