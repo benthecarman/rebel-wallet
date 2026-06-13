@@ -9,6 +9,8 @@ use bip39::Mnemonic;
 
 use crate::persistence::ServerConfig;
 
+const VTXO_REFRESH_EXPIRY_THRESHOLD_BLOCKS: u32 = 144;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WalletOpenMode {
     Create,
@@ -34,6 +36,7 @@ pub(crate) async fn open_bark_wallet(
         server_address: server_config.server_address,
         server_access_token: server_config.server_access_token,
         esplora_address: Some(server_config.esplora_address),
+        vtxo_refresh_expiry_threshold: VTXO_REFRESH_EXPIRY_THRESHOLD_BLOCKS,
         ..Config::network_default(network)
     };
     let lock_manager = Box::new(MemoryLockManager::new());
