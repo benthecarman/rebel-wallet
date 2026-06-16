@@ -73,8 +73,8 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "ark-lib"
-version = "0.2.2"
-source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=38f79ffefa057d6323662a22dff5d074a1ac7447#38f79ffefa057d6323662a22dff5d074a1ac7447"
+version = "0.2.5"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=283e236aa88e93c33c2bd4b6096b0d4573e7a850#283e236aa88e93c33c2bd4b6096b0d4573e7a850"
 dependencies = [
  "async-trait",
  "bark-bitcoin-ext",
@@ -84,7 +84,7 @@ dependencies = [
  "hex-conservative 0.3.2",
  "lazy_static",
  "lightning",
- "lightning-invoice 0.34.0",
+ "lightning-invoice",
  "rand 0.9.4",
  "secp256k1 0.32.0-beta.2",
  "serde",
@@ -202,8 +202,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bark-bitcoin-ext"
-version = "0.2.2"
-source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=38f79ffefa057d6323662a22dff5d074a1ac7447#38f79ffefa057d6323662a22dff5d074a1ac7447"
+version = "0.2.5"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=283e236aa88e93c33c2bd4b6096b0d4573e7a850#283e236aa88e93c33c2bd4b6096b0d4573e7a850"
 dependencies = [
  "bdk_bitcoind_rpc",
  "bdk_wallet",
@@ -217,8 +217,8 @@ dependencies = [
 
 [[package]]
 name = "bark-server-rpc"
-version = "0.2.2"
-source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=38f79ffefa057d6323662a22dff5d074a1ac7447#38f79ffefa057d6323662a22dff5d074a1ac7447"
+version = "0.2.5"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=283e236aa88e93c33c2bd4b6096b0d4573e7a850#283e236aa88e93c33c2bd4b6096b0d4573e7a850"
 dependencies = [
  "ark-lib",
  "bitcoin",
@@ -235,8 +235,8 @@ dependencies = [
 
 [[package]]
 name = "bark-wallet"
-version = "0.2.2"
-source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=38f79ffefa057d6323662a22dff5d074a1ac7447#38f79ffefa057d6323662a22dff5d074a1ac7447"
+version = "0.2.5"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=283e236aa88e93c33c2bd4b6096b0d4573e7a850#283e236aa88e93c33c2bd4b6096b0d4573e7a850"
 dependencies = [
  "anyhow",
  "ark-lib",
@@ -257,7 +257,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "lightning",
- "lightning-invoice 0.34.0",
+ "lightning-invoice",
  "lnurl-rs",
  "log",
  "parking_lot",
@@ -379,11 +379,11 @@ checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 [[package]]
 name = "bip321"
 version = "0.1.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=38f79ffefa057d6323662a22dff5d074a1ac7447#38f79ffefa057d6323662a22dff5d074a1ac7447"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=283e236aa88e93c33c2bd4b6096b0d4573e7a850#283e236aa88e93c33c2bd4b6096b0d4573e7a850"
 dependencies = [
  "bitcoin",
  "lightning",
- "lightning-invoice 0.34.0",
+ "lightning-invoice",
  "percent-encoding",
  "thiserror 2.0.18",
 ]
@@ -1721,21 +1721,10 @@ dependencies = [
  "dnssec-prover",
  "hashbrown 0.13.2",
  "libm",
- "lightning-invoice 0.34.0",
+ "lightning-invoice",
  "lightning-macros",
- "lightning-types 0.3.1",
+ "lightning-types",
  "possiblyrandom",
-]
-
-[[package]]
-name = "lightning-invoice"
-version = "0.33.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11209f386879b97198b2bfc9e9c1e5d42870825c6bd4376f17f95357244d6600"
-dependencies = [
- "bech32",
- "bitcoin",
- "lightning-types 0.2.0",
 ]
 
 [[package]]
@@ -1746,7 +1735,7 @@ checksum = "b85e5e14bcdb30d746e9785b04f27938292e8944f78f26517e01e91691f6b3f2"
 dependencies = [
  "bech32",
  "bitcoin",
- "lightning-types 0.3.1",
+ "lightning-types",
  "serde",
 ]
 
@@ -1759,15 +1748,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "lightning-types"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2cd84d4e71472035903e43caded8ecc123066ce466329ccd5ae537a8d5488c7"
-dependencies = [
- "bitcoin",
 ]
 
 [[package]]
@@ -2495,7 +2475,7 @@ dependencies = [
  "flume",
  "futures-util",
  "image",
- "lightning-invoice 0.33.2",
+ "lightning-invoice",
  "nostr",
  "nostr-sdk",
  "rand 0.8.6",

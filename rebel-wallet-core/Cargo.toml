@@ -9,7 +9,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
-bark = { package = "bark-wallet", git = "https://gitlab.com/ark-bitcoin/bark.git", rev = "38f79ffefa057d6323662a22dff5d074a1ac7447", default-features = false, features = ["sqlite-bundled", "native", "tls-webpki-roots", "rand"] }
+bark = { package = "bark-wallet", git = "https://gitlab.com/ark-bitcoin/bark.git", rev = "283e236aa88e93c33c2bd4b6096b0d4573e7a850", default-features = false, features = ["sqlite-bundled", "native", "tls-webpki-roots", "rand"] }
 bech32 = "0.11"
 bip39 = { version = "2", features = ["rand"] }
 bitcoin = "0.32"
@@ -17,7 +17,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 flume = "0.11"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-lightning-invoice = "0.33"
+lightning-invoice = "0.34"
 nostr = { version = "0.45.0-alpha.1", features = ["nip04"] }
 nostr-sdk = "0.45.0-alpha.1"
 rand = "0.8"
