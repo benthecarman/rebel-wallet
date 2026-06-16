@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SendView: View {
     @Bindable var manager: AppManager
@@ -16,106 +17,115 @@ struct SendView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Paste or scan an Ark address, Lightning invoice, offer, or Lightning address.")
-                    .font(.subheadline)
-                    .foregroundStyle(mutedText)
-
-                if destination.isEmpty {
-                    SendSearchPanel(manager: manager)
-                } else {
-                    SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
-                        manager.dispatch(.resetSendDraft)
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissKeyboard()
                     }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Amount")
-                            .font(.headline)
-                        TextField("Sats", text: Binding(
-                            get: { amountText },
-                            set: { setAmountText($0) }
-                        ))
-                        .keyboardType(.numberPad)
-                        .focused($amountFieldFocused)
-                        .padding(12)
-                        .foregroundStyle(primaryText)
-                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
-                        .disabled(manager.state.send.amountLocked)
-
-                        HStack(spacing: 4) {
-                            Text("Available:")
-                            Text(manager.state.wallet.balanceDisplay)
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                            if let fiatBalance = manager.state.wallet.balanceFiatDisplay {
-                                Text("(\(fiatBalance))")
-                                    .monospacedDigit()
-                            }
-                        }
-                        .font(.caption)
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Paste or scan an Ark address, Lightning invoice, offer, or Lightning address.")
+                        .font(.subheadline)
                         .foregroundStyle(mutedText)
-                    }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Note")
-                            .font(.headline)
-                        TextField("What for?", text: Binding(
-                            get: { manager.state.send.memo },
-                            set: { manager.dispatch(.setSendMemo(memo: $0)) }
-                        ))
-                        .padding(12)
-                        .foregroundStyle(primaryText)
-                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
-                    }
+                    if destination.isEmpty {
+                        SendSearchPanel(manager: manager)
+                    } else {
+                        SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
+                            manager.dispatch(.resetSendDraft)
+                        }
 
-                    SendFeeSummary(send: manager.state.send)
-
-                    if manager.state.send.zapAvailable {
-                        Toggle(isOn: Binding(
-                            get: { manager.state.send.zapEnabled },
-                            set: { manager.dispatch(.setSendZapEnabled(enabled: $0)) }
-                        )) {
-                            Label("Zap", systemImage: "bolt.fill")
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Amount")
                                 .font(.headline)
-                        }
-                        .toggleStyle(.switch)
-                        .padding(14)
-                        .foregroundStyle(primaryText)
-                        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
-                    }
+                            TextField("Sats", text: Binding(
+                                get: { amountText },
+                                set: { setAmountText($0) }
+                            ))
+                            .keyboardType(.numberPad)
+                            .focused($amountFieldFocused)
+                            .padding(12)
+                            .foregroundStyle(primaryText)
+                            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                            .disabled(manager.state.send.amountLocked)
 
-                    if let result = manager.state.send.lastResult {
-                        SendResultPanel(result: result)
-                    }
-
-                    Button {
-                        manager.dispatch(.payDestination)
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isSending {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "paperplane.fill")
+                            HStack(spacing: 4) {
+                                Text("Available:")
+                                Text(manager.state.wallet.balanceDisplay)
+                                    .fontWeight(.semibold)
+                                    .monospacedDigit()
+                                if let fiatBalance = manager.state.wallet.balanceFiatDisplay {
+                                    Text("(\(fiatBalance))")
+                                        .monospacedDigit()
+                                }
                             }
-                            Text(isSending ? "Sending..." : "Confirm send")
-                        }
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
-                    .disabled(!manager.state.send.canSubmit)
-
-                    if let errorText = manager.state.send.errorText {
-                        Text(errorText)
                             .font(.caption)
-                            .foregroundStyle(walletAccent)
+                            .foregroundStyle(mutedText)
+                        }
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Note")
+                                .font(.headline)
+                            TextField("What for?", text: Binding(
+                                get: { manager.state.send.memo },
+                                set: { manager.dispatch(.setSendMemo(memo: $0)) }
+                            ))
+                            .padding(12)
+                            .foregroundStyle(primaryText)
+                            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                        }
+
+                        SendFeeSummary(send: manager.state.send)
+
+                        if manager.state.send.zapAvailable {
+                            Toggle(isOn: Binding(
+                                get: { manager.state.send.zapEnabled },
+                                set: { manager.dispatch(.setSendZapEnabled(enabled: $0)) }
+                            )) {
+                                Label("Zap", systemImage: "bolt.fill")
+                                    .font(.headline)
+                            }
+                            .toggleStyle(.switch)
+                            .padding(14)
+                            .foregroundStyle(primaryText)
+                            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                        }
+
+                        if let result = manager.state.send.lastResult {
+                            SendResultPanel(result: result)
+                        }
+
+                        Button {
+                            manager.dispatch(.payDestination)
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isSending {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "paperplane.fill")
+                                }
+                                Text(isSending ? "Sending..." : "Confirm send")
+                            }
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(color: rebelBlue))
+                        .disabled(!manager.state.send.canSubmit)
+
+                        if let errorText = manager.state.send.errorText {
+                            Text(errorText)
+                                .font(.caption)
+                                .foregroundStyle(walletAccent)
+                        }
                     }
                 }
+                .padding(16)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 1, alignment: .topLeading)
         }
         .navigationTitle("Send")
         .background(pageBackground)
@@ -181,6 +191,11 @@ struct SendView: View {
         } else {
             amountText = manager.state.send.amountSat == 0 ? "" : String(manager.state.send.amountSat)
         }
+    }
+
+    private func dismissKeyboard() {
+        amountFieldFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
