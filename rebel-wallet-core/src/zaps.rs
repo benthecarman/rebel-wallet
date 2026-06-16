@@ -43,11 +43,6 @@ struct LnurlZapInvoice {
     reason: Option<String>,
 }
 
-pub(crate) async fn check_zap_endpoint(destination: &str) -> anyhow::Result<ZapEndpoint> {
-    let endpoint = fetch_zap_endpoint(destination).await?;
-    Ok(endpoint)
-}
-
 pub(crate) async fn request_zap_invoice(
     destination: &str,
     recipient_pubkey: NostrPublicKey,

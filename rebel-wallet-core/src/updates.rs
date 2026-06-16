@@ -77,10 +77,6 @@ pub(crate) enum AsyncMsg {
         result: String,
         annotation: Option<crate::persistence::PaymentAnnotation>,
     },
-    ZapAvailabilityChecked {
-        contact_id: String,
-        available: bool,
-    },
     ZapReceiptsLoaded {
         receipts: Vec<ZapReceiptRecord>,
         records: Vec<FetchedProfileContact>,

@@ -52,8 +52,8 @@ struct ContactDetailView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        if !contact.lightningAddress.isEmpty {
-                            manager.dispatch(.setSendDestination(destination: contact.lightningAddress))
+                        if !contact.lightningAddress.isEmpty || !contact.lnurl.isEmpty {
+                            manager.dispatch(.selectSendContact(contactId: contact.id))
                             manager.dispatch(.pushScreen(screen: .send))
                         }
                     } label: {
@@ -62,7 +62,7 @@ struct ContactDetailView: View {
                             .foregroundStyle(walletAccent)
                             .frame(width: 36, height: 36)
                     }
-                    .disabled(contact.lightningAddress.isEmpty)
+                    .disabled(contact.lightningAddress.isEmpty && contact.lnurl.isEmpty)
 
                     TextField("Message", text: $message, axis: .vertical)
                         .lineLimit(1...4)
@@ -114,15 +114,15 @@ struct ContactChatHeader: View {
 
             HStack(spacing: 16) {
                 Button {
-                    if !contact.lightningAddress.isEmpty {
-                        manager.dispatch(.setSendDestination(destination: contact.lightningAddress))
+                    if !contact.lightningAddress.isEmpty || !contact.lnurl.isEmpty {
+                        manager.dispatch(.selectSendContact(contactId: contact.id))
                         manager.dispatch(.pushScreen(screen: .send))
                     }
                 } label: {
                     Label("Send", systemImage: "arrow.up.right")
                 }
                 .foregroundStyle(rebelGreen)
-                .disabled(contact.lightningAddress.isEmpty)
+                .disabled(contact.lightningAddress.isEmpty && contact.lnurl.isEmpty)
 
                 Button {
                     manager.dispatch(.pushScreen(screen: .receive))

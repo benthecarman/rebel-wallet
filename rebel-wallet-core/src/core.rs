@@ -50,7 +50,7 @@ use crate::state::{send_destination_kind, sort_contacts_by_name_npub};
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
-use crate::zaps::{check_zap_endpoint, fetch_received_zap_receipts, request_zap_invoice};
+use crate::zaps::{fetch_received_zap_receipts, request_zap_invoice};
 use crate::{
     ActivityItem, AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
     Contact, MainTab, NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase, Screen,
@@ -773,17 +773,6 @@ impl AppCore {
                 self.state.send.last_result = Some(result);
                 self.maintain_vtxos();
             }
-            AsyncMsg::ZapAvailabilityChecked {
-                contact_id,
-                available,
-            } => {
-                if self.state.send.selected_contact_id.as_deref() == Some(contact_id.as_str()) {
-                    self.state.send.zap_available = available;
-                    if !available {
-                        self.state.send.zap_enabled = false;
-                    }
-                }
-            }
             AsyncMsg::ZapReceiptsLoaded { receipts, records } => {
                 let contacts = self.cache_fetched_profile_contacts(records);
                 let contact_ids = contacts
@@ -975,7 +964,6 @@ impl AppCore {
             AsyncMsg::ArkReceiveConfirmed { .. }
             | AsyncMsg::LightningReceiveStatus { .. }
             | AsyncMsg::LightningReceiveClaimed { .. }
-            | AsyncMsg::ZapAvailabilityChecked { .. }
             | AsyncMsg::ZapReceiptsLoaded { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
@@ -1473,12 +1461,9 @@ impl AppCore {
         contact.last_used = now_unix();
         self.state.send.selected_contact_id = Some(contact.id.clone());
         self.state.send.zap_enabled = false;
-        self.state.send.zap_available = false;
-        let contact_id = contact.id.clone();
-        let npub = contact.npub.clone();
+        self.state.send.zap_available = public_key_from_npub_or_hex(&contact.npub).is_ok();
         self.save_app_data();
         self.set_send_destination(destination);
-        self.check_send_zap_availability(contact_id, npub, self.state.send.destination.clone());
     }
 
     fn reset_send_draft(&mut self) {
@@ -1604,20 +1589,6 @@ impl AppCore {
         self.state.send.selected_contact_id = None;
         self.state.send.zap_enabled = false;
         self.state.send.zap_available = false;
-    }
-
-    fn check_send_zap_availability(&self, contact_id: String, npub: String, destination: String) {
-        if public_key_from_npub_or_hex(&npub).is_err() || destination.trim().is_empty() {
-            return;
-        }
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let available = check_zap_endpoint(&destination).await.is_ok();
-            let _ = tx.send(CoreMsg::Async(AsyncMsg::ZapAvailabilityChecked {
-                contact_id,
-                available,
-            }));
-        });
     }
 
     fn selected_send_contact(&self) -> Option<Contact> {
@@ -3335,7 +3306,9 @@ fn ensure_wallet_metadata_table(conn: &rusqlite::Connection) -> rusqlite::Result
 
 #[cfg(test)]
 mod tests {
-    use nostr_sdk::prelude::{Alphabet, FromBech32, SecretKey as NostrSecretKey, SingleLetterTag};
+    use nostr_sdk::prelude::{
+        Alphabet, FromBech32, Keys, SecretKey as NostrSecretKey, SingleLetterTag,
+    };
 
     use crate::{ActivityIconKind, LightningAddressState};
 
@@ -3375,6 +3348,45 @@ mod tests {
         assert!(!send_screen_removed(&[], &[Screen::Send]));
         assert!(!send_screen_removed(&[Screen::Send], &[Screen::Send]));
         assert!(!send_screen_removed(&[Screen::Receive], &[]));
+    }
+
+    #[test]
+    fn selecting_nostr_contact_makes_zap_available_immediately() {
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let (tx, _rx) = flume::unbounded();
+        let mut core = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        let npub = Keys::generate()
+            .public_key()
+            .to_bech32()
+            .expect("generated npub");
+        core.state.nostr.contacts.push(Contact {
+            id: "alice".to_string(),
+            npub,
+            name: "Alice".to_string(),
+            followed: true,
+            picture: String::new(),
+            lightning_address: "alice@example.com".to_string(),
+            lnurl: String::new(),
+            last_used: 0,
+        });
+
+        core.handle(CoreMsg::Action(AppAction::SelectSendContact {
+            contact_id: "alice".to_string(),
+        }));
+
+        assert_eq!(
+            core.state.send.selected_contact_id.as_deref(),
+            Some("alice")
+        );
+        assert_eq!(core.state.send.destination, "alice@example.com");
+        assert!(core.state.send.zap_available);
     }
 
     #[test]
@@ -3972,6 +3984,22 @@ mod tests {
             lightning_invoice: None,
             lightning_payment_hash: None,
             lightning_payment_preimage: None,
+        }
+    }
+
+    struct TestSecretStore;
+
+    impl SecretStore for TestSecretStore {
+        fn get_secret(&self, _key: String) -> Option<String> {
+            None
+        }
+
+        fn set_secret(&self, _key: String, _value: String) -> bool {
+            true
+        }
+
+        fn delete_secret(&self, _key: String) -> bool {
+            true
         }
     }
 }
