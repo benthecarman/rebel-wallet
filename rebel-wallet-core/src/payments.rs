@@ -6,12 +6,25 @@ use bark::ark::lightning::PaymentHash;
 use bark::ark::Address as ArkAddress;
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::movement::{Movement, MovementStatus, PaymentMethod as BarkPaymentMethod};
+use bark::payment_request::AvailablePaymentMethod;
 use bark::Wallet;
 use flume::Sender;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
 use crate::{AsyncMsg, CoreMsg};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SendPaymentPreference {
+    Ark,
+    Lightning,
+    OnChain,
+}
+
+struct SendPaymentDestination {
+    preference: SendPaymentPreference,
+    destination: String,
+}
 
 pub(crate) struct ParsedSendDestination {
     pub(crate) destination: String,
@@ -31,71 +44,22 @@ pub(crate) async fn parse_send_destination(
         .or_else(|| embedded_send_amount_sat(raw));
     let memo = request.message.or(request.label);
 
-    for option in request
-        .options
-        .iter()
-        .filter(|option| option.errors.is_empty())
-    {
-        if let BarkPaymentMethod::Ark(address) = &option.method {
-            return Some(ParsedSendDestination {
-                destination: address.to_string(),
-                amount_sat,
-                memo,
-                toast: None,
-            });
-        }
-    }
-
-    for option in request
-        .options
-        .iter()
-        .filter(|option| option.errors.is_empty())
-    {
-        if let BarkPaymentMethod::Invoice(invoice) = &option.method {
-            return Some(ParsedSendDestination {
-                destination: invoice.to_string(),
-                amount_sat,
-                memo,
-                toast: None,
-            });
-        }
-    }
-
-    for option in request
-        .options
-        .iter()
-        .filter(|option| option.errors.is_empty())
-    {
-        if let BarkPaymentMethod::LightningAddress(address) = &option.method {
-            return Some(ParsedSendDestination {
-                destination: address.to_string(),
-                amount_sat,
-                memo,
-                toast: None,
-            });
-        }
-    }
-
-    for option in request
-        .options
-        .iter()
-        .filter(|option| option.errors.is_empty())
-    {
-        if let BarkPaymentMethod::Bitcoin(address) = &option.method {
-            return Some(ParsedSendDestination {
-                destination: address.assume_checked_ref().to_string(),
-                amount_sat,
-                memo,
-                toast: None,
-            });
-        }
+    if let Some(option) = preferred_send_option(&request.options) {
+        return Some(ParsedSendDestination {
+            destination: option.destination,
+            amount_sat,
+            memo,
+            toast: None,
+        });
     }
 
     let toast = request
         .options
         .iter()
         .find_map(|option| match &option.method {
-            BarkPaymentMethod::Ark(_) | BarkPaymentMethod::Invoice(_) => option
+            BarkPaymentMethod::Ark(_)
+            | BarkPaymentMethod::Invoice(_)
+            | BarkPaymentMethod::LightningAddress(_) => option
                 .errors
                 .first()
                 .map(|e| format!("Invalid payment request: {e}")),
@@ -109,9 +73,6 @@ pub(crate) async fn parse_send_destination(
             BarkPaymentMethod::Offer(_) => {
                 Some("BOLT12 payment QR codes are not supported yet.".to_string())
             }
-            BarkPaymentMethod::LightningAddress(_) => {
-                Some("Lightning address QR codes are not supported yet.".to_string())
-            }
             BarkPaymentMethod::Custom(_) => {
                 Some("This payment instruction type is not supported yet.".to_string())
             }
@@ -123,6 +84,38 @@ pub(crate) async fn parse_send_destination(
         memo,
         toast,
     })
+}
+
+fn preferred_send_option(options: &[AvailablePaymentMethod]) -> Option<SendPaymentDestination> {
+    options
+        .iter()
+        .filter(|option| option.errors.is_empty())
+        .filter_map(|option| send_payment_destination(&option.method))
+        .min_by_key(|destination| destination.preference)
+}
+
+fn send_payment_destination(method: &BarkPaymentMethod) -> Option<SendPaymentDestination> {
+    match method {
+        BarkPaymentMethod::Ark(address) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::Ark,
+            destination: address.to_string(),
+        }),
+        BarkPaymentMethod::Invoice(invoice) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::Lightning,
+            destination: invoice.to_string(),
+        }),
+        BarkPaymentMethod::LightningAddress(address) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::Lightning,
+            destination: address.to_string(),
+        }),
+        BarkPaymentMethod::Bitcoin(address) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::OnChain,
+            destination: address.assume_checked_ref().to_string(),
+        }),
+        BarkPaymentMethod::OutputScript(_)
+        | BarkPaymentMethod::Offer(_)
+        | BarkPaymentMethod::Custom(_) => None,
+    }
 }
 
 pub(crate) fn embedded_send_amount_sat(destination: &str) -> Option<u64> {
@@ -515,7 +508,66 @@ fn send_ark_receive_confirmed(tx: &Sender<CoreMsg>, address: &str, amount_sat: u
 
 #[cfg(test)]
 mod tests {
-    use super::{decimal_btc_to_sat, embedded_send_amount_sat};
+    use bark::movement::PaymentMethod as BarkPaymentMethod;
+    use bark::payment_request::{AvailablePaymentMethod, PaymentMethodParsingError};
+
+    use super::{decimal_btc_to_sat, embedded_send_amount_sat, preferred_send_option};
+
+    const ARK_ADDRESS: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
+    const BITCOIN_ADDRESS: &str = "bc1qrrz8r05xuyjh667a2nfgvh96d5x47aug0prxwm";
+    const LIGHTNING_INVOICE: &str = "lnbc20m1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygshp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q9qrsgq9vlvyj8cqvq6ggvpwd53jncp9nwc47xlrsnenq2zp70fq83qlgesn4u3uyf4tesfkkwwfg3qs54qe426hp3tz7z6sweqdjg05axsrjqp9yrrwc";
+
+    fn payment_option(method: BarkPaymentMethod) -> AvailablePaymentMethod {
+        AvailablePaymentMethod {
+            method,
+            errors: Vec::new(),
+        }
+    }
+
+    fn payment_method(type_str: &str, value: &str) -> BarkPaymentMethod {
+        BarkPaymentMethod::from_type_value(type_str, value).unwrap()
+    }
+
+    #[test]
+    fn prioritizes_bip321_send_methods_ark_then_lightning_then_onchain() {
+        let options = vec![
+            payment_option(payment_method("bitcoin", BITCOIN_ADDRESS)),
+            payment_option(payment_method("invoice", LIGHTNING_INVOICE)),
+            payment_option(payment_method("ark", ARK_ADDRESS)),
+        ];
+
+        let selected = preferred_send_option(&options).unwrap();
+
+        assert_eq!(selected.destination, ARK_ADDRESS);
+    }
+
+    #[test]
+    fn prioritizes_lightning_over_onchain_when_ark_is_missing() {
+        let options = vec![
+            payment_option(payment_method("bitcoin", BITCOIN_ADDRESS)),
+            payment_option(payment_method("invoice", LIGHTNING_INVOICE)),
+        ];
+
+        let selected = preferred_send_option(&options).unwrap();
+
+        assert_eq!(selected.destination, LIGHTNING_INVOICE);
+    }
+
+    #[test]
+    fn ignores_invalid_higher_priority_bip321_send_methods() {
+        let options = vec![
+            AvailablePaymentMethod {
+                method: payment_method("ark", ARK_ADDRESS),
+                errors: vec![PaymentMethodParsingError::NetworkMismatch],
+            },
+            payment_option(payment_method("invoice", LIGHTNING_INVOICE)),
+            payment_option(payment_method("bitcoin", BITCOIN_ADDRESS)),
+        ];
+
+        let selected = preferred_send_option(&options).unwrap();
+
+        assert_eq!(selected.destination, LIGHTNING_INVOICE);
+    }
 
     #[test]
     fn extracts_amount_from_bitcoin_uri() {

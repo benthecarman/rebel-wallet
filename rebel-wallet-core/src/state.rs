@@ -570,6 +570,7 @@ impl AppState {
         }
         self.send.destination_kind = send_destination_kind(&self.send.destination);
         self.send.error_text = send_error_text(
+            &self.send.destination,
             self.send.destination_kind.clone(),
             self.send.amount_sat,
             self.send.total_cost_sat,
@@ -839,6 +840,7 @@ fn normalize_search(value: &str) -> String {
 }
 
 fn send_error_text(
+    destination: &str,
     destination_kind: SendDestinationKind,
     amount_sat: u64,
     total_cost_sat: Option<u64>,
@@ -847,20 +849,38 @@ fn send_error_text(
     if total_cost_sat.unwrap_or(amount_sat) > balance_sat {
         return Some("Insufficient balance for this send.".to_string());
     }
-    if matches!(
-        destination_kind,
-        SendDestinationKind::Ark | SendDestinationKind::OnChain
-    ) && amount_sat == 0
-    {
+    if send_requires_amount(destination, destination_kind.clone()) && amount_sat == 0 {
         return Some(format!(
             "Enter an amount before sending to {}.",
             match destination_kind {
                 SendDestinationKind::OnChain => "an on-chain address",
+                SendDestinationKind::Lightning => "this Lightning address",
                 _ => "an Ark address",
             }
         ));
     }
     None
+}
+
+fn send_requires_amount(destination: &str, destination_kind: SendDestinationKind) -> bool {
+    match destination_kind {
+        SendDestinationKind::Ark | SendDestinationKind::OnChain => true,
+        SendDestinationKind::Lightning => is_lnurl_or_lightning_address(destination),
+        SendDestinationKind::Unknown => false,
+    }
+}
+
+fn is_lnurl_or_lightning_address(destination: &str) -> bool {
+    let destination = strip_lightning_prefix(destination.trim());
+    let lower = destination.to_ascii_lowercase();
+    lower.starts_with("lnurl") || is_valid_lightning_address(destination)
+}
+
+fn strip_lightning_prefix(destination: &str) -> &str {
+    destination
+        .strip_prefix("lightning:")
+        .or_else(|| destination.strip_prefix("LIGHTNING:"))
+        .unwrap_or(destination)
 }
 
 fn grouped_digits(amount: u64) -> String {
@@ -937,6 +957,15 @@ mod tests {
         assert!(!state.send.can_continue_search);
 
         state.send.destination = " Alice@Example.com ".to_string();
+        state.send.amount_sat = 0;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(!state.send.can_submit);
+        assert_eq!(
+            state.send.error_text.as_deref(),
+            Some("Enter an amount before sending to this Lightning address.")
+        );
+
         state.send.amount_sat = 1;
         state.refresh_derived();
         assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);

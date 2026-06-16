@@ -17,7 +17,7 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Paste or scan an Ark address or Lightning invoice.")
+                Text("Paste or scan an Ark address, Lightning invoice, or Lightning address.")
                     .font(.subheadline)
                     .foregroundStyle(mutedText)
 
@@ -439,7 +439,7 @@ struct SendDestinationSummary: View {
     private var presentation: (icon: String, color: Color, title: String) {
         switch kind {
         case .lightning:
-            return ("bolt.fill", rebelBlue, "Lightning invoice")
+            return ("bolt.fill", rebelBlue, "Lightning")
         case .onChain:
             return ("bitcoinsign.circle.fill", rebelRed, "On-chain address")
         case .ark, .unknown:
