@@ -33,8 +33,8 @@ use crate::nostr_support::{
     FetchedProfileContact,
 };
 use crate::payments::{
-    is_lnurl_pay_destination, monitor_ark_receive, monitor_lightning_receive,
-    parse_send_destination, resolve_lnurl_pay_invoice,
+    embedded_send_amount_sat, is_lnurl_pay_destination, monitor_ark_receive,
+    monitor_lightning_receive, parse_send_destination, resolve_lnurl_pay_invoice,
 };
 use crate::persistence::{
     PaymentAnnotation, PersistedAppData, PersistedPriceCurrency, ServerConfig, ZapReceiptRecord,
@@ -421,6 +421,9 @@ impl AppCore {
                 self.set_send_destination(destination);
             }
             AppAction::SetSendAmount { amount_sat } => {
+                if self.state.send.amount_locked {
+                    return;
+                }
                 self.state.send.amount_sat = amount_sat;
                 self.request_send_fee_estimate();
             }
@@ -1384,6 +1387,7 @@ impl AppCore {
             return;
         }
 
+        let was_amount_locked = self.state.send.amount_locked;
         let parsed = self
             .wallet
             .clone()
@@ -1392,6 +1396,12 @@ impl AppCore {
             self.state.send.destination = parsed.destination;
             if let Some(amount_sat) = parsed.amount_sat {
                 self.state.send.amount_sat = amount_sat;
+                self.state.send.amount_locked = true;
+            } else {
+                if was_amount_locked {
+                    self.state.send.amount_sat = 0;
+                }
+                self.state.send.amount_locked = false;
             }
             if let Some(memo) = parsed.memo.filter(|m| !m.trim().is_empty()) {
                 self.state.send.memo = memo;
@@ -1401,6 +1411,15 @@ impl AppCore {
             }
         } else {
             self.state.send.destination = raw.clone();
+            if let Some(amount_sat) = embedded_send_amount_sat(&raw) {
+                self.state.send.amount_sat = amount_sat;
+                self.state.send.amount_locked = true;
+            } else {
+                if was_amount_locked {
+                    self.state.send.amount_sat = 0;
+                }
+                self.state.send.amount_locked = false;
+            }
         }
         self.state.send.search_query = raw;
         self.state.send.phase = SendPhase::Editing;
@@ -1470,6 +1489,7 @@ impl AppCore {
         self.state.send.zap_enabled = false;
         self.state.send.zap_available = false;
         self.state.send.amount_sat = 0;
+        self.state.send.amount_locked = false;
         self.state.send.memo.clear();
         self.state.send.last_result = None;
         self.state.send.phase = SendPhase::Drafting;

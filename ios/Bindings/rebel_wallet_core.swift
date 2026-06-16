@@ -1675,6 +1675,7 @@ public struct SendState: Equatable, Hashable {
     public var zapEnabled: Bool
     public var zapAvailable: Bool
     public var amountSat: UInt64
+    public var amountLocked: Bool
     public var amountDisplay: String
     public var estimatingFee: Bool
     public var feeEstimateSat: UInt64?
@@ -1692,7 +1693,7 @@ public struct SendState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(destination: String, destinationKind: SendDestinationKind, phase: SendPhase, searchQuery: String, searchResults: [Contact], globalSearchResults: [Contact], canContinueSearch: Bool, selectedContactId: String?, zapEnabled: Bool, zapAvailable: Bool, amountSat: UInt64, amountDisplay: String, estimatingFee: Bool, feeEstimateSat: UInt64?, feeEstimateDisplay: String?, feeEstimateFiatDisplay: String?, totalCostSat: UInt64?, totalCostDisplay: String?, totalCostFiatDisplay: String?, feeEstimateError: String?, memo: String, lastResult: String?, successAmountDisplay: String, canSubmit: Bool, errorText: String?) {
+    public init(destination: String, destinationKind: SendDestinationKind, phase: SendPhase, searchQuery: String, searchResults: [Contact], globalSearchResults: [Contact], canContinueSearch: Bool, selectedContactId: String?, zapEnabled: Bool, zapAvailable: Bool, amountSat: UInt64, amountLocked: Bool, amountDisplay: String, estimatingFee: Bool, feeEstimateSat: UInt64?, feeEstimateDisplay: String?, feeEstimateFiatDisplay: String?, totalCostSat: UInt64?, totalCostDisplay: String?, totalCostFiatDisplay: String?, feeEstimateError: String?, memo: String, lastResult: String?, successAmountDisplay: String, canSubmit: Bool, errorText: String?) {
         self.destination = destination
         self.destinationKind = destinationKind
         self.phase = phase
@@ -1704,6 +1705,7 @@ public struct SendState: Equatable, Hashable {
         self.zapEnabled = zapEnabled
         self.zapAvailable = zapAvailable
         self.amountSat = amountSat
+        self.amountLocked = amountLocked
         self.amountDisplay = amountDisplay
         self.estimatingFee = estimatingFee
         self.feeEstimateSat = feeEstimateSat
@@ -1747,6 +1749,7 @@ public struct FfiConverterTypeSendState: FfiConverterRustBuffer {
                 zapEnabled: FfiConverterBool.read(from: &buf), 
                 zapAvailable: FfiConverterBool.read(from: &buf), 
                 amountSat: FfiConverterUInt64.read(from: &buf), 
+                amountLocked: FfiConverterBool.read(from: &buf), 
                 amountDisplay: FfiConverterString.read(from: &buf), 
                 estimatingFee: FfiConverterBool.read(from: &buf), 
                 feeEstimateSat: FfiConverterOptionUInt64.read(from: &buf), 
@@ -1776,6 +1779,7 @@ public struct FfiConverterTypeSendState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.zapEnabled, into: &buf)
         FfiConverterBool.write(value.zapAvailable, into: &buf)
         FfiConverterUInt64.write(value.amountSat, into: &buf)
+        FfiConverterBool.write(value.amountLocked, into: &buf)
         FfiConverterString.write(value.amountDisplay, into: &buf)
         FfiConverterBool.write(value.estimatingFee, into: &buf)
         FfiConverterOptionUInt64.write(value.feeEstimateSat, into: &buf)

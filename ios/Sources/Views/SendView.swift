@@ -41,10 +41,20 @@ struct SendView: View {
                         .foregroundStyle(primaryText)
                         .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+                        .disabled(manager.state.send.amountLocked)
 
-                        Text(manager.state.send.destinationKind == .lightning ? "Leave amount at 0 for invoices that already include an amount." : "Ark sends require an amount.")
-                            .font(.caption)
-                            .foregroundStyle(mutedText)
+                        HStack(spacing: 4) {
+                            Text("Available:")
+                            Text(manager.state.wallet.balanceDisplay)
+                                .fontWeight(.semibold)
+                                .monospacedDigit()
+                            if let fiatBalance = manager.state.wallet.balanceFiatDisplay {
+                                Text("(\(fiatBalance))")
+                                    .monospacedDigit()
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -114,12 +124,18 @@ struct SendView: View {
             syncAmountTextFromState()
         }
         .onChange(of: manager.state.send.amountSat) { _, _ in
-            if !amountFieldFocused {
+            if !amountFieldFocused || manager.state.send.amountLocked {
                 syncAmountTextFromState()
             }
         }
         .onChange(of: destination) { _, _ in
-            if !amountFieldFocused {
+            if !amountFieldFocused || manager.state.send.amountLocked {
+                syncAmountTextFromState()
+            }
+        }
+        .onChange(of: manager.state.send.amountLocked) { _, locked in
+            if locked {
+                amountFieldFocused = false
                 syncAmountTextFromState()
             }
         }
@@ -150,13 +166,21 @@ struct SendView: View {
     }
 
     private func setAmountText(_ value: String) {
+        guard !manager.state.send.amountLocked else {
+            syncAmountTextFromState()
+            return
+        }
         let digits = value.filter(\.isNumber)
         amountText = digits
         manager.dispatch(.setSendAmount(amountSat: UInt64(digits) ?? 0))
     }
 
     private func syncAmountTextFromState() {
-        amountText = manager.state.send.amountSat == 0 ? "" : String(manager.state.send.amountSat)
+        if manager.state.send.amountLocked {
+            amountText = manager.state.send.amountDisplay
+        } else {
+            amountText = manager.state.send.amountSat == 0 ? "" : String(manager.state.send.amountSat)
+        }
     }
 }
 
@@ -164,41 +188,49 @@ struct SendFeeSummary: View {
     let send: SendState
 
     var body: some View {
-        if send.estimatingFee || send.feeEstimateDisplay != nil || send.feeEstimateError != nil {
-            VStack(alignment: .leading, spacing: 10) {
-                if let fee = send.feeEstimateDisplay, let total = send.totalCostDisplay {
-                    FeeSummaryRow(
-                        label: send.estimatingFee ? "Estimated fee updating" : "Estimated fee",
-                        value: fee,
-                        fiatValue: send.feeEstimateFiatDisplay
-                    )
+        VStack(alignment: .leading, spacing: 10) {
+            if let fee = send.feeEstimateDisplay {
+                FeeSummaryRow(
+                    label: "Estimated fee",
+                    value: fee,
+                    fiatValue: send.feeEstimateFiatDisplay,
+                    isUpdating: send.estimatingFee
+                )
+                if let total = send.totalCostDisplay {
                     FeeSummaryRow(
                         label: "Total",
                         value: total,
                         fiatValue: send.totalCostFiatDisplay
                     )
-                } else if send.estimatingFee {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("Estimating fee...")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(mutedText)
-                } else if let error = send.feeEstimateError {
-                    Text("Fee estimate unavailable")
-                        .font(.subheadline.weight(.semibold))
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(mutedText)
-                        .lineLimit(2)
                 }
+            } else if send.estimatingFee {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(rebelRed)
+                    Text("Estimating fee...")
+                }
+                .font(.subheadline)
+                .foregroundStyle(mutedText)
+            } else if let error = send.feeEstimateError {
+                Text("Fee estimate unavailable")
+                    .font(.subheadline.weight(.semibold))
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .lineLimit(2)
+            } else {
+                FeeSummaryRow(
+                    label: "Estimated fee",
+                    value: "-",
+                    fiatValue: nil
+                )
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(primaryText)
-            .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(primaryText)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
     }
 }
 
@@ -206,11 +238,19 @@ struct FeeSummaryRow: View {
     let label: String
     let value: String
     let fiatValue: String?
+    var isUpdating = false
 
     var body: some View {
         HStack {
-            Text(label)
-                .foregroundStyle(mutedText)
+            HStack(spacing: 6) {
+                Text(label)
+                    .foregroundStyle(mutedText)
+                if isUpdating {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(rebelRed)
+                }
+            }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text(value)

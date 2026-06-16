@@ -1,8 +1,10 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context};
 use bark::ark::lightning::PaymentHash;
 use bark::ark::Address as ArkAddress;
+use bark::lightning_invoice::Bolt11Invoice;
 use bark::movement::{Movement, MovementStatus, PaymentMethod as BarkPaymentMethod};
 use bark::Wallet;
 use flume::Sender;
@@ -23,7 +25,10 @@ pub(crate) async fn parse_send_destination(
     raw: &str,
 ) -> Option<ParsedSendDestination> {
     let request = wallet.parse_payment_request(raw).await.ok()?;
-    let amount_sat = request.amount.map(|amount| amount.to_sat());
+    let amount_sat = request
+        .amount
+        .map(|amount| amount.to_sat())
+        .or_else(|| embedded_send_amount_sat(raw));
     let memo = request.message.or(request.label);
 
     for option in request
@@ -118,6 +123,56 @@ pub(crate) async fn parse_send_destination(
         memo,
         toast,
     })
+}
+
+pub(crate) fn embedded_send_amount_sat(destination: &str) -> Option<u64> {
+    bolt11_amount_sat(destination).or_else(|| bitcoin_uri_amount_sat(destination))
+}
+
+fn bolt11_amount_sat(destination: &str) -> Option<u64> {
+    let invoice = strip_lightning_prefix(destination.trim());
+    let invoice = Bolt11Invoice::from_str(invoice).ok()?;
+    let msat = invoice.amount_milli_satoshis()?;
+    let sat = msat.checked_add(999)? / 1_000;
+    (sat > 0).then_some(sat)
+}
+
+fn bitcoin_uri_amount_sat(destination: &str) -> Option<u64> {
+    let uri = destination.trim();
+    if !uri.to_ascii_lowercase().starts_with("bitcoin:") {
+        return None;
+    }
+    let url = reqwest::Url::parse(uri).ok()?;
+    let amount = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "amount").then(|| value.into_owned()))?;
+    decimal_btc_to_sat(&amount)
+}
+
+fn decimal_btc_to_sat(amount: &str) -> Option<u64> {
+    let amount = amount.trim();
+    if amount.is_empty() || amount.starts_with('-') || amount.starts_with('+') {
+        return None;
+    }
+    let (whole, fractional) = amount.split_once('.').unwrap_or((amount, ""));
+    if whole.is_empty() || !whole.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if fractional.len() > 8 || !fractional.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let whole_sat = whole.parse::<u64>().ok()?.checked_mul(100_000_000)?;
+    let mut fractional_text = fractional.to_string();
+    while fractional_text.len() < 8 {
+        fractional_text.push('0');
+    }
+    let fractional_sat = if fractional_text.is_empty() {
+        0
+    } else {
+        fractional_text.parse::<u64>().ok()?
+    };
+    let sat = whole_sat.checked_add(fractional_sat)?;
+    (sat > 0).then_some(sat)
 }
 
 #[derive(Debug, Deserialize)]
@@ -456,4 +511,32 @@ fn send_ark_receive_confirmed(tx: &Sender<CoreMsg>, address: &str, amount_sat: u
         address: address.to_string(),
         amount_sat,
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decimal_btc_to_sat, embedded_send_amount_sat};
+
+    #[test]
+    fn extracts_amount_from_bitcoin_uri() {
+        assert_eq!(
+            embedded_send_amount_sat(
+                "bitcoin:?amount=0.0005&lightning=lnbc1example&ark=tark1example"
+            ),
+            Some(50_000)
+        );
+        assert_eq!(
+            embedded_send_amount_sat("bitcoin:bc1qexample?label=Rebel&amount=1.23456789"),
+            Some(123_456_789)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_or_zero_bitcoin_amounts() {
+        assert_eq!(decimal_btc_to_sat("0"), None);
+        assert_eq!(decimal_btc_to_sat("0.00000000"), None);
+        assert_eq!(decimal_btc_to_sat("0.000000001"), None);
+        assert_eq!(decimal_btc_to_sat("-1"), None);
+        assert_eq!(decimal_btc_to_sat("1.2.3"), None);
+    }
 }
