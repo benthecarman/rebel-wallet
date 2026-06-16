@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-CORE_CRATE="rebel-wallet_core"
+CORE_CRATE="rebel-wallet-core"
 LIB_NAME="rebel_wallet_core"
 XCF_NAME="RebelWalletCore"
 IOS_MIN_VERSION="17.0"

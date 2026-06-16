@@ -3,7 +3,7 @@ name = "rebel-wallet"
 org = "com.rebelwallet"
 
 [core]
-crate = "rebel-wallet_core"
+crate = "rebel-wallet-core"
 bindings = "uniffi"
 
 [ios]

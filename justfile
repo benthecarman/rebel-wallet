@@ -1,9 +1,9 @@
 set shell := ["bash", "-c"]
 
-CORE_CRATE := "rebel-wallet_core"
+CORE_CRATE := "rebel-wallet-core"
 LIB_NAME := "rebel_wallet_core"
 XCF_NAME := "RebelWalletCore"
-ICED_PACKAGE := "rebel-wallet_core_desktop_iced"
+ICED_PACKAGE := "rebel-wallet-core_desktop_iced"
 DYLIB_EXT := if os() == "macos" { "dylib" } else { "so" }
 IOS_BUNDLE_ID := "com.rebelwallet.app"
 
@@ -61,7 +61,7 @@ ios-gen-swift: rust-build-host
     --library target/release/lib{{LIB_NAME}}.{{DYLIB_EXT}} \
     --language swift \
     --out-dir ios/Bindings \
-    --config rust/uniffi.toml
+    --config rebel-wallet-core/uniffi.toml
 
 # Cross-compile Rust for iOS device and simulator (arm64).
 ios-rust:

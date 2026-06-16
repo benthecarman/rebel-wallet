@@ -19,7 +19,7 @@ Nostr, persistence, and routing state.
 
 ```bash
 brew install xcodegen
-cargo check -p rebel-wallet_core
+cargo check -p rebel-wallet-core
 just ios-build
 cd ios && xcodegen generate
 ```
