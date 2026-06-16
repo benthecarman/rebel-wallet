@@ -1,4 +1,3 @@
-use bitcoin::{Amount, Denomination};
 use serde::{Deserialize, Serialize};
 
 use crate::{MAINNET_ESPLORA, MAINNET_SERVER, SIGNET_ESPLORA, SIGNET_SERVER};
@@ -525,7 +524,6 @@ impl AppState {
         }
 
         self.receive.amount_display = format_sats(self.receive.amount_sat);
-        self.receive.receive_request = receive_request(&self.receive);
         self.receive.lightning_status_display = if self.receive.lightning_paid {
             "Paid".to_string()
         } else {
@@ -645,22 +643,6 @@ fn should_show_launch_splash(state: &AppState) -> bool {
 
 pub(crate) fn format_sats(amount: u64) -> String {
     format!("{} sats", grouped_digits(amount))
-}
-
-fn receive_request(receive: &ReceiveState) -> Option<String> {
-    match receive.method {
-        ReceiveMethod::Lightning => receive.lightning_invoice.clone(),
-        ReceiveMethod::Ark => {
-            let address = receive.ark_address.as_ref()?;
-            if receive.amount_sat == 0 {
-                Some(address.clone())
-            } else {
-                let amount =
-                    Amount::from_sat(receive.amount_sat).to_string_in(Denomination::Bitcoin);
-                Some(format!("bitcoin:?amount={amount}&ark={address}"))
-            }
-        }
-    }
 }
 
 fn format_fiat_sats(
@@ -941,27 +923,16 @@ mod tests {
     }
 
     #[test]
-    fn derives_receive_request_for_ark_and_lightning() {
+    fn preserves_generated_receive_request() {
         let mut state = AppState::initial();
-        state.receive.method = ReceiveMethod::Ark;
+        state.receive.receive_request =
+            Some("bitcoin:?amount=0.0005&ark=tark1fdafa&lightning=lnbc1example".to_string());
         state.receive.ark_address = Some("tark1fdafa".to_string());
-        state.receive.amount_sat = 0;
-        state.refresh_derived();
-        assert_eq!(state.receive.receive_request.as_deref(), Some("tark1fdafa"));
-
-        state.receive.amount_sat = 50_000;
-        state.refresh_derived();
-        assert_eq!(
-            state.receive.receive_request.as_deref(),
-            Some("bitcoin:?amount=0.0005&ark=tark1fdafa")
-        );
-
-        state.receive.method = ReceiveMethod::Lightning;
         state.receive.lightning_invoice = Some("lnbc1example".to_string());
         state.refresh_derived();
         assert_eq!(
             state.receive.receive_request.as_deref(),
-            Some("lnbc1example")
+            Some("bitcoin:?amount=0.0005&ark=tark1fdafa&lightning=lnbc1example")
         );
     }
 

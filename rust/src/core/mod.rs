@@ -10,7 +10,7 @@ use bark::ark::lightning::{PaymentHash, Preimage};
 use bark::ark::vtxo::Full;
 use bark::ark::{Vtxo, VtxoPolicy};
 use bark::lightning_invoice::Bolt11Invoice;
-use bark::movement::Movement;
+use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
 use bark::Wallet;
 use bip39::Mnemonic;
 use bitcoin::{
@@ -367,10 +367,7 @@ impl AppCore {
                 self.save_app_data();
             }
             AppAction::EditReceiveRequest => self.state.receive.phase = ReceivePhase::Editing,
-            AppAction::BeginReceiveRequest => match self.state.receive.method {
-                ReceiveMethod::Lightning => self.create_lightning_invoice(),
-                ReceiveMethod::Ark => self.create_ark_address(),
-            },
+            AppAction::BeginReceiveRequest => self.create_receive_request(),
             AppAction::CreateArkAddress => self.create_ark_address(),
             AppAction::CreateLightningInvoice => self.create_lightning_invoice(),
             AppAction::SetSendSearchQuery { query } => {
@@ -600,14 +597,30 @@ impl AppCore {
             }
             AsyncMsg::ArkAddress(address) => {
                 self.state.receive.ark_address = Some(address);
+                if self.state.receive.receive_request.is_none() {
+                    self.state.receive.phase = ReceivePhase::ShowingRequest;
+                }
+            }
+            AsyncMsg::ReceiveRequest {
+                uri,
+                ark_address,
+                lightning_invoice,
+                payment_hash,
+            } => {
+                self.state.receive.method = ReceiveMethod::Lightning;
+                self.state.receive.receive_request = Some(uri);
+                self.state.receive.ark_address = Some(ark_address);
+                self.state.receive.lightning_invoice = Some(lightning_invoice);
+                self.state.receive.lightning_payment_hash = Some(payment_hash);
+                self.state.receive.lightning_status = "waiting".to_string();
+                self.state.receive.lightning_paid = false;
                 self.state.receive.phase = ReceivePhase::ShowingRequest;
             }
             AsyncMsg::ArkReceiveConfirmed {
                 address,
                 amount_sat,
             } => {
-                if self.state.receive.method == ReceiveMethod::Ark
-                    && self.state.receive.phase == ReceivePhase::ShowingRequest
+                if self.state.receive.phase == ReceivePhase::ShowingRequest
                     && self.state.receive.ark_address.as_deref() == Some(address.as_str())
                 {
                     self.state.receive.amount_sat = amount_sat;
@@ -863,7 +876,9 @@ impl AppCore {
                     self.state.busy.syncing_wallet = false;
                 }
             }
-            AsyncMsg::ArkAddress(_) | AsyncMsg::LightningInvoice { .. } => {
+            AsyncMsg::ArkAddress(_)
+            | AsyncMsg::ReceiveRequest { .. }
+            | AsyncMsg::LightningInvoice { .. } => {
                 self.state.busy.creating_invoice = false;
             }
             AsyncMsg::Paid { .. } => self.state.busy.sending_payment = false,
@@ -1134,6 +1149,88 @@ impl AppCore {
                         "Could not create Ark address: {e:#}"
                     ))));
                 }
+            }
+        });
+    }
+
+    fn create_receive_request(&mut self) {
+        let Some(mut wallet) = self.wallet.clone() else {
+            return;
+        };
+        let amount_sat = self.state.receive.amount_sat;
+        if amount_sat == 0 {
+            self.state.toast = Some("Enter an amount to create a Lightning request.".to_string());
+            return;
+        }
+
+        self.state.receive.phase = ReceivePhase::Creating;
+        self.state.receive.receive_request = None;
+        self.state.receive.ark_address = None;
+        self.state.receive.lightning_invoice = None;
+        self.state.receive.lightning_payment_hash = None;
+        self.state.receive.lightning_status = "waiting".to_string();
+        self.state.receive.lightning_paid = false;
+        self.state.busy.creating_invoice = true;
+
+        let memo = self.state.receive.memo.trim().to_string();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let rt = Runtime::new().expect("tokio runtime");
+            let result_tx = tx.clone();
+            let result = rt.block_on(async move {
+                let mut builder = wallet.bip321_uri().amount(Amount::from_sat(amount_sat));
+                if !memo.is_empty() {
+                    builder = builder.message(memo);
+                }
+                let uri = builder.build().await?;
+                let uri_text = uri.to_string();
+                let request = wallet
+                    .parse_payment_request(&uri_text)
+                    .await
+                    .context("failed to parse generated BIP321 request")?;
+
+                let ark_address = request
+                    .options
+                    .iter()
+                    .find_map(|option| match &option.method {
+                        BarkPaymentMethod::Ark(address) => Some(address.clone()),
+                        _ => None,
+                    })
+                    .context("generated BIP321 request did not include an Ark address")?;
+                let lightning_invoice = request
+                    .options
+                    .iter()
+                    .find_map(|option| match &option.method {
+                        BarkPaymentMethod::Invoice(invoice) => Some(invoice.to_string()),
+                        _ => None,
+                    })
+                    .context("generated BIP321 request did not include a Lightning invoice")?;
+                let invoice = Bolt11Invoice::from_str(&lightning_invoice)
+                    .context("generated Lightning invoice was invalid")?;
+                let payment_hash: PaymentHash = (*invoice.payment_hash()).into();
+                let payment_hash_text = payment_hash.to_string();
+
+                let _ = result_tx.send(CoreMsg::Async(AsyncMsg::ReceiveRequest {
+                    uri: uri_text,
+                    ark_address: ark_address.to_string(),
+                    lightning_invoice,
+                    payment_hash: payment_hash_text,
+                }));
+
+                let ark_wallet = wallet.clone();
+                let ark_tx = result_tx.clone();
+                tokio::spawn(async move {
+                    monitor_ark_receive(ark_wallet, ark_tx, ark_address).await;
+                });
+                monitor_lightning_receive(wallet, result_tx, payment_hash).await;
+
+                anyhow::Ok(())
+            });
+
+            if let Err(e) = result {
+                let _ = tx.send(CoreMsg::Async(AsyncMsg::Error(format!(
+                    "Could not create receive request: {e:#}"
+                ))));
             }
         });
     }

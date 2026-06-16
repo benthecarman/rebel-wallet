@@ -13,14 +13,19 @@ struct SecondaryButtonStyle: ButtonStyle {
 }
 
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     let color: Color
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(isEnabled ? .white : mutedText)
             .padding(.vertical, 14)
             .padding(.horizontal, 16)
-            .background(color.opacity(configuration.isPressed ? 0.82 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .background(
+                (isEnabled ? color : raisedSurface).opacity(configuration.isPressed ? 0.82 : 1),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
     }
 }

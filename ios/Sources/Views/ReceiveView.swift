@@ -7,16 +7,16 @@ struct ReceiveView: View {
     @State private var didInitializeAmount = false
     @FocusState private var amountFocused: Bool
 
-    private var method: ReceiveMethod {
-        manager.state.receive.method
-    }
-
     private var showingResult: Bool {
         manager.state.receive.phase == .creating || manager.state.receive.phase == .showingRequest || manager.state.receive.phase == .success
     }
 
     private var receiveText: String? {
         manager.state.receive.receiveRequest
+    }
+
+    private var canContinue: Bool {
+        !amountText.isEmpty && manager.state.receive.amountSat > 0
     }
 
     var body: some View {
@@ -35,7 +35,6 @@ struct ReceiveView: View {
 
                 if showingResult {
                     ReceiveRequestPanel(
-                        method: method,
                         text: receiveText,
                         amountText: manager.state.receive.amountDisplay,
                         statusText: manager.state.receive.lightningStatusDisplay,
@@ -52,9 +51,6 @@ struct ReceiveView: View {
                                 manager.dispatch(.setReceiveAmount(amountSat: value))
                             }
                         )
-                        ReceiveMethodPicker(method: method) { method in
-                            manager.dispatch(.selectReceiveMethod(method: method))
-                        }
                     }
                     .frame(maxWidth: 400)
 
@@ -70,10 +66,10 @@ struct ReceiveView: View {
                         .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
 
-                        if method == .lightning && manager.state.receive.amountSat == 0 {
+                        if manager.state.receive.amountSat == 0 {
                             HStack(spacing: 8) {
                                 Image(systemName: "info.circle")
-                                Text("Lightning invoices need an amount.")
+                                Text("A receive request needs an amount.")
                             }
                             .font(.caption)
                             .foregroundStyle(mutedText)
@@ -82,13 +78,15 @@ struct ReceiveView: View {
 
                         Button {
                             amountFocused = false
-                            manager.dispatch(.beginReceiveRequest)
+                            if canContinue {
+                                manager.dispatch(.beginReceiveRequest)
+                            }
                         } label: {
                             Text("Continue")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(PrimaryButtonStyle(color: rebelGreen))
-                        .disabled(method == .lightning && manager.state.receive.amountSat == 0)
+                        .disabled(!canContinue)
                     }
                 }
             }
@@ -117,7 +115,7 @@ struct ReceiveView: View {
             PaymentSuccessScreen(
                 title: "Payment Received",
                 amountText: manager.state.receive.amountDisplay,
-                detail: method == .lightning ? "Lightning receive claimed." : "Ark receive confirmed.",
+                detail: "Receive request paid.",
                 confirmText: "Nice"
             ) {
                 returnHomeFromSuccess()
@@ -176,7 +174,6 @@ struct ReceiveAmountEditor: View {
 }
 
 struct ReceiveRequestPanel: View {
-    let method: ReceiveMethod
     let text: String?
     let amountText: String
     let statusText: String
@@ -185,9 +182,9 @@ struct ReceiveRequestPanel: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack(spacing: 8) {
-                Image(systemName: method.icon)
-                    .foregroundStyle(method == .lightning ? rebelBlue : rebelGreen)
-                Text(method.title)
+                Image(systemName: "link")
+                    .foregroundStyle(rebelGreen)
+                Text("BIP321")
                     .font(.headline)
                 Spacer()
                 if amountText != "0 sats" {
@@ -195,7 +192,7 @@ struct ReceiveRequestPanel: View {
                         .font(.caption.bold())
                         .foregroundStyle(mutedText)
                 }
-                Text(method == .lightning ? statusText : "Waiting")
+                Text(statusText)
                     .font(.caption.bold())
                     .foregroundStyle(paid ? rebelGreen : mutedText)
                     .padding(.horizontal, 8)
@@ -286,37 +283,5 @@ extension ReceiveMethod: Identifiable {
         case .lightning: return "bolt.fill"
         case .ark: return "link"
         }
-    }
-}
-
-struct ReceiveMethodPicker: View {
-    let method: ReceiveMethod
-    let onSelect: (ReceiveMethod) -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach([ReceiveMethod.lightning, ReceiveMethod.ark]) { option in
-                Button {
-                    onSelect(option)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: option.icon)
-                            .foregroundStyle(option == .lightning ? rebelBlue : rebelGreen)
-                        Text(option.title)
-                            .font(.subheadline.bold())
-                    }
-                    .foregroundStyle(primaryText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(method == option ? raisedSurface : Color.clear)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
     }
 }

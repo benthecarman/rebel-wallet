@@ -28,6 +28,12 @@ pub(crate) enum AsyncMsg {
         activity: Vec<ActivityItem>,
     },
     ArkAddress(String),
+    ReceiveRequest {
+        uri: String,
+        ark_address: String,
+        lightning_invoice: String,
+        payment_hash: String,
+    },
     ArkReceiveConfirmed {
         address: String,
         amount_sat: u64,
