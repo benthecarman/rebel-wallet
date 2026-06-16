@@ -28,23 +28,22 @@ bindings:
 run-ios:
   rmp run ios
 
+ios-devices:
+  xcrun devicectl list devices
+
 run-ios-phone bundle_id=IOS_BUNDLE_ID: ios-rust ios-xcframework ios-xcodeproj
   #!/usr/bin/env bash
   set -euo pipefail
-  DEVICE_ID="$(xcrun devicectl list devices | awk '
-    NR > 2 {
-      for (i = 1; i <= NF; i++) {
-        if ($i == "connected") {
-          print $(i - 1)
-          exit
-        }
-      }
-    }
-  ')"
+  DEVICE_ID="$(xcrun devicectl list devices \
+    | grep -E 'connected|available \(paired\)' \
+    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-Fa-f-]{36}$/) { print $i; exit } }')"
   if [ -z "$DEVICE_ID" ]; then
-    echo "No connected iOS device found." >&2
+    echo "No connected or paired iOS device found." >&2
+    echo "Visible devices:" >&2
+    xcrun devicectl list devices >&2
     exit 1
   fi
+  echo "Installing to iOS device $DEVICE_ID"
   DERIVED_DATA="build/ios-phone-derived"
   ./tools/xcode-run xcodebuild build \
     -project ios/App.xcodeproj -scheme App \

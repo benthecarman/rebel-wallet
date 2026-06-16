@@ -17,7 +17,7 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Paste or scan an Ark address, Lightning invoice, or Lightning address.")
+                Text("Paste or scan an Ark address, Lightning invoice, offer, or Lightning address.")
                     .font(.subheadline)
                     .foregroundStyle(mutedText)
 

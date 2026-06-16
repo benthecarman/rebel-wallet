@@ -59,6 +59,7 @@ pub(crate) async fn parse_send_destination(
         .find_map(|option| match &option.method {
             BarkPaymentMethod::Ark(_)
             | BarkPaymentMethod::Invoice(_)
+            | BarkPaymentMethod::Offer(_)
             | BarkPaymentMethod::LightningAddress(_) => option
                 .errors
                 .first()
@@ -69,9 +70,6 @@ pub(crate) async fn parse_send_destination(
                 .map(|e| format!("Invalid on-chain payment request: {e}")),
             BarkPaymentMethod::OutputScript(_) => {
                 Some("Output script payment QR codes are not supported yet.".to_string())
-            }
-            BarkPaymentMethod::Offer(_) => {
-                Some("BOLT12 payment QR codes are not supported yet.".to_string())
             }
             BarkPaymentMethod::Custom(_) => {
                 Some("This payment instruction type is not supported yet.".to_string())
@@ -108,13 +106,15 @@ fn send_payment_destination(method: &BarkPaymentMethod) -> Option<SendPaymentDes
             preference: SendPaymentPreference::Lightning,
             destination: address.to_string(),
         }),
+        BarkPaymentMethod::Offer(offer) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::Lightning,
+            destination: offer.to_string(),
+        }),
         BarkPaymentMethod::Bitcoin(address) => Some(SendPaymentDestination {
             preference: SendPaymentPreference::OnChain,
             destination: address.assume_checked_ref().to_string(),
         }),
-        BarkPaymentMethod::OutputScript(_)
-        | BarkPaymentMethod::Offer(_)
-        | BarkPaymentMethod::Custom(_) => None,
+        BarkPaymentMethod::OutputScript(_) | BarkPaymentMethod::Custom(_) => None,
     }
 }
 
@@ -516,6 +516,7 @@ mod tests {
     const ARK_ADDRESS: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
     const BITCOIN_ADDRESS: &str = "bc1qrrz8r05xuyjh667a2nfgvh96d5x47aug0prxwm";
     const LIGHTNING_INVOICE: &str = "lnbc20m1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygshp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q9qrsgq9vlvyj8cqvq6ggvpwd53jncp9nwc47xlrsnenq2zp70fq83qlgesn4u3uyf4tesfkkwwfg3qs54qe426hp3tz7z6sweqdjg05axsrjqp9yrrwc";
+    const LIGHTNING_OFFER: &str = "lno1pqpzwyq2qe3k7enxv4j3pjgrrwzv24nmzfjypx2a8m264ws9vht3uxp5vpypnluuzl67n4waq78syn2tdngnvypje2da9t4emyq25n29m84dszkfggehf3z35uj56pmxqgp5vfme44926w23gc282xn3pp0j7y8pc7je8e8qxrhmtwrjrnj4kzcqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqjnrlnqdqf52q7jwgcnxgnuseav37nvs0zn06dyfs79hk7uk8lrxuqzqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
 
     fn payment_option(method: BarkPaymentMethod) -> AvailablePaymentMethod {
         AvailablePaymentMethod {
@@ -551,6 +552,15 @@ mod tests {
         let selected = preferred_send_option(&options).unwrap();
 
         assert_eq!(selected.destination, LIGHTNING_INVOICE);
+    }
+
+    #[test]
+    fn supports_offer_as_lightning_send_method() {
+        let options = vec![payment_option(payment_method("offer", LIGHTNING_OFFER))];
+
+        let selected = preferred_send_option(&options).unwrap();
+
+        assert_eq!(selected.destination, LIGHTNING_OFFER);
     }
 
     #[test]

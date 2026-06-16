@@ -73,7 +73,12 @@ pub(crate) fn activity_from_movement(
     } else {
         "Unknown".to_string()
     };
-    let method_icon = activity_method_icon(&method, inbound).to_string();
+    let method_icon = if is_lightning_address_receive {
+        "bolt.fill"
+    } else {
+        activity_method_icon(destination.map(|d| &d.destination), inbound)
+    }
+    .to_string();
     let method_display = if is_lightning_address_receive {
         "Lightning address".to_string()
     } else {
@@ -89,6 +94,7 @@ pub(crate) fn activity_from_movement(
     let lightning_invoice = movement
         .lightning_invoice()
         .map(|invoice| invoice.to_string());
+    let lightning_offer = movement.lightning_offer().map(|offer| offer.to_string());
     let lightning_payment_hash = movement
         .lightning_payment_hash()
         .map(|payment_hash| payment_hash.to_string());
@@ -131,6 +137,7 @@ pub(crate) fn activity_from_movement(
         counterparty: contact,
         ark_address,
         lightning_invoice,
+        lightning_offer,
         lightning_payment_hash,
         lightning_payment_preimage,
     }
@@ -190,16 +197,22 @@ fn is_round_refresh_movement(movement: &Movement) -> bool {
         && movement.subsystem.kind == RoundMovement::Refresh.to_string()
 }
 
-fn activity_method_icon(method: &str, inbound: bool) -> &'static str {
-    let lower = method.to_ascii_lowercase();
-    if lower.contains("lightning") || lower.contains("invoice") {
-        "bolt.fill"
-    } else if lower.contains("ark") {
-        "link"
-    } else if inbound {
-        "arrow.down.left"
-    } else {
-        "arrow.up.right"
+fn activity_method_icon(destination: Option<&BarkPaymentMethod>, inbound: bool) -> &'static str {
+    match destination {
+        Some(BarkPaymentMethod::Invoice(_))
+        | Some(BarkPaymentMethod::Offer(_))
+        | Some(BarkPaymentMethod::LightningAddress(_)) => "bolt.fill",
+        Some(BarkPaymentMethod::Ark(_)) => "link",
+        Some(BarkPaymentMethod::Bitcoin(_))
+        | Some(BarkPaymentMethod::OutputScript(_))
+        | Some(BarkPaymentMethod::Custom(_))
+        | None => {
+            if inbound {
+                "arrow.down.left"
+            } else {
+                "arrow.up.right"
+            }
+        }
     }
 }
 
@@ -323,16 +336,17 @@ mod tests {
     use std::str::FromStr;
 
     const ARK_ADDR: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
+    const LIGHTNING_OFFER: &str = "lno1pqpzwyq2qe3k7enxv4j3pjgrrwzv24nmzfjypx2a8m264ws9vht3uxp5vpypnluuzl67n4waq78syn2tdngnvypje2da9t4emyq25n29m84dszkfggehf3z35uj56pmxqgp5vfme44926w23gc282xn3pp0j7y8pc7je8e8qxrhmtwrjrnj4kzcqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqjnrlnqdqf52q7jwgcnxgnuseav37nvs0zn06dyfs79hk7uk8lrxuqzqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
 
     #[test]
     fn activity_helpers_return_render_ready_labels() {
-        assert_eq!(
-            activity_method_icon("Lightning lnbc1...", true),
-            "bolt.fill"
-        );
-        assert_eq!(activity_method_icon("Ark address", false), "link");
-        assert_eq!(activity_method_icon("Wallet", true), "arrow.down.left");
-        assert_eq!(activity_method_icon("Wallet", false), "arrow.up.right");
+        let offer = BarkPaymentMethod::from_type_value("offer", LIGHTNING_OFFER).unwrap();
+        let ark = BarkPaymentMethod::from_type_value("ark", ARK_ADDR).unwrap();
+
+        assert_eq!(activity_method_icon(Some(&offer), false), "bolt.fill");
+        assert_eq!(activity_method_icon(Some(&ark), false), "link");
+        assert_eq!(activity_method_icon(None, true), "arrow.down.left");
+        assert_eq!(activity_method_icon(None, false), "arrow.up.right");
 
         assert_eq!(activity_message_text(""), None);
         assert_eq!(activity_message_text("ark"), None);

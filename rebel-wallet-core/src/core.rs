@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Context;
-use bark::ark::lightning::{PaymentHash, Preimage};
+use bark::ark::lightning::{Offer, OfferAmount, PaymentHash, Preimage};
 use bark::ark::vtxo::Full;
 use bark::ark::{Vtxo, VtxoPolicy};
 use bark::lightning_invoice::Bolt11Invoice;
@@ -97,10 +97,15 @@ fn send_fee_estimate_request(
             .strip_prefix("lightning:")
             .or_else(|| destination.strip_prefix("LIGHTNING:"))
             .unwrap_or(destination);
-        let invoice = Bolt11Invoice::from_str(invoice).ok()?;
-        let invoice_msat = invoice.amount_milli_satoshis()?;
-        let invoice_sat = invoice_msat.checked_add(999)? / 1_000;
-        return (invoice_sat > 0).then_some((invoice_sat, SendDestinationKind::Lightning));
+        if let Ok(invoice) = Bolt11Invoice::from_str(invoice) {
+            let invoice_msat = invoice.amount_milli_satoshis()?;
+            let invoice_sat = invoice_msat.checked_add(999)? / 1_000;
+            return (invoice_sat > 0).then_some((invoice_sat, SendDestinationKind::Lightning));
+        }
+        if let Some(offer) = parsed_offer(invoice) {
+            return offer_amount_sat(&offer).map(|amount| (amount, SendDestinationKind::Lightning));
+        }
+        return None;
     }
 
     let kind = match send_destination_kind(destination) {
@@ -108,6 +113,24 @@ fn send_fee_estimate_request(
         SendDestinationKind::Unknown | SendDestinationKind::Lightning => return None,
     };
     (amount_sat > 0).then_some((amount_sat, kind))
+}
+
+fn parsed_offer(destination: &str) -> Option<Offer> {
+    let destination = destination
+        .strip_prefix("lightning:")
+        .or_else(|| destination.strip_prefix("LIGHTNING:"))
+        .unwrap_or(destination);
+    Offer::from_str(destination.trim()).ok()
+}
+
+fn offer_amount_sat(offer: &Offer) -> Option<u64> {
+    match offer.amount()? {
+        OfferAmount::Bitcoin { amount_msats } => {
+            let sat = amount_msats.checked_add(999)? / 1_000;
+            (sat > 0).then_some(sat)
+        }
+        OfferAmount::Currency { .. } => None,
+    }
 }
 
 async fn checked_bitcoin_address(wallet: &Wallet, address: &str) -> anyhow::Result<BitcoinAddress> {
@@ -1348,12 +1371,16 @@ impl AppCore {
         } else {
             match self.state.send.destination_kind {
                 SendDestinationKind::Lightning => {
-                    let invoice = destination
-                        .strip_prefix("lightning:")
-                        .or_else(|| destination.strip_prefix("LIGHTNING:"))
-                        .unwrap_or(&destination)
-                        .to_string();
-                    self.pay_lightning_invoice(invoice, Some(self.state.send.amount_sat));
+                    if let Some(offer) = parsed_offer(&destination) {
+                        self.pay_lightning_offer(offer, self.state.send.amount_sat);
+                    } else {
+                        let invoice = destination
+                            .strip_prefix("lightning:")
+                            .or_else(|| destination.strip_prefix("LIGHTNING:"))
+                            .unwrap_or(&destination)
+                            .to_string();
+                        self.pay_lightning_invoice(invoice, Some(self.state.send.amount_sat));
+                    }
                 }
                 SendDestinationKind::OnChain => {
                     self.pay_onchain_address(destination, self.state.send.amount_sat);
@@ -2000,6 +2027,58 @@ impl AppCore {
                     }
                 }
                 Err(e) => AsyncMsg::Error(format!("Invalid Lightning invoice: {e}")),
+            };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
+    }
+
+    fn pay_lightning_offer(&mut self, offer: Offer, amount_sat: u64) {
+        let offer_text = offer.to_string();
+        let payment_amount_sat = if amount_sat > 0 {
+            Some(amount_sat)
+        } else {
+            offer_amount_sat(&offer)
+        };
+        if payment_amount_sat.is_none() {
+            self.state.toast =
+                Some("Enter an amount before sending to this Lightning offer.".to_string());
+            return;
+        }
+        if let Some(amount_sat) = payment_amount_sat {
+            if amount_sat > self.state.wallet.balance_sat {
+                self.state.toast =
+                    Some("Insufficient balance for this Lightning payment.".to_string());
+                return;
+            }
+        }
+        let Some(wallet) = self.wallet.clone() else {
+            self.state.toast = Some("Wallet is not ready yet.".to_string());
+            return;
+        };
+        self.state.busy.sending_payment = true;
+        self.state.send.phase = SendPhase::Sending;
+        self.state.send.last_result = None;
+        let tx = self.tx.clone();
+        let user_amount = (amount_sat > 0).then_some(Amount::from_sat(amount_sat));
+        let annotation = self.payment_annotation(
+            offer_text,
+            None,
+            payment_amount_sat
+                .map(|amount| -(amount as i64))
+                .unwrap_or(0),
+            false,
+        );
+        self.rt.spawn(async move {
+            let msg = match wallet.pay_lightning_offer(offer, user_amount, true).await {
+                Ok(invoice) => AsyncMsg::Paid {
+                    result: "Lightning offer paid.".to_string(),
+                    annotation: annotation.map(|mut annotation| {
+                        annotation.invoice = Some(invoice.to_string());
+                        annotation.payment_hash = Some(invoice.payment_hash().to_string());
+                        annotation
+                    }),
+                },
+                Err(e) => AsyncMsg::Error(format!("Lightning offer payment failed: {e:#}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
         });
@@ -3982,6 +4061,7 @@ mod tests {
             counterparty: None,
             ark_address: None,
             lightning_invoice: None,
+            lightning_offer: None,
             lightning_payment_hash: None,
             lightning_payment_preimage: None,
         }

@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use bark::ark::lightning::{Offer, OfferAmount};
 use bark::ark::Address as ArkAddress;
 use bitcoin::Address as BitcoinAddress;
 use serde::{Deserialize, Serialize};
@@ -380,6 +381,7 @@ pub struct ActivityItem {
     pub counterparty: Option<Contact>,
     pub ark_address: Option<String>,
     pub lightning_invoice: Option<String>,
+    pub lightning_offer: Option<String>,
     pub lightning_payment_hash: Option<String>,
     pub lightning_payment_preimage: Option<String>,
 }
@@ -829,6 +831,7 @@ fn is_sendable_search_query(query: &str) -> bool {
             || lower.starts_with("lightning:")
             || lower.starts_with("lnbc")
             || lower.starts_with("lntb")
+            || lower.starts_with("lno")
             || lower.starts_with("lnurl")
             || trimmed.contains('@')
             || lower.starts_with("http://")
@@ -846,7 +849,13 @@ fn send_error_text(
     total_cost_sat: Option<u64>,
     balance_sat: u64,
 ) -> Option<String> {
-    if total_cost_sat.unwrap_or(amount_sat) > balance_sat {
+    let effective_amount_sat =
+        if amount_sat == 0 && destination_kind == SendDestinationKind::Lightning {
+            offer_amount_sat(destination).unwrap_or(0)
+        } else {
+            amount_sat
+        };
+    if total_cost_sat.unwrap_or(effective_amount_sat) > balance_sat {
         return Some("Insufficient balance for this send.".to_string());
     }
     if send_requires_amount(destination, destination_kind.clone()) && amount_sat == 0 {
@@ -854,7 +863,7 @@ fn send_error_text(
             "Enter an amount before sending to {}.",
             match destination_kind {
                 SendDestinationKind::OnChain => "an on-chain address",
-                SendDestinationKind::Lightning => "this Lightning address",
+                SendDestinationKind::Lightning => "this Lightning destination",
                 _ => "an Ark address",
             }
         ));
@@ -865,8 +874,24 @@ fn send_error_text(
 fn send_requires_amount(destination: &str, destination_kind: SendDestinationKind) -> bool {
     match destination_kind {
         SendDestinationKind::Ark | SendDestinationKind::OnChain => true,
-        SendDestinationKind::Lightning => is_lnurl_or_lightning_address(destination),
+        SendDestinationKind::Lightning => {
+            is_lnurl_or_lightning_address(destination) || is_amountless_offer(destination)
+        }
         SendDestinationKind::Unknown => false,
+    }
+}
+
+fn is_amountless_offer(destination: &str) -> bool {
+    offer_amount_sat(destination).is_some_and(|amount| amount == 0)
+}
+
+fn offer_amount_sat(destination: &str) -> Option<u64> {
+    let destination = strip_lightning_prefix(destination.trim());
+    let offer = Offer::from_str(destination).ok()?;
+    match offer.amount() {
+        Some(OfferAmount::Bitcoin { amount_msats }) => Some(amount_msats.checked_add(999)? / 1_000),
+        Some(OfferAmount::Currency { .. }) => Some(0),
+        None => Some(0),
     }
 }
 
@@ -917,6 +942,7 @@ mod tests {
     #[test]
     fn derives_send_destination_kind_and_validation() {
         const ARK_ADDR: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
+        const LIGHTNING_OFFER: &str = "lno1pqpzwyq2qe3k7enxv4j3pjgrrwzv24nmzfjypx2a8m264ws9vht3uxp5vpypnluuzl67n4waq78syn2tdngnvypje2da9t4emyq25n29m84dszkfggehf3z35uj56pmxqgp5vfme44926w23gc282xn3pp0j7y8pc7je8e8qxrhmtwrjrnj4kzcqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqjnrlnqdqf52q7jwgcnxgnuseav37nvs0zn06dyfs79hk7uk8lrxuqzqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
 
         let mut state = AppState::initial();
         state.wallet.balance_sat = 1_000;
@@ -963,12 +989,25 @@ mod tests {
         assert!(!state.send.can_submit);
         assert_eq!(
             state.send.error_text.as_deref(),
-            Some("Enter an amount before sending to this Lightning address.")
+            Some("Enter an amount before sending to this Lightning destination.")
         );
 
         state.send.amount_sat = 1;
         state.refresh_derived();
         assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(state.send.can_submit);
+
+        state.send.destination = LIGHTNING_OFFER.to_string();
+        state.send.search_query = LIGHTNING_OFFER.to_string();
+        state.send.amount_sat = 0;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(state.send.can_submit);
+        assert!(state.send.can_continue_search);
+        assert_eq!(state.send.error_text, None);
+
+        state.send.amount_sat = 1;
+        state.refresh_derived();
         assert!(state.send.can_submit);
 
         let onchain_address = "bc1qrrz8r05xuyjh667a2nfgvh96d5x47aug0prxwm";
@@ -1128,6 +1167,7 @@ mod tests {
             counterparty: None,
             ark_address: None,
             lightning_invoice: None,
+            lightning_offer: None,
             lightning_payment_hash: None,
             lightning_payment_preimage: None,
         }];

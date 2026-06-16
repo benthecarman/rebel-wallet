@@ -128,6 +128,10 @@ struct ActivityPreviewSheet: View {
                         SettingsDivider()
                         ActivityPreviewLine(title: "Invoice", value: invoice, canCopy: true)
                     }
+                    if let offer = item.lightningOffer, !offer.isEmpty {
+                        SettingsDivider()
+                        ActivityPreviewLine(title: "Offer", value: offer, canCopy: true)
+                    }
                     if let paymentHash = item.lightningPaymentHash, !paymentHash.isEmpty {
                         SettingsDivider()
                         ActivityPreviewLine(title: "Payment Hash", value: paymentHash, canCopy: true)

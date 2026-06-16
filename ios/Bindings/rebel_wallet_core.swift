@@ -733,12 +733,13 @@ public struct ActivityItem: Equatable, Hashable {
     public var counterparty: Contact?
     public var arkAddress: String?
     public var lightningInvoice: String?
+    public var lightningOffer: String?
     public var lightningPaymentHash: String?
     public var lightningPaymentPreimage: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, paymentAmountSat: Int64, amountDisplay: String, amountFiatDisplay: String?, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, completedAtUnix: UInt64, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
+    public init(id: String, title: String, subtitle: String, displayPrimaryName: String, displayVerb: String, displaySecondaryName: String, messageText: String?, methodIcon: String, methodDisplay: String, amountSat: Int64, paymentAmountSat: Int64, amountDisplay: String, amountFiatDisplay: String?, signedAmountDisplay: String, iconKind: ActivityIconKind, status: String, timestamp: String, completedAtUnix: UInt64, counterparty: Contact?, arkAddress: String?, lightningInvoice: String?, lightningOffer: String?, lightningPaymentHash: String?, lightningPaymentPreimage: String?) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -760,6 +761,7 @@ public struct ActivityItem: Equatable, Hashable {
         self.counterparty = counterparty
         self.arkAddress = arkAddress
         self.lightningInvoice = lightningInvoice
+        self.lightningOffer = lightningOffer
         self.lightningPaymentHash = lightningPaymentHash
         self.lightningPaymentPreimage = lightningPaymentPreimage
     }
@@ -801,6 +803,7 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 counterparty: FfiConverterOptionTypeContact.read(from: &buf), 
                 arkAddress: FfiConverterOptionString.read(from: &buf), 
                 lightningInvoice: FfiConverterOptionString.read(from: &buf), 
+                lightningOffer: FfiConverterOptionString.read(from: &buf),
                 lightningPaymentHash: FfiConverterOptionString.read(from: &buf), 
                 lightningPaymentPreimage: FfiConverterOptionString.read(from: &buf)
         )
@@ -828,6 +831,7 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
         FfiConverterOptionTypeContact.write(value.counterparty, into: &buf)
         FfiConverterOptionString.write(value.arkAddress, into: &buf)
         FfiConverterOptionString.write(value.lightningInvoice, into: &buf)
+        FfiConverterOptionString.write(value.lightningOffer, into: &buf)
         FfiConverterOptionString.write(value.lightningPaymentHash, into: &buf)
         FfiConverterOptionString.write(value.lightningPaymentPreimage, into: &buf)
     }
