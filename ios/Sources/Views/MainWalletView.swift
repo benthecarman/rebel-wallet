@@ -79,6 +79,7 @@ struct HomeView: View {
     @State private var balanceDisplayMode: BalanceDisplayMode = .sats
     @State private var pullDistance: CGFloat = 0
     @State private var refreshingActivity = false
+    @State private var crossedRefreshThreshold = false
 
     private let refreshThreshold: CGFloat = 86
 
@@ -145,6 +146,12 @@ struct HomeView: View {
                     .onChanged { value in
                         guard !refreshingActivity else { return }
                         pullDistance = max(0, value.translation.height)
+                        if !crossedRefreshThreshold && pullDistance >= refreshThreshold {
+                            crossedRefreshThreshold = true
+                            manager.requestHaptic(.impactMedium)
+                        } else if crossedRefreshThreshold && pullDistance < refreshThreshold * 0.72 {
+                            crossedRefreshThreshold = false
+                        }
                     }
                     .onEnded { value in
                         guard !refreshingActivity else { return }
@@ -152,6 +159,7 @@ struct HomeView: View {
                         if distance >= refreshThreshold {
                             startActivityRefresh()
                         } else {
+                            crossedRefreshThreshold = false
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                                 pullDistance = 0
                             }
@@ -166,7 +174,7 @@ struct HomeView: View {
         }
         .foregroundStyle(primaryText)
         .background(pageBackground)
-        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId)
+        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId, manager: manager)
     }
 
     private func startActivityRefresh() {
@@ -176,6 +184,7 @@ struct HomeView: View {
             await MainActor.run {
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
                     refreshingActivity = false
+                    crossedRefreshThreshold = false
                     pullDistance = 0
                 }
             }
@@ -255,7 +264,9 @@ struct WalletHeader: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 8)
-                MutinyBalanceButton(wallet: manager.state.wallet, displayMode: $balanceDisplayMode)
+                MutinyBalanceButton(wallet: manager.state.wallet, displayMode: $balanceDisplayMode) {
+                    manager.requestHaptic(.selection)
+                }
                     .frame(maxWidth: .infinity)
                 Button {
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
@@ -321,6 +332,7 @@ private enum WalletPanel: Equatable, Hashable {
 struct MutinyBalanceButton: View {
     let wallet: WalletState
     @Binding var displayMode: BalanceDisplayMode
+    let onCycle: () -> Void
 
     private var canShowCurrency: Bool {
         wallet.priceCurrency != .btc && wallet.balanceFiatDisplay != nil
@@ -373,6 +385,7 @@ struct MutinyBalanceButton: View {
     }
 
     private func advanceDisplayMode() {
+        onCycle()
         switch displayMode {
         case .sats:
             displayMode = canShowCurrency ? .currency : .privacy
@@ -424,11 +437,13 @@ struct MutinyFab: View {
             if open {
                 VStack(alignment: .leading, spacing: 0) {
                     FabMenuButton(title: "Send", icon: "arrow.up.right") {
+                        manager.requestHaptic(.impactLight)
                         open = false
                         manager.dispatch(.pushScreen(screen: .send))
                     }
                     Divider().overlay(borderColor)
                     FabMenuButton(title: "Receive", icon: "arrow.down.left") {
+                        manager.requestHaptic(.impactLight)
                         open = false
                         manager.dispatch(.pushScreen(screen: .receive))
                     }
@@ -444,6 +459,7 @@ struct MutinyFab: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
             }
             Button {
+                manager.requestHaptic(.selection)
                 open.toggle()
             } label: {
                 MutinyCircle(size: 64, color: walletAccent) {

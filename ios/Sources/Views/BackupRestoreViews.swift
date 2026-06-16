@@ -27,13 +27,21 @@ struct BackupView: View {
                         .foregroundStyle(mutedText)
                 }
 
-                SeedWordsPanel(words: words, revealed: $revealed, copied: $copied)
+                SeedWordsPanel(words: words, revealed: $revealed, copied: $copied) { feedback in
+                    manager.requestHaptic(feedback)
+                }
 
                 if revealed {
                     VStack(alignment: .leading, spacing: 12) {
-                        BackupCheckBox(checked: $checkedSecure, text: "I wrote the words down.")
-                        BackupCheckBox(checked: $checkedResponsibility, text: "I understand Rebel cannot recover them.")
-                        BackupCheckBox(checked: $checkedPrivate, text: "I will not share them with anyone.")
+                        BackupCheckBox(checked: $checkedSecure, text: "I wrote the words down.") {
+                            manager.requestHaptic(.selection)
+                        }
+                        BackupCheckBox(checked: $checkedResponsibility, text: "I understand Rebel cannot recover them.") {
+                            manager.requestHaptic(.selection)
+                        }
+                        BackupCheckBox(checked: $checkedPrivate, text: "I will not share them with anyone.") {
+                            manager.requestHaptic(.selection)
+                        }
                     }
                     .padding(14)
                     .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
@@ -218,12 +226,14 @@ struct SeedWordsPanel: View {
     let words: [String]
     @Binding var revealed: Bool
     @Binding var copied: Bool
+    let onHaptic: (HapticFeedback) -> Void
     @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         VStack(spacing: 16) {
             Button {
                 revealed.toggle()
+                onHaptic(revealed ? .notificationWarning : .selection)
             } label: {
                 Text(revealed ? "Hide seed words" : "Reveal seed words")
                     .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -247,6 +257,7 @@ struct SeedWordsPanel: View {
 
                 Button {
                     UIPasteboard.general.string = words.joined(separator: " ")
+                    onHaptic(.impactLight)
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         copied = false
@@ -268,11 +279,13 @@ struct SeedWordsPanel: View {
 struct BackupCheckBox: View {
     @Binding var checked: Bool
     let text: String
+    let onToggle: () -> Void
     @Environment(\.walletAccent) private var walletAccent
 
     var body: some View {
         Button {
             checked.toggle()
+            onToggle()
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")

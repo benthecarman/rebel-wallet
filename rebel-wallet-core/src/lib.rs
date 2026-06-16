@@ -27,7 +27,7 @@ pub use state::{
     NostrState, PriceCurrency, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
     SendDestinationKind, SendPhase, SendState, SetupState, WalletNetwork, WalletState,
 };
-pub use updates::AppUpdate;
+pub use updates::{AppUpdate, HapticFeedback};
 pub(crate) use updates::{AsyncMsg, CoreMsg};
 
 uniffi::setup_scaffolding!();

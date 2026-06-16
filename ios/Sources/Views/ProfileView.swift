@@ -143,6 +143,7 @@ struct LightningAddressPanel: View {
                 HStack(spacing: 10) {
                     Button {
                         UIPasteboard.general.string = claimedAddress
+                        manager.requestHaptic(.impactLight)
                     } label: {
                         Label("Copy", systemImage: "doc.on.doc")
                             .frame(maxWidth: .infinity)
@@ -236,6 +237,7 @@ struct EditProfilePanel: View {
                     Button {
                         if let arkLightningAddress {
                             lightningAddress = arkLightningAddress
+                            manager.requestHaptic(.selection)
                         }
                     } label: {
                         Label("Use Arkzap", systemImage: "bolt.badge.checkmark")

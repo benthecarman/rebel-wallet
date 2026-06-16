@@ -48,7 +48,7 @@ use crate::profile_cache::{
 };
 use crate::state::{send_destination_kind, sort_contacts_by_name_npub};
 use crate::time::{now_label, now_unix};
-use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
+use crate::updates::{AppUpdate, AsyncMsg, CoreMsg, HapticFeedback};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
 use crate::zaps::{fetch_received_zap_receipts, request_zap_invoice};
 use crate::{
@@ -314,6 +314,7 @@ struct AppCore {
     rev: u64,
     next_capability_id: u64,
     send_fee_estimate_request_id: u64,
+    pending_haptics: Vec<HapticFeedback>,
 }
 
 impl AppCore {
@@ -343,6 +344,7 @@ impl AppCore {
             rev: 0,
             next_capability_id: 0,
             send_fee_estimate_request_id: 0,
+            pending_haptics: Vec::new(),
         }
     }
 
@@ -384,6 +386,7 @@ impl AppCore {
                     let _ = self.tx.send(CoreMsg::Async(AsyncMsg::Seed(seed)));
                 } else {
                     self.state.toast = Some("Recovery phrase not found.".to_string());
+                    self.request_haptic(HapticFeedback::NotificationWarning);
                 }
             }
             AppAction::SyncWallet => self.sync_wallet(),
@@ -483,6 +486,7 @@ impl AppCore {
             AppAction::CompleteQrScan { value } => {
                 self.state.capability_request = None;
                 if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
                     self.clear_send_contact_selection();
                     self.set_send_destination(value);
                     if self.state.router.screen_stack.last() != Some(&Screen::Send) {
@@ -493,6 +497,7 @@ impl AppCore {
             AppAction::CompleteClipboardRead { value } => {
                 self.state.capability_request = None;
                 if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
                     self.clear_send_contact_selection();
                     self.set_send_destination(value);
                 }
@@ -636,6 +641,7 @@ impl AppCore {
                 message,
             } => self.send_direct_message(contact_id, message),
             AppAction::ClearToast => self.state.toast = None,
+            AppAction::RequestHaptic { feedback } => self.request_haptic(feedback),
         }
     }
 
@@ -702,6 +708,7 @@ impl AppCore {
                 {
                     self.state.receive.amount_sat = amount_sat;
                     self.state.receive.phase = ReceivePhase::Success;
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
                 }
                 self.maintain_vtxos();
             }
@@ -734,6 +741,7 @@ impl AppCore {
                     self.state.receive.lightning_status = "paid".to_string();
                     self.state.receive.lightning_paid = true;
                     self.state.receive.phase = ReceivePhase::Success;
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
                 }
                 self.maintain_vtxos();
             }
@@ -794,6 +802,7 @@ impl AppCore {
                 self.state.send.phase = SendPhase::Success;
                 self.state.send.success_amount_display = self.state.send.amount_display.clone();
                 self.state.send.last_result = Some(result);
+                self.request_haptic(HapticFeedback::NotificationSuccess);
                 self.maintain_vtxos();
             }
             AsyncMsg::ZapReceiptsLoaded { receipts, records } => {
@@ -912,6 +921,7 @@ impl AppCore {
                 self.state.nostr.picture = url.clone();
                 self.state.nostr.picture_display_url = url;
                 self.state.toast = Some("Profile picture uploaded.".to_string());
+                self.request_haptic(HapticFeedback::NotificationSuccess);
                 self.save_app_data();
             }
             AsyncMsg::NostrPublished(message) => {
@@ -923,6 +933,7 @@ impl AppCore {
             AsyncMsg::DirectMessageSent(message) => {
                 self.state.direct_messages.push(message);
                 self.state.toast = Some("Message sent.".to_string());
+                self.request_haptic(HapticFeedback::NotificationSuccess);
             }
             AsyncMsg::PriceUpdated { currency, price } => {
                 self.state.wallet.price_currency = currency;
@@ -945,6 +956,7 @@ impl AppCore {
                     };
                 }
                 self.state.toast = Some(message);
+                self.request_haptic(HapticFeedback::NotificationError);
             }
         }
     }
@@ -1001,7 +1013,7 @@ impl AppCore {
         }
     }
 
-    fn emit(&self, shared: &Arc<RwLock<AppState>>, tx: &Sender<AppUpdate>) {
+    fn emit(&mut self, shared: &Arc<RwLock<AppState>>, tx: &Sender<AppUpdate>) {
         let mut snapshot = self.state.clone();
         snapshot.refresh_derived();
         match shared.write() {
@@ -1009,6 +1021,13 @@ impl AppCore {
             Err(poison) => *poison.into_inner() = snapshot.clone(),
         }
         let _ = tx.send(AppUpdate::FullState(snapshot));
+        for feedback in self.pending_haptics.drain(..) {
+            let _ = tx.send(AppUpdate::Haptic(feedback));
+        }
+    }
+
+    fn request_haptic(&mut self, feedback: HapticFeedback) {
+        self.pending_haptics.push(feedback);
     }
 
     fn bootstrap(&mut self) {
@@ -1062,14 +1081,18 @@ impl AppCore {
                 self.state.busy.opening_wallet = true;
                 self.open_wallet(seed, WalletOpenMode::OpenOrCreate);
                 self.state.toast = Some("Network changed. Reconnecting wallet.".to_string());
+                self.request_haptic(HapticFeedback::NotificationSuccess);
             } else {
                 self.state.toast = Some("Network changed.".to_string());
+                self.request_haptic(HapticFeedback::NotificationSuccess);
             }
         } else if changed {
             self.ensure_lightning_address();
             self.state.toast = Some("Network changed.".to_string());
+            self.request_haptic(HapticFeedback::NotificationSuccess);
         } else {
             self.state.toast = Some("Network already selected.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
         }
     }
 
@@ -1077,6 +1100,7 @@ impl AppCore {
         self.state.wallet.price_currency = currency;
         self.state.wallet.btc_price = None;
         self.save_app_data();
+        self.request_haptic(HapticFeedback::NotificationSuccess);
         self.refresh_price();
     }
 
@@ -1242,6 +1266,7 @@ impl AppCore {
         let amount_sat = self.state.receive.amount_sat;
         if amount_sat == 0 {
             self.state.toast = Some("Enter an amount to create a Lightning request.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         }
 
@@ -1253,6 +1278,7 @@ impl AppCore {
         self.state.receive.lightning_status = "waiting".to_string();
         self.state.receive.lightning_paid = false;
         self.state.busy.creating_invoice = true;
+        self.request_haptic(HapticFeedback::ImpactMedium);
 
         let memo = self.state.receive.memo.trim().to_string();
         let tx = self.tx.clone();
@@ -1353,6 +1379,7 @@ impl AppCore {
         let destination = self.state.send.destination.trim().to_string();
         if destination.is_empty() {
             self.state.toast = Some("Enter a destination first.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         }
         let total_cost_sat = self
@@ -1362,15 +1389,19 @@ impl AppCore {
             .unwrap_or(self.state.send.amount_sat);
         if total_cost_sat > self.state.wallet.balance_sat {
             self.state.toast = Some("Insufficient balance for this send.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         }
         if self.state.send.zap_enabled {
+            self.request_haptic(HapticFeedback::ImpactMedium);
             self.pay_zap_destination(destination, self.state.send.amount_sat);
         } else if is_lnurl_pay_destination(&destination) {
+            self.request_haptic(HapticFeedback::ImpactMedium);
             self.pay_lnurl_destination(destination, self.state.send.amount_sat);
         } else {
             match self.state.send.destination_kind {
                 SendDestinationKind::Lightning => {
+                    self.request_haptic(HapticFeedback::ImpactMedium);
                     if let Some(offer) = parsed_offer(&destination) {
                         self.pay_lightning_offer(offer, self.state.send.amount_sat);
                     } else {
@@ -1383,13 +1414,16 @@ impl AppCore {
                     }
                 }
                 SendDestinationKind::OnChain => {
+                    self.request_haptic(HapticFeedback::ImpactMedium);
                     self.pay_onchain_address(destination, self.state.send.amount_sat);
                 }
                 SendDestinationKind::Ark => {
+                    self.request_haptic(HapticFeedback::ImpactMedium);
                     self.pay_ark_address(destination, self.state.send.amount_sat);
                 }
                 SendDestinationKind::Unknown => {
                     self.state.toast = Some("Enter a valid payment destination.".to_string());
+                    self.request_haptic(HapticFeedback::NotificationWarning);
                 }
             }
         }
@@ -1471,6 +1505,7 @@ impl AppCore {
             .find(|contact| contact.id == contact_id)
         else {
             self.state.toast = Some("Contact not found.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         };
 
@@ -1482,6 +1517,7 @@ impl AppCore {
 
         if destination.trim().is_empty() {
             self.state.toast = Some("This contact does not have a Lightning address.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         }
 
@@ -1490,6 +1526,7 @@ impl AppCore {
         self.state.send.zap_enabled = false;
         self.state.send.zap_available = public_key_from_npub_or_hex(&contact.npub).is_ok();
         self.save_app_data();
+        self.request_haptic(HapticFeedback::ImpactLight);
         self.set_send_destination(destination);
     }
 
@@ -1688,6 +1725,7 @@ impl AppCore {
             id: self.next_capability_id,
             kind,
         });
+        self.request_haptic(HapticFeedback::ImpactLight);
     }
 
     fn cache_fetched_profile_contacts(
@@ -2331,11 +2369,13 @@ impl AppCore {
                 let _ = self.secrets.set_secret(NOSTR_SECRET_KEY.to_string(), nsec);
                 self.reset_nostr_identity(npub);
                 self.state.toast = Some("Nostr key generated in Keychain.".to_string());
+                self.request_haptic(HapticFeedback::NotificationSuccess);
                 self.save_app_data();
                 self.sync_primal_follow_contacts(false);
             }
             _ => {
                 self.state.toast = Some("Could not encode generated Nostr key.".to_string());
+                self.request_haptic(HapticFeedback::NotificationError);
             }
         }
     }
@@ -2344,6 +2384,7 @@ impl AppCore {
         let value = nsec_or_hex.trim().to_string();
         if value.is_empty() {
             self.state.toast = Some("Enter a Nostr secret key.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
             return;
         }
         match Keys::parse(&value) {
@@ -2353,25 +2394,31 @@ impl AppCore {
                     self.reset_nostr_identity(npub);
                     self.state.toast =
                         Some("Nostr key imported. Refreshing profile...".to_string());
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
                     self.save_app_data();
                     self.refresh_nostr_profile();
                     self.sync_primal_follow_contacts(false);
                 }
                 _ => {
                     self.state.toast = Some("Could not encode imported Nostr key.".to_string());
+                    self.request_haptic(HapticFeedback::NotificationError);
                 }
             },
             Err(e) => {
                 self.state.toast = Some(format!("Invalid Nostr secret key: {e}"));
+                self.request_haptic(HapticFeedback::NotificationError);
             }
         }
     }
 
     fn export_nostr_secret(&mut self) {
-        self.state.toast = self
-            .secrets
-            .get_secret(NOSTR_SECRET_KEY.to_string())
-            .or_else(|| Some("No Nostr secret key found.".to_string()));
+        if let Some(secret) = self.secrets.get_secret(NOSTR_SECRET_KEY.to_string()) {
+            self.state.toast = Some(secret);
+            self.request_haptic(HapticFeedback::NotificationSuccess);
+        } else {
+            self.state.toast = Some("No Nostr secret key found.".to_string());
+            self.request_haptic(HapticFeedback::NotificationWarning);
+        }
     }
 
     fn clear_nostr_key(&mut self) {
@@ -2389,6 +2436,7 @@ impl AppCore {
             self.state.direct_messages.clear();
         }
         self.save_app_data();
+        self.request_haptic(HapticFeedback::NotificationWarning);
     }
 
     fn clear_nostr_profile_cache(&mut self) {
@@ -2408,6 +2456,7 @@ impl AppCore {
         self.state.nostr.picture_display_url.clear();
         self.state.send.global_search_results.clear();
         self.state.toast = Some("Nostr profile cache cleared.".to_string());
+        self.request_haptic(HapticFeedback::NotificationWarning);
         self.save_app_data();
     }
 

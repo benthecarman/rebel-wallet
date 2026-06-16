@@ -1,4 +1,4 @@
-use crate::{MainTab, PriceCurrency, ReceiveMethod, Screen, WalletNetwork};
+use crate::{HapticFeedback, MainTab, PriceCurrency, ReceiveMethod, Screen, WalletNetwork};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppAction {
@@ -143,4 +143,7 @@ pub enum AppAction {
         message: String,
     },
     ClearToast,
+    RequestHaptic {
+        feedback: HapticFeedback,
+    },
 }

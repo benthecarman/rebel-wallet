@@ -150,6 +150,9 @@ struct CurrencyView: View {
                 SettingsCard(title: "Select currency") {
                     ForEach(Array(manager.state.supportedPriceCurrencies.enumerated()), id: \.element.currency) { index, option in
                         Button {
+                            if selectedCurrency != option.currency {
+                                manager.requestHaptic(.selection)
+                            }
                             selectedCurrency = option.currency
                         } label: {
                             HStack(spacing: 12) {
@@ -220,6 +223,9 @@ struct NetworkView: View {
                 SettingsCard(title: "Select network") {
                     ForEach(Array(manager.state.supportedNetworks.enumerated()), id: \.element.network) { index, option in
                         Button {
+                            if selectedNetwork != option.network {
+                                manager.requestHaptic(.selection)
+                            }
                             selectedNetwork = option.network
                         } label: {
                             HStack(spacing: 12) {

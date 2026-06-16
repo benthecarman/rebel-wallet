@@ -34,18 +34,18 @@ struct ActivityView: View {
         .navigationTitle("Activity")
         .background(pageBackground)
         .foregroundStyle(primaryText)
-        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId)
+        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId, manager: manager)
     }
 }
 
 extension View {
-    func activityPreviewSheet(item: ActivityItem?, selectedActivityId: Binding<String?>) -> some View {
+    func activityPreviewSheet(item: ActivityItem?, selectedActivityId: Binding<String?>, manager: AppManager) -> some View {
         self.sheet(isPresented: Binding(
             get: { selectedActivityId.wrappedValue != nil },
             set: { if !$0 { selectedActivityId.wrappedValue = nil } }
         )) {
             if let item {
-                ActivityPreviewSheet(item: item)
+                ActivityPreviewSheet(item: item, manager: manager)
                     .presentationDetents([.fraction(0.82), .large])
                     .presentationDragIndicator(.visible)
             }
@@ -55,6 +55,7 @@ extension View {
 
 struct ActivityPreviewSheet: View {
     let item: ActivityItem
+    @Bindable var manager: AppManager
 
     private var inbound: Bool {
         item.iconKind == .received
@@ -122,23 +123,23 @@ struct ActivityPreviewSheet: View {
                     ActivityPreviewLine(title: "Date", value: item.timestamp)
                     if let arkAddress = item.arkAddress, !arkAddress.isEmpty {
                         SettingsDivider()
-                        ActivityPreviewLine(title: "Ark Address", value: arkAddress, canCopy: true)
+                        ActivityPreviewLine(title: "Ark Address", value: arkAddress, canCopy: true, manager: manager)
                     }
                     if let invoice = item.lightningInvoice, !invoice.isEmpty {
                         SettingsDivider()
-                        ActivityPreviewLine(title: "Invoice", value: invoice, canCopy: true)
+                        ActivityPreviewLine(title: "Invoice", value: invoice, canCopy: true, manager: manager)
                     }
                     if let offer = item.lightningOffer, !offer.isEmpty {
                         SettingsDivider()
-                        ActivityPreviewLine(title: "Offer", value: offer, canCopy: true)
+                        ActivityPreviewLine(title: "Offer", value: offer, canCopy: true, manager: manager)
                     }
                     if let paymentHash = item.lightningPaymentHash, !paymentHash.isEmpty {
                         SettingsDivider()
-                        ActivityPreviewLine(title: "Payment Hash", value: paymentHash, canCopy: true)
+                        ActivityPreviewLine(title: "Payment Hash", value: paymentHash, canCopy: true, manager: manager)
                     }
                     if let preimage = item.lightningPaymentPreimage, !preimage.isEmpty {
                         SettingsDivider()
-                        ActivityPreviewLine(title: "Preimage", value: preimage, canCopy: true)
+                        ActivityPreviewLine(title: "Preimage", value: preimage, canCopy: true, manager: manager)
                     }
                 }
                 .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
@@ -155,6 +156,7 @@ struct ActivityPreviewLine: View {
     let title: String
     let value: String
     var canCopy: Bool = false
+    var manager: AppManager? = nil
 
     private var displayValue: String {
         canCopy ? truncateMiddle(value, maxLength: 34) : value
@@ -176,6 +178,7 @@ struct ActivityPreviewLine: View {
             if canCopy {
                 Button {
                     UIPasteboard.general.string = value
+                    manager?.requestHaptic(.impactLight)
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 13, weight: .semibold))

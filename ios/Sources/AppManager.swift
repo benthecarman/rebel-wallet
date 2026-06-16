@@ -42,11 +42,17 @@ final class AppManager: AppReconciler {
             if s.rev <= lastRevApplied { return }
             lastRevApplied = s.rev
             state = s
+        case .haptic(let feedback):
+            Haptics.play(feedback)
         }
     }
 
     func dispatch(_ action: AppAction) {
         rust.dispatch(action: action)
+    }
+
+    func requestHaptic(_ feedback: HapticFeedback) {
+        dispatch(.requestHaptic(feedback: feedback))
     }
 
     private static func removeLegacyProfileCache(from dataDirUrl: URL) {

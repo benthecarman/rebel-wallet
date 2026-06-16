@@ -9,6 +9,17 @@ use crate::{
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppUpdate {
     FullState(AppState),
+    Haptic(HapticFeedback),
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum HapticFeedback {
+    Selection,
+    ImpactLight,
+    ImpactMedium,
+    NotificationSuccess,
+    NotificationWarning,
+    NotificationError,
 }
 
 pub(crate) enum CoreMsg {

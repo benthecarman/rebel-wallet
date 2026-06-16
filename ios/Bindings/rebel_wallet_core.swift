@@ -803,7 +803,7 @@ public struct FfiConverterTypeActivityItem: FfiConverterRustBuffer {
                 counterparty: FfiConverterOptionTypeContact.read(from: &buf), 
                 arkAddress: FfiConverterOptionString.read(from: &buf), 
                 lightningInvoice: FfiConverterOptionString.read(from: &buf), 
-                lightningOffer: FfiConverterOptionString.read(from: &buf),
+                lightningOffer: FfiConverterOptionString.read(from: &buf), 
                 lightningPaymentHash: FfiConverterOptionString.read(from: &buf), 
                 lightningPaymentPreimage: FfiConverterOptionString.read(from: &buf)
         )
@@ -2119,6 +2119,8 @@ public enum AppAction: Equatable, Hashable {
     case sendDirectMessage(contactId: String, message: String
     )
     case clearToast
+    case requestHaptic(feedback: HapticFeedback
+    )
 
 
 
@@ -2293,6 +2295,9 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         )
         
         case 61: return .clearToast
+        
+        case 62: return .requestHaptic(feedback: try FfiConverterTypeHapticFeedback.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2593,6 +2598,11 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         case .clearToast:
             writeInt(&buf, Int32(61))
         
+        
+        case let .requestHaptic(feedback):
+            writeInt(&buf, Int32(62))
+            FfiConverterTypeHapticFeedback.write(feedback, into: &buf)
+            
         }
     }
 }
@@ -2620,6 +2630,8 @@ public enum AppUpdate: Equatable, Hashable {
     
     case fullState(AppState
     )
+    case haptic(HapticFeedback
+    )
 
 
 
@@ -2644,6 +2656,9 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case 1: return .fullState(try FfiConverterTypeAppState.read(from: &buf)
         )
         
+        case 2: return .haptic(try FfiConverterTypeHapticFeedback.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -2655,6 +2670,11 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case let .fullState(v1):
             writeInt(&buf, Int32(1))
             FfiConverterTypeAppState.write(v1, into: &buf)
+            
+        
+        case let .haptic(v1):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeHapticFeedback.write(v1, into: &buf)
             
         }
     }
@@ -2747,6 +2767,101 @@ public func FfiConverterTypeCapabilityRequestKind_lift(_ buf: RustBuffer) throws
 #endif
 public func FfiConverterTypeCapabilityRequestKind_lower(_ value: CapabilityRequestKind) -> RustBuffer {
     return FfiConverterTypeCapabilityRequestKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum HapticFeedback: Equatable, Hashable {
+    
+    case selection
+    case impactLight
+    case impactMedium
+    case notificationSuccess
+    case notificationWarning
+    case notificationError
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension HapticFeedback: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHapticFeedback: FfiConverterRustBuffer {
+    typealias SwiftType = HapticFeedback
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HapticFeedback {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .selection
+        
+        case 2: return .impactLight
+        
+        case 3: return .impactMedium
+        
+        case 4: return .notificationSuccess
+        
+        case 5: return .notificationWarning
+        
+        case 6: return .notificationError
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: HapticFeedback, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .selection:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .impactLight:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .impactMedium:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .notificationSuccess:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .notificationWarning:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .notificationError:
+            writeInt(&buf, Int32(6))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHapticFeedback_lift(_ buf: RustBuffer) throws -> HapticFeedback {
+    return try FfiConverterTypeHapticFeedback.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHapticFeedback_lower(_ value: HapticFeedback) -> RustBuffer {
+    return FfiConverterTypeHapticFeedback.lower(value)
 }
 
 

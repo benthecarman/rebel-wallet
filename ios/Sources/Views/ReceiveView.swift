@@ -39,7 +39,9 @@ struct ReceiveView: View {
                         amountText: manager.state.receive.amountDisplay,
                         statusText: manager.state.receive.lightningStatusDisplay,
                         paid: manager.state.receive.lightningPaid
-                    )
+                    ) {
+                        manager.requestHaptic(.impactLight)
+                    }
                 } else {
                     Spacer(minLength: 24)
 
@@ -178,6 +180,7 @@ struct ReceiveRequestPanel: View {
     let amountText: String
     let statusText: String
     let paid: Bool
+    let onCopy: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
@@ -227,6 +230,7 @@ struct ReceiveRequestPanel: View {
                 HStack(spacing: 10) {
                     Button {
                         UIPasteboard.general.string = text
+                        onCopy()
                     } label: {
                         Label("Copy", systemImage: "doc.on.doc")
                             .frame(maxWidth: .infinity)

@@ -20,6 +20,7 @@
 		5BD7FDC594AE8C2772C8DE0B /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 084A69637C40DAFB20690CE9 /* App.swift */; };
 		67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */; };
 		67FF93F9D8D2C554E9276533 /* AppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 182BE8950E50F58DF4E9DFDB /* AppManager.swift */; };
+		737B461EAB6B2553322AF574 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */; };
 		77918D97F5494E74BC085BC7 /* QRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76402BBB1CEAF24094C36E2 /* QRCodeView.swift */; };
 		7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */; };
 		8C969DF3CAF763FFE4B79252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EC33CB686ACF317A895B9BB7 /* Assets.xcassets */; };
@@ -46,6 +47,7 @@
 		6AF276A85A4339254182EB73 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		747F6D6E419A7475169ACED6 /* CommonComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonComponents.swift; sourceTree = "<group>"; };
 		771215578CB9B3F8F64C9139 /* ContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsView.swift; sourceTree = "<group>"; };
+		7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		82FC9EE794A5E7927FEE7DF8 /* ContactDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailView.swift; sourceTree = "<group>"; };
 		8F8285F313C1C4D80E03963B /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
 		91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = RebelWalletCore.xcframework; path = Frameworks/RebelWalletCore.xcframework; sourceTree = "<group>"; };
@@ -98,6 +100,7 @@
 				182BE8950E50F58DF4E9DFDB /* AppManager.swift */,
 				EC33CB686ACF317A895B9BB7 /* Assets.xcassets */,
 				08790D56E6532CF87DC5EAF5 /* ContentView.swift */,
+				7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */,
 				D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */,
 				07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */,
 				9BED51F3FB75136969C70004 /* Capabilities */,
@@ -248,6 +251,7 @@
 				430B05A25E1EBA780E5F7A16 /* ContactDetailView.swift in Sources */,
 				EC041799A677360DB6FB8799 /* ContactsView.swift in Sources */,
 				11A29977382725FC272B253A /* ContentView.swift in Sources */,
+				737B461EAB6B2553322AF574 /* Haptics.swift in Sources */,
 				AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */,
 				2F71F386BE8E65B77B9C4A44 /* MainWalletView.swift in Sources */,
 				67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */,

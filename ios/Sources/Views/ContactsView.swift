@@ -67,6 +67,7 @@ struct ContactsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
 
                 Button {
+                    manager.requestHaptic(.selection)
                     adding.toggle()
                 } label: {
                     HStack(spacing: 12) {

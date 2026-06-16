@@ -125,6 +125,7 @@ struct ContactChatHeader: View {
                 .disabled(contact.lightningAddress.isEmpty && contact.lnurl.isEmpty)
 
                 Button {
+                    manager.requestHaptic(.impactLight)
                     manager.dispatch(.pushScreen(screen: .receive))
                 } label: {
                     Label("Request", systemImage: "arrow.down.left")
@@ -132,6 +133,7 @@ struct ContactChatHeader: View {
                 .foregroundStyle(rebelBlue)
 
                 Button {
+                    manager.requestHaptic(.selection)
                     if contact.followed {
                         manager.dispatch(.unfollowContact(contactId: contact.id))
                     } else {
@@ -145,6 +147,7 @@ struct ContactChatHeader: View {
                 Spacer()
 
                 Button(role: .destructive) {
+                    manager.requestHaptic(.notificationWarning)
                     manager.dispatch(.deleteContact(contactId: contact.id))
                     manager.dispatch(.popScreen)
                 } label: {
