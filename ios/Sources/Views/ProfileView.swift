@@ -225,10 +225,6 @@ struct EditProfilePanel: View {
                 TextField("About", text: $about, axis: .vertical)
                     .lineLimit(3...6)
                     .profileField()
-                TextField("Picture URL", text: $picture)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .profileField()
 
                 HStack(spacing: 10) {
                     TextField("Lightning Address", text: $lightningAddress)
