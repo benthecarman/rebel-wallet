@@ -308,7 +308,6 @@ struct NostrKeysPanel: View {
     @Bindable var manager: AppManager
     let done: () -> Void
     @State private var secret = ""
-    @State private var confirmClearCache = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -354,7 +353,7 @@ struct NostrKeysPanel: View {
                 .disabled(manager.state.nostr.npub == nil)
 
                 Button(role: .destructive) {
-                    confirmClearCache = true
+                    presentClearProfileCacheConfirmation()
                 } label: {
                     Label("Clear profile cache", systemImage: "xmark.bin")
                         .frame(maxWidth: .infinity)
@@ -374,14 +373,61 @@ struct NostrKeysPanel: View {
             .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
         }
-        .confirmationDialog("Clear cached Nostr profiles?", isPresented: $confirmClearCache, titleVisibility: .visible) {
-            Button("Clear profile cache", role: .destructive) {
-                manager.dispatch(.clearNostrProfileCache)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This deletes cached profile metadata and downloaded profile pictures from this device. Your key and contacts stay linked.")
+    }
+
+    private func presentClearProfileCacheConfirmation() {
+        guard let presenter = UIApplication.shared.rebelTopViewController() else {
+            return
         }
+
+        let sheet = UIAlertController(
+            title: "Clear cached Nostr profiles?",
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Clear Profile Cache", style: .destructive) { _ in
+            manager.dispatch(.clearNostrProfileCache)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if UIDevice.current.userInterfaceIdiom == .pad, let popover = sheet.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.maxY,
+                width: 1,
+                height: 1
+            )
+            popover.permittedArrowDirections = []
+        }
+
+        presenter.present(sheet, animated: true)
+    }
+}
+
+private extension UIApplication {
+    func rebelTopViewController() -> UIViewController? {
+        connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .rootViewController?
+            .rebelTopPresentedViewController()
+    }
+}
+
+private extension UIViewController {
+    func rebelTopPresentedViewController() -> UIViewController {
+        if let presentedViewController {
+            return presentedViewController.rebelTopPresentedViewController()
+        }
+        if let navigationController = self as? UINavigationController {
+            return navigationController.visibleViewController?.rebelTopPresentedViewController() ?? navigationController
+        }
+        if let tabBarController = self as? UITabBarController {
+            return tabBarController.selectedViewController?.rebelTopPresentedViewController() ?? tabBarController
+        }
+        return self
     }
 }
 
