@@ -321,7 +321,13 @@ pub struct NostrState {
     pub npub: Option<String>,
     pub name: String,
     pub about: String,
+    /// Remote profile picture URL from Nostr metadata. This is the value that
+    /// gets republished in kind-0 metadata.
     pub picture: String,
+    /// Render-ready profile picture URL. Rust may point this at a normalized
+    /// cached `file://` image while keeping `picture` as the remote source.
+    #[serde(default)]
+    pub picture_display_url: String,
     pub lud16: String,
     pub nip05: String,
     #[serde(default)]
@@ -469,6 +475,7 @@ impl AppState {
                 name: "Rebel".to_string(),
                 about: String::new(),
                 picture: String::new(),
+                picture_display_url: String::new(),
                 lud16: String::new(),
                 nip05: String::new(),
                 deleted: false,

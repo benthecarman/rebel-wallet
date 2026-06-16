@@ -96,7 +96,7 @@ struct ContactsView: View {
                             .autocorrectionDisabled()
                             .profileField()
                         Button("Add and follow") {
-                            manager.dispatch(.addContact(npub: npub, name: name.isEmpty ? npub : name, lightningAddress: lightningAddress, lnurl: "", picture: ""))
+                            manager.dispatch(.addContact(npub: npub, name: name, lightningAddress: lightningAddress, lnurl: "", picture: ""))
                             npub = ""
                             name = ""
                             lightningAddress = ""

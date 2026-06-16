@@ -27,8 +27,14 @@ final class ProfileImageLoader: ObservableObject {
     private var url: URL?
     private var loadTask: Task<Void, Never>?
 
-    func load(_ nextURL: URL, normalizer: FfiApp? = nil) {
-        guard Self.canLoad(nextURL) else {
+    /// Loads an avatar URL supplied by Rust state.
+    ///
+    /// Profile pictures are cache-managed by the Rust core. Normal app views
+    /// should therefore load only `file://` URLs so they cannot bypass
+    /// `profiles.sqlite3` and the normalized `profile_pictures` disk cache.
+    /// The remote opt-in is reserved for explicit edit previews.
+    func load(_ nextURL: URL, normalizer: FfiApp? = nil, allowRemote: Bool = false) {
+        guard Self.canLoad(nextURL, allowRemote: allowRemote) else {
             reset()
             return
         }
@@ -46,7 +52,7 @@ final class ProfileImageLoader: ObservableObject {
         image = nil
         isLoading = true
         loadTask = Task { [weak self] in
-            let loaded = await Self.image(for: nextURL, normalizer: normalizer)
+            let loaded = await Self.image(for: nextURL, normalizer: normalizer, allowRemote: allowRemote)
             guard !Task.isCancelled else { return }
             guard let self, self.url == nextURL else { return }
             self.image = loaded
@@ -62,8 +68,8 @@ final class ProfileImageLoader: ObservableObject {
         isLoading = false
     }
 
-    private static func image(for url: URL, normalizer: FfiApp?) async -> UIImage? {
-        guard canLoad(url) else { return nil }
+    private static func image(for url: URL, normalizer: FfiApp?, allowRemote: Bool) async -> UIImage? {
+        guard canLoad(url, allowRemote: allowRemote) else { return nil }
 
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
@@ -126,9 +132,9 @@ final class ProfileImageLoader: ObservableObject {
         return cgImage.bytesPerRow * cgImage.height
     }
 
-    private static func canLoad(_ url: URL) -> Bool {
+    private static func canLoad(_ url: URL, allowRemote: Bool) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
-        return scheme == "https" || scheme == "http" || scheme == "file"
+        return scheme == "file" || (allowRemote && (scheme == "https" || scheme == "http"))
     }
 
     deinit {

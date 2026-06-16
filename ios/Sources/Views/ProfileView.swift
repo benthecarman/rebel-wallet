@@ -62,7 +62,7 @@ struct ProfileSummaryPanel: View {
     var body: some View {
         VStack(spacing: 18) {
             VStack(spacing: 12) {
-                ProfileAvatar(url: manager.state.nostr.picture, size: 128, imageNormalizer: manager.rust)
+                ProfileAvatar(url: manager.state.nostr.pictureDisplayUrl, size: 128, imageNormalizer: manager.rust)
                 Text(manager.state.nostr.name.isEmpty ? "Rebel" : manager.state.nostr.name)
                     .font(.largeTitle.bold())
                     .multilineTextAlignment(.center)
@@ -206,7 +206,12 @@ struct EditProfilePanel: View {
                     manager.dispatch(.requestPhotoPick)
                 } label: {
                     ZStack(alignment: .bottomTrailing) {
-                        ProfileAvatar(url: picture, size: 128, imageNormalizer: manager.rust)
+                        ProfileAvatar(
+                            url: picture,
+                            size: 128,
+                            imageNormalizer: manager.rust,
+                            allowRemotePreview: true
+                        )
                         Image(systemName: "pencil")
                             .font(.headline)
                             .padding(10)
@@ -401,6 +406,7 @@ struct ProfileAvatar: View {
     let size: CGFloat
     var initial: String = "R"
     var imageNormalizer: FfiApp? = nil
+    var allowRemotePreview = false
 
     @StateObject private var loader = ProfileImageLoader()
 
@@ -425,7 +431,7 @@ struct ProfileAvatar: View {
         .overlay(Circle().stroke(Color.white.opacity(0.20)))
         .task(id: url) {
             if let parsed = URL(string: url), !url.isEmpty {
-                loader.load(parsed, normalizer: imageNormalizer)
+                loader.load(parsed, normalizer: imageNormalizer, allowRemote: allowRemotePreview)
             } else {
                 loader.reset()
             }

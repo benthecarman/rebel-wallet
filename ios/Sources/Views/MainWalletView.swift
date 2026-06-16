@@ -251,7 +251,7 @@ struct WalletHeader: View {
                 Button {
                     openProfile()
                 } label: {
-                    ProfileAvatar(url: manager.state.nostr.picture, size: 48, imageNormalizer: manager.rust)
+                    ProfileAvatar(url: manager.state.nostr.pictureDisplayUrl, size: 48, imageNormalizer: manager.rust)
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 8)

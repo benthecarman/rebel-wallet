@@ -29,7 +29,9 @@ pub(crate) struct ProfileCacheEntry {
     pub(crate) pubkey: String,
     pub(crate) metadata_json: String,
     pub(crate) name: String,
+    /// The current remote URL declared by the latest accepted metadata event.
     pub(crate) picture_remote_url: String,
+    /// The remote URL whose normalized bytes are stored in `profile_pictures/{pubkey}`.
     pub(crate) picture_cached_url: String,
     pub(crate) picture_cached_at: u64,
     pub(crate) lightning_address: String,
@@ -72,6 +74,9 @@ pub(crate) fn load_profile(
 }
 
 pub(crate) fn save_profile(conn: &Connection, entry: &ProfileCacheEntry) -> rusqlite::Result<()> {
+    // Preserve the downloaded pfp only while the metadata still points at the
+    // same remote URL. A metadata change invalidates the file and forces the
+    // actor to queue a fresh normalized download.
     conn.execute(
         "INSERT INTO profiles (
             pubkey,
@@ -123,6 +128,8 @@ pub(crate) fn update_cached_picture(
     pubkey: &str,
     remote_url: &str,
 ) -> rusqlite::Result<()> {
+    // Only mark a file as cached if it still matches the latest metadata row;
+    // late download completions for old URLs must not resurrect stale pfps.
     conn.execute(
         "UPDATE profiles
          SET picture_cached_url = ?2,

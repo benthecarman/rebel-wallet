@@ -31,8 +31,12 @@ pub(crate) async fn nostr_client() -> anyhow::Result<NostrClient> {
     Ok(client)
 }
 
+/// Normalized profile data ready for the actor's profile cache pipeline.
+///
+/// This intentionally is not Primal-specific: every profile metadata fetcher
+/// should produce this shape so the actor can apply one cache policy.
 #[derive(Clone, Debug)]
-pub(crate) struct PrimalProfileContact {
+pub(crate) struct FetchedProfileContact {
     pub(crate) pubkey_hex: String,
     pub(crate) metadata_json: String,
     pub(crate) event_created_at: u64,
@@ -40,9 +44,94 @@ pub(crate) struct PrimalProfileContact {
     pub(crate) contact: Contact,
 }
 
+/// Builds the app's cacheable profile shape from a Nostr kind-0 metadata payload.
+///
+/// Keep every profile fetch path routed through this constructor before the
+/// record reaches `AppCore`; that gives the cache layer one stable contract for
+/// metadata, remote picture URLs, and user-facing contact fields regardless of
+/// whether the data came from Primal or regular relays.
+pub(crate) fn profile_contact_from_metadata_json(
+    key: NostrPublicKey,
+    metadata_json: String,
+    event_created_at: u64,
+    followed: bool,
+) -> FetchedProfileContact {
+    let npub = key.to_bech32().unwrap_or_else(|_| key.to_hex());
+    let pubkey_hex = key.to_hex();
+    let profile = serde_json::from_str::<PrimalProfile>(&metadata_json).ok();
+    let name = profile
+        .as_ref()
+        .map(|profile| {
+            nostr_contact_display_name(
+                profile.display_name.clone(),
+                profile.name.clone(),
+                None,
+                &npub,
+            )
+        })
+        .unwrap_or_else(|| fallback_nostr_name(&npub));
+    let picture = profile
+        .as_ref()
+        .and_then(|profile| profile.image.clone().or(profile.picture.clone()))
+        .unwrap_or_default();
+    let lightning_address = profile
+        .as_ref()
+        .and_then(|profile| profile.lud16.clone())
+        .unwrap_or_default();
+    let lnurl = profile
+        .as_ref()
+        .and_then(|profile| profile.lud06.clone())
+        .unwrap_or_default();
+
+    FetchedProfileContact {
+        pubkey_hex,
+        metadata_json,
+        event_created_at,
+        picture_remote_url: picture.clone(),
+        contact: Contact {
+            id: contact_id(&npub),
+            npub,
+            name,
+            followed,
+            picture,
+            lightning_address,
+            lnurl,
+            last_used: if followed { now_unix() } else { 0 },
+        },
+    }
+}
+
+/// Returns the single user-facing name fallback used for Nostr contacts.
+///
+/// Nostr metadata commonly has optional fields encoded as empty strings. Treat
+/// those values as absent, then prefer display name, metadata name, contact-list
+/// petname, and finally a shortened npub. Native UI should pass raw user input
+/// through to Rust and render the normalized `Contact.name` it receives back.
+pub(crate) fn nostr_contact_display_name(
+    display_name: Option<String>,
+    name: Option<String>,
+    petname: Option<String>,
+    npub: &str,
+) -> String {
+    clean_optional_string(display_name)
+        .or_else(|| clean_optional_string(name))
+        .or_else(|| clean_optional_string(petname))
+        .unwrap_or_else(|| fallback_nostr_name(npub))
+}
+
+pub(crate) fn fallback_nostr_name(npub: &str) -> String {
+    truncate_pubkey(npub)
+}
+
+fn clean_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 pub(crate) async fn primal_follow_contacts(
     pubkey: NostrPublicKey,
-) -> anyhow::Result<Vec<PrimalProfileContact>> {
+) -> anyhow::Result<Vec<FetchedProfileContact>> {
     let pubkey_hex = pubkey.to_hex();
     let events = primal_request(json!(["contact_list", { "pubkey": pubkey_hex }])).await?;
     let mut latest_contact_list: Option<PrimalEvent> = None;
@@ -105,7 +194,7 @@ pub(crate) async fn primal_follow_contacts(
 
 pub(crate) async fn primal_search_profiles(
     query: &str,
-) -> anyhow::Result<Vec<PrimalProfileContact>> {
+) -> anyhow::Result<Vec<FetchedProfileContact>> {
     let query = query.trim();
     if query.len() < 2 {
         return Ok(Vec::new());
@@ -141,7 +230,7 @@ pub(crate) async fn primal_search_profiles(
         let contact = contact_from_primal_profile(key, Some(&event), false);
         if !contacts
             .iter()
-            .any(|c: &PrimalProfileContact| c.contact.npub == contact.contact.npub)
+            .any(|c: &FetchedProfileContact| c.contact.npub == contact.contact.npub)
         {
             contacts.push(contact);
         }
@@ -152,7 +241,7 @@ pub(crate) async fn primal_search_profiles(
 pub(crate) async fn primal_profile_contacts(
     pubkeys: Vec<NostrPublicKey>,
     followed: bool,
-) -> anyhow::Result<Vec<PrimalProfileContact>> {
+) -> anyhow::Result<Vec<FetchedProfileContact>> {
     if pubkeys.is_empty() {
         return Ok(Vec::new());
     }
@@ -273,49 +362,12 @@ fn contact_from_primal_profile(
     key: NostrPublicKey,
     event: Option<&PrimalEvent>,
     followed: bool,
-) -> PrimalProfileContact {
-    let npub = key.to_bech32().unwrap_or_else(|_| key.to_hex());
-    let pubkey_hex = key.to_hex();
+) -> FetchedProfileContact {
     let metadata_json = event
         .map(|event| event.content.clone())
         .unwrap_or_else(|| "{}".to_string());
     let event_created_at = event.map(|event| event.created_at).unwrap_or_default();
-    let profile =
-        event.and_then(|event| serde_json::from_str::<PrimalProfile>(&event.content).ok());
-    let name = profile
-        .as_ref()
-        .and_then(|profile| profile.display_name.clone().or(profile.name.clone()))
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| truncate_pubkey(&npub));
-    let picture = profile
-        .as_ref()
-        .and_then(|profile| profile.image.clone().or(profile.picture.clone()))
-        .unwrap_or_default();
-    let lightning_address = profile
-        .as_ref()
-        .and_then(|profile| profile.lud16.clone())
-        .unwrap_or_default();
-    let lnurl = profile
-        .as_ref()
-        .and_then(|profile| profile.lud06.clone())
-        .unwrap_or_default();
-
-    PrimalProfileContact {
-        pubkey_hex,
-        metadata_json,
-        event_created_at,
-        picture_remote_url: picture.clone(),
-        contact: Contact {
-            id: contact_id(&npub),
-            npub,
-            name,
-            followed,
-            picture,
-            lightning_address,
-            lnurl,
-            last_used: if followed { now_unix() } else { 0 },
-        },
-    }
+    profile_contact_from_metadata_json(key, metadata_json, event_created_at, followed)
 }
 
 fn truncate_pubkey(npub: &str) -> String {
@@ -428,12 +480,15 @@ pub(crate) fn apply_metadata_content(nostr: &mut NostrState, content: &str) -> a
     }
 
     let metadata = Metadata::from_json(content.to_string())?;
-    nostr.name = metadata
-        .display_name
-        .or(metadata.name)
-        .unwrap_or(nostr.name.clone());
+    nostr.name = nostr_contact_display_name(
+        metadata.display_name,
+        metadata.name,
+        Some(nostr.name.clone()),
+        nostr.npub.as_deref().unwrap_or_default(),
+    );
     nostr.about = metadata.about.unwrap_or_default();
     nostr.picture = metadata.picture.map(|u| u.to_string()).unwrap_or_default();
+    nostr.picture_display_url = nostr.picture.clone();
     nostr.lud16 = metadata.lud16.unwrap_or_default();
     nostr.nip05 = metadata.nip05.unwrap_or_default();
     nostr.deleted = false;
@@ -444,6 +499,7 @@ pub(crate) fn mark_profile_deleted(nostr: &mut NostrState) {
     nostr.name = "Deleted".to_string();
     nostr.about = "Deleted".to_string();
     nostr.picture.clear();
+    nostr.picture_display_url.clear();
     nostr.lud16.clear();
     nostr.nip05.clear();
     nostr.deleted = true;
@@ -487,7 +543,7 @@ pub(crate) fn merge_contacts(existing: &mut Vec<Contact>, fetched: Vec<Contact>)
 
 fn should_replace_profile_name(current: &str, fetched: &str, npub: &str) -> bool {
     let fetched = fetched.trim();
-    !fetched.is_empty() && (current.trim().is_empty() || fetched != truncate_pubkey(npub))
+    !fetched.is_empty() && (current.trim().is_empty() || fetched != fallback_nostr_name(npub))
 }
 
 pub(crate) fn contact_id(input: &str) -> String {
@@ -551,6 +607,86 @@ mod tests {
             lnurl: String::new(),
             last_used,
         }
+    }
+
+    #[test]
+    fn profile_contact_from_metadata_json_extracts_cache_fields() {
+        let key = NostrPublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
+        let record = profile_contact_from_metadata_json(
+            key,
+            r#"{
+                "name": "alice",
+                "display_name": "Alice",
+                "picture": "https://example.com/picture.jpg",
+                "lud16": "alice@example.com",
+                "lud06": "lnurl1"
+            }"#
+            .to_string(),
+            42,
+            true,
+        );
+
+        assert_eq!(
+            record.pubkey_hex,
+            "0000000000000000000000000000000000000000000000000000000000000001"
+        );
+        assert_eq!(record.event_created_at, 42);
+        assert_eq!(record.picture_remote_url, "https://example.com/picture.jpg");
+        assert_eq!(record.contact.name, "Alice");
+        assert_eq!(record.contact.picture, "https://example.com/picture.jpg");
+        assert_eq!(record.contact.lightning_address, "alice@example.com");
+        assert_eq!(record.contact.lnurl, "lnurl1");
+        assert!(record.contact.followed);
+    }
+
+    #[test]
+    fn nostr_contact_display_name_treats_empty_fields_as_absent() {
+        let npub = "npub12345678901234567890";
+
+        assert_eq!(
+            nostr_contact_display_name(
+                Some("   ".to_string()),
+                Some("\n".to_string()),
+                Some(" Petname ".to_string()),
+                npub,
+            ),
+            "Petname"
+        );
+    }
+
+    #[test]
+    fn nostr_contact_display_name_uses_one_npub_fallback() {
+        let npub = "npub12345678901234567890";
+
+        assert_eq!(
+            nostr_contact_display_name(None, None, None, npub),
+            fallback_nostr_name(npub)
+        );
+        assert_eq!(fallback_nostr_name(npub), "npub123456...67890");
+    }
+
+    #[test]
+    fn profile_contact_from_metadata_json_ignores_empty_profile_names() {
+        let key = NostrPublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )
+        .unwrap();
+        let npub = key.to_bech32().unwrap();
+        let record = profile_contact_from_metadata_json(
+            key,
+            r#"{
+                "name": "",
+                "display_name": "   "
+            }"#
+            .to_string(),
+            42,
+            false,
+        );
+
+        assert_eq!(record.contact.name, fallback_nostr_name(&npub));
     }
 
     #[test]
@@ -630,6 +766,7 @@ mod tests {
             name: "Alice".to_string(),
             about: "hello".to_string(),
             picture: "https://example.com/a.png".to_string(),
+            picture_display_url: "file:///cached/a.png".to_string(),
             lud16: "alice@example.com".to_string(),
             nip05: "alice@example.com".to_string(),
             deleted: false,
@@ -641,6 +778,7 @@ mod tests {
         assert_eq!(nostr.name, "Deleted");
         assert_eq!(nostr.about, "Deleted");
         assert!(nostr.picture.is_empty());
+        assert!(nostr.picture_display_url.is_empty());
         assert!(nostr.lud16.is_empty());
         assert!(nostr.nip05.is_empty());
         assert!(nostr.deleted);

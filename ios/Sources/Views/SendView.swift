@@ -230,15 +230,24 @@ struct FeeSummaryRow: View {
 
 struct SendSearchPanel: View {
     @Bindable var manager: AppManager
-    @State private var prefetchedProfilePicturesOnOpen = false
+    @State private var requestedProfilePictureIds = Set<String>()
+    @State private var pendingVisibleProfilePictureIds = Set<String>()
+    @State private var visibleProfilePicturePrefetchTask: Task<Void, Never>?
+    @State private var backgroundProfilePicturePrefetchTask: Task<Void, Never>?
 
-    private let profilePicturePrefetchCount = 80
+    private let initialProfilePicturePrefetchCount = 20
+    private let backgroundProfilePicturePrefetchDelayNanoseconds: UInt64 = 500_000_000
+    private let visibleProfilePicturePrefetchDelayNanoseconds: UInt64 = 150_000_000
 
     private var searchBinding: Binding<String> {
         Binding(
             get: { manager.state.send.searchQuery },
             set: { manager.dispatch(.setSendSearchQuery(query: $0)) }
         )
+    }
+
+    private var searchResultIds: [String] {
+        manager.state.send.searchResults.map(\.id)
     }
 
     var body: some View {
@@ -312,6 +321,9 @@ struct SendSearchPanel: View {
                             } label: {
                                 ContactRow(contact: contact, imageNormalizer: manager.rust)
                                     .padding(.vertical, 12)
+                                    .onAppear {
+                                        scheduleVisibleProfilePicturePrefetch(contact.id)
+                                    }
                             }
                             .buttonStyle(.plain)
                             Divider().overlay(borderColor)
@@ -324,16 +336,58 @@ struct SendSearchPanel: View {
             }
         }
         .onAppear {
-            prefetchProfilePicturesOnceOnOpen()
+            scheduleSearchResultProfilePicturePrefetch(searchResultIds)
+        }
+        .onChange(of: searchResultIds) { _, ids in
+            scheduleSearchResultProfilePicturePrefetch(ids)
+        }
+        .onDisappear {
+            visibleProfilePicturePrefetchTask?.cancel()
+            visibleProfilePicturePrefetchTask = nil
+            backgroundProfilePicturePrefetchTask?.cancel()
+            backgroundProfilePicturePrefetchTask = nil
+            pendingVisibleProfilePictureIds.removeAll()
+            requestedProfilePictureIds.removeAll()
         }
     }
 
-    private func prefetchProfilePicturesOnceOnOpen() {
-        guard !prefetchedProfilePicturesOnOpen else { return }
-        let ids = Array(manager.state.send.searchResults.prefix(profilePicturePrefetchCount).map(\.id))
+    private func scheduleSearchResultProfilePicturePrefetch(_ ids: [String]) {
+        backgroundProfilePicturePrefetchTask?.cancel()
         guard !ids.isEmpty else { return }
-        prefetchedProfilePicturesOnOpen = true
-        manager.dispatch(.prefetchProfilePictures(contactIds: ids))
+
+        let initialIds = ids
+            .prefix(initialProfilePicturePrefetchCount)
+            .filter { requestedProfilePictureIds.insert($0).inserted }
+        if !initialIds.isEmpty {
+            manager.dispatch(.prefetchProfilePictures(contactIds: Array(initialIds)))
+        }
+
+        let remainingIds = ids
+            .dropFirst(initialProfilePicturePrefetchCount)
+            .filter { !requestedProfilePictureIds.contains($0) }
+        guard !remainingIds.isEmpty else { return }
+
+        backgroundProfilePicturePrefetchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: backgroundProfilePicturePrefetchDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            let idsToPrefetch = remainingIds.filter { requestedProfilePictureIds.insert($0).inserted }
+            guard !idsToPrefetch.isEmpty else { return }
+            manager.dispatch(.prefetchProfilePictures(contactIds: Array(idsToPrefetch)))
+        }
+    }
+
+    private func scheduleVisibleProfilePicturePrefetch(_ contactId: String) {
+        guard !requestedProfilePictureIds.contains(contactId) else { return }
+        pendingVisibleProfilePictureIds.insert(contactId)
+        visibleProfilePicturePrefetchTask?.cancel()
+        visibleProfilePicturePrefetchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: visibleProfilePicturePrefetchDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            let ids = pendingVisibleProfilePictureIds.filter { requestedProfilePictureIds.insert($0).inserted }
+            pendingVisibleProfilePictureIds.removeAll()
+            guard !ids.isEmpty else { return }
+            manager.dispatch(.prefetchProfilePictures(contactIds: Array(ids)))
+        }
     }
 }
 

@@ -24,12 +24,13 @@ use nostr_sdk::prelude::{
 };
 use tokio::runtime::Runtime;
 
-use crate::activity::{activity_from_movement, is_user_visible_movement, truncate_middle};
+use crate::activity::{activity_from_movement, is_user_visible_movement};
 use crate::nostr_support::{
     apply_metadata_content, contact_id, deleted_profile_content, mark_profile_deleted,
-    merge_contacts, metadata_from_state, nostr_client, primal_follow_contacts,
-    primal_profile_contacts, primal_search_profiles, public_key_from_npub_or_hex,
-    upload_profile_picture, PrimalProfileContact,
+    merge_contacts, metadata_from_state, nostr_client, nostr_contact_display_name,
+    primal_follow_contacts, primal_profile_contacts, primal_search_profiles,
+    profile_contact_from_metadata_json, public_key_from_npub_or_hex, upload_profile_picture,
+    FetchedProfileContact,
 };
 use crate::payments::{
     is_lnurl_pay_destination, monitor_ark_receive, monitor_lightning_receive,
@@ -494,10 +495,23 @@ impl AppCore {
                 }
                 self.state.nostr.name = name;
                 self.state.nostr.about = about;
-                self.state.nostr.picture = picture;
+                self.state.nostr.picture = picture.clone();
+                self.state.nostr.picture_display_url = picture;
                 self.state.nostr.lud16 = lud16;
                 self.state.nostr.nip05 = nip05;
                 self.state.nostr.deleted = false;
+                if let Some(npub) = self.state.nostr.npub.clone() {
+                    if let Ok(pubkey) = public_key_from_npub_or_hex(&npub) {
+                        let pubkey_hex = pubkey.to_hex();
+                        let picture = self.state.nostr.picture.clone();
+                        save_own_profile_picture_remote_url(
+                            self.profile_db.as_ref(),
+                            &pubkey_hex,
+                            &self.state.nostr,
+                        );
+                        self.prefetch_profile_picture_for_pubkey(&pubkey_hex, &picture);
+                    }
+                }
                 self.state.toast = Some("Nostr profile saved locally.".to_string());
                 self.save_app_data();
             }
@@ -513,6 +527,7 @@ impl AppCore {
             } => {
                 let id = contact_id(&npub);
                 if !self.state.nostr.contacts.iter().any(|c| c.id == id) {
+                    let name = nostr_contact_display_name(None, Some(name), None, &npub);
                     self.state.nostr.contacts.push(Contact {
                         id,
                         npub,
@@ -628,6 +643,7 @@ impl AppCore {
                 self.state.wallet.pending_refresh_sat = pending_refresh_sat;
                 self.state.wallet.last_sync = Some(now_label());
                 self.state.activity = activity;
+                self.prefetch_activity_profile_pictures();
                 self.scan_zap_receipts();
             }
             AsyncMsg::ArkAddress(address) => {
@@ -766,7 +782,7 @@ impl AppCore {
                 }
             }
             AsyncMsg::ZapReceiptsLoaded { receipts, records } => {
-                let contacts = self.cache_primal_profile_contacts(records);
+                let contacts = self.cache_fetched_profile_contacts(records);
                 let contact_ids = contacts
                     .iter()
                     .map(|contact| contact.id.clone())
@@ -781,16 +797,26 @@ impl AppCore {
             AsyncMsg::Seed(seed) => {
                 self.state.recovery_phrase = Some(seed);
             }
-            AsyncMsg::NostrProfileLoaded(nostr) => {
+            AsyncMsg::NostrProfileLoaded { nostr, profile } => {
                 self.state.nostr.name = nostr.name;
                 self.state.nostr.about = nostr.about;
                 self.state.nostr.picture = nostr.picture;
+                self.state.nostr.picture_display_url = nostr.picture_display_url;
                 self.state.nostr.lud16 = nostr.lud16;
                 self.state.nostr.nip05 = nostr.nip05;
                 self.state.nostr.deleted = nostr.deleted;
+                if let Some(profile) = profile {
+                    let pubkey_hex = profile.pubkey_hex.clone();
+                    let contact = self.cache_fetched_profile_contact(profile);
+                    if !self.state.nostr.deleted {
+                        self.state.nostr.picture_display_url = contact.picture.clone();
+                        self.prefetch_profile_picture_for_pubkey(&pubkey_hex, &contact.picture);
+                    }
+                }
                 self.save_app_data();
             }
             AsyncMsg::NostrContactsLoaded(contacts) => {
+                let contacts = self.cache_fetched_profile_contacts(contacts);
                 let contact_ids = contacts
                     .iter()
                     .map(|contact| contact.id.clone())
@@ -806,7 +832,7 @@ impl AppCore {
                 records,
                 show_toast,
             } => {
-                let contacts = self.cache_primal_profile_contacts(records);
+                let contacts = self.cache_fetched_profile_contacts(records);
                 let contact_ids = contacts
                     .iter()
                     .map(|contact| contact.id.clone())
@@ -823,14 +849,22 @@ impl AppCore {
             AsyncMsg::NostrSearchLoaded { query, contacts } => {
                 if self.state.send.search_query.trim() == query {
                     self.state.send.global_search_results =
-                        self.cache_primal_profile_contacts(contacts);
+                        self.cache_fetched_profile_contacts(contacts);
+                    let contact_ids = self
+                        .state
+                        .send
+                        .global_search_results
+                        .iter()
+                        .map(|contact| contact.id.clone())
+                        .collect::<Vec<_>>();
+                    self.prefetch_profile_pictures(contact_ids);
                 }
             }
             AsyncMsg::PrimalProfilesLoaded { records } => {
                 for record in &records {
                     self.profile_info_requests.remove(&record.pubkey_hex);
                 }
-                let contacts = self.cache_primal_profile_contacts(records);
+                let contacts = self.cache_fetched_profile_contacts(records);
                 let contact_ids = contacts
                     .iter()
                     .map(|contact| contact.id.clone())
@@ -852,6 +886,7 @@ impl AppCore {
                     let _ = update_cached_picture(conn, &pubkey, &remote_url);
                 }
                 self.refresh_contact_picture_for_pubkey(&pubkey);
+                self.refresh_own_profile_picture_for_pubkey(&pubkey);
                 self.refresh_activity_picture_for_pubkey(&pubkey);
             }
             AsyncMsg::ProfilePictureCacheFailed { pubkey, remote_url } => {
@@ -859,7 +894,8 @@ impl AppCore {
                     .remove(&profile_picture_download_key(&pubkey, &remote_url));
             }
             AsyncMsg::NostrProfilePictureUploaded(url) => {
-                self.state.nostr.picture = url;
+                self.state.nostr.picture = url.clone();
+                self.state.nostr.picture_display_url = url;
                 self.state.toast = Some("Profile picture uploaded.".to_string());
                 self.save_app_data();
             }
@@ -929,7 +965,7 @@ impl AppCore {
                 self.state.busy.uploading_profile_picture = false;
             }
             AsyncMsg::NostrPublished(_) => self.state.busy.publishing_nostr = false,
-            AsyncMsg::NostrProfileLoaded(_)
+            AsyncMsg::NostrProfileLoaded { .. }
             | AsyncMsg::NostrContactsLoaded(_)
             | AsyncMsg::PrimalContactsLoaded { .. } => self.state.busy.refreshing_contacts = false,
             AsyncMsg::Error(_) => self.state.busy = BusyState::default(),
@@ -963,14 +999,7 @@ impl AppCore {
 
     fn bootstrap(&mut self) {
         self.load_app_data();
-        let persisted_contact_ids = self
-            .state
-            .nostr
-            .contacts
-            .iter()
-            .map(|contact| contact.id.clone())
-            .collect::<Vec<_>>();
-        self.prefetch_profile_pictures(persisted_contact_ids);
+        self.refresh_cached_contact_profiles_on_startup();
         self.load_nostr_key();
         self.refresh_price();
         if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
@@ -1643,17 +1672,22 @@ impl AppCore {
         });
     }
 
-    fn cache_primal_profile_contacts(
+    fn cache_fetched_profile_contacts(
         &mut self,
-        records: Vec<PrimalProfileContact>,
+        records: Vec<FetchedProfileContact>,
     ) -> Vec<Contact> {
         records
             .into_iter()
-            .map(|record| self.cache_primal_profile_contact(record))
+            .map(|record| self.cache_fetched_profile_contact(record))
             .collect()
     }
 
-    fn cache_primal_profile_contact(&mut self, record: PrimalProfileContact) -> Contact {
+    /// Saves fetched profile metadata and returns a render-ready contact.
+    ///
+    /// This is the only actor path that should turn fetched profile metadata
+    /// into UI contact state. It preserves the remote URL in SQLite and swaps
+    /// the render URL to a cached `file://` pfp when the cache is current.
+    fn cache_fetched_profile_contact(&mut self, record: FetchedProfileContact) -> Contact {
         let mut contact = record.contact;
         let cached = self
             .profile_db
@@ -1712,59 +1746,105 @@ impl AppCore {
     }
 
     fn prefetch_profile_pictures(&mut self, contact_ids: Vec<String>) {
-        let mut missing_profile_pubkeys = Vec::new();
-        for contact_id in contact_ids.into_iter().take(80) {
-            let Some(contact) = self
-                .state
-                .send
-                .search_results
-                .iter()
-                .chain(self.state.send.global_search_results.iter())
-                .chain(self.state.nostr.contacts.iter())
-                .find(|contact| contact.id == contact_id)
-                .cloned()
-            else {
-                continue;
-            };
+        let contacts = contact_ids
+            .into_iter()
+            .filter_map(|contact_id| {
+                self.state
+                    .send
+                    .search_results
+                    .iter()
+                    .chain(self.state.send.global_search_results.iter())
+                    .chain(self.state.nostr.contacts.iter())
+                    .find(|contact| contact.id == contact_id)
+                    .cloned()
+            })
+            .collect();
+        self.prefetch_profile_pictures_for_contacts(contacts);
+    }
 
+    fn prefetch_activity_profile_pictures(&mut self) {
+        let mut contacts = Vec::new();
+        for contact in self
+            .state
+            .activity
+            .iter()
+            .filter_map(|item| item.counterparty.clone())
+        {
+            if !contacts
+                .iter()
+                .any(|existing: &Contact| existing.npub == contact.npub)
+            {
+                contacts.push(contact);
+            }
+        }
+        self.prefetch_profile_pictures_for_contacts(contacts);
+    }
+
+    fn refresh_cached_contact_profiles_on_startup(&mut self) {
+        let contacts = self.state.nostr.contacts.clone();
+        self.prefetch_profile_pictures_for_contacts(contacts.clone());
+        let pubkeys = contacts
+            .into_iter()
+            .filter_map(|contact| public_key_from_npub_or_hex(&contact.npub).ok())
+            .filter(|pubkey| self.profile_info_requests.insert(pubkey.to_hex()))
+            .collect();
+        self.spawn_primal_profile_prefetch(pubkeys);
+    }
+
+    fn prefetch_profile_pictures_for_contacts(&mut self, contacts: Vec<Contact>) {
+        let mut missing_profile_pubkeys = Vec::new();
+        for contact in contacts {
             let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
                 continue;
             };
             let pubkey_hex = pubkey.to_hex();
-            let mut remote_url = contact.picture;
-            if remote_url.starts_with("file://") {
-                continue;
-            }
-            if remote_url.trim().is_empty() {
-                remote_url = self
-                    .profile_db
-                    .as_ref()
-                    .and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
-                    .map(|entry| entry.picture_remote_url)
-                    .unwrap_or_default();
-            }
-
-            if remote_url.trim().is_empty() {
+            if !self.prefetch_profile_picture_for_pubkey(&pubkey_hex, &contact.picture) {
                 if self.profile_info_requests.insert(pubkey_hex.clone()) {
                     missing_profile_pubkeys.push(pubkey);
                 }
-                continue;
             }
-            let cached_file_url = self
-                .profile_db
-                .as_ref()
-                .and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
-                .filter(|entry| entry.picture_cached_url == remote_url)
-                .and_then(|_| profile_picture_file_url(&self.cache_dir, &pubkey_hex));
-            if cached_file_url.is_some() {
-                self.refresh_contact_picture_for_pubkey(&pubkey_hex);
-                continue;
-            }
-
-            self.spawn_profile_picture_download(pubkey_hex, remote_url);
         }
 
         self.spawn_primal_profile_prefetch(missing_profile_pubkeys);
+    }
+
+    /// Ensures a profile picture flows through the Rust disk cache instead of
+    /// leaving views to fetch remote pfp URLs directly.
+    ///
+    /// Returns `false` when no remote URL is known yet; callers that have a
+    /// pubkey can then fetch profile metadata and retry through this function.
+    fn prefetch_profile_picture_for_pubkey(&mut self, pubkey_hex: &str, picture: &str) -> bool {
+        let mut remote_url = picture.to_string();
+        if remote_url.starts_with("file://") {
+            return true;
+        }
+        if remote_url.trim().is_empty() {
+            remote_url = self
+                .profile_db
+                .as_ref()
+                .and_then(|conn| load_profile(conn, pubkey_hex).ok().flatten())
+                .map(|entry| entry.picture_remote_url)
+                .unwrap_or_default();
+        }
+
+        if remote_url.trim().is_empty() {
+            return false;
+        }
+
+        let cached_file_url = self
+            .profile_db
+            .as_ref()
+            .and_then(|conn| load_profile(conn, pubkey_hex).ok().flatten())
+            .filter(|entry| entry.picture_cached_url == remote_url)
+            .and_then(|_| profile_picture_file_url(&self.cache_dir, pubkey_hex));
+        if cached_file_url.is_some() {
+            self.refresh_contact_picture_for_pubkey(pubkey_hex);
+            self.refresh_own_profile_picture_for_pubkey(pubkey_hex);
+            return true;
+        }
+
+        self.spawn_profile_picture_download(pubkey_hex.to_string(), remote_url);
+        true
     }
 
     fn spawn_primal_profile_prefetch(&self, pubkeys: Vec<NostrPublicKey>) {
@@ -1849,6 +1929,23 @@ impl AppCore {
                 contact.picture = file_url.clone();
             }
         }
+        self.save_app_data();
+    }
+
+    fn refresh_own_profile_picture_for_pubkey(&mut self, pubkey: &str) {
+        let Some(npub) = self.state.nostr.npub.as_deref() else {
+            return;
+        };
+        let Ok(own_pubkey) = public_key_from_npub_or_hex(npub) else {
+            return;
+        };
+        if own_pubkey.to_hex() != pubkey {
+            return;
+        }
+        let Some(file_url) = profile_picture_file_url(&self.cache_dir, pubkey) else {
+            return;
+        };
+        self.state.nostr.picture_display_url = file_url;
         self.save_app_data();
     }
 
@@ -2214,6 +2311,7 @@ impl AppCore {
             self.state.nostr.name = "Rebel".to_string();
             self.state.nostr.about.clear();
             self.state.nostr.picture.clear();
+            self.state.nostr.picture_display_url.clear();
             self.state.nostr.lud16.clear();
             self.state.nostr.nip05.clear();
             self.state.nostr.deleted = false;
@@ -2237,6 +2335,7 @@ impl AppCore {
         for contact in &mut self.state.send.global_search_results {
             contact.picture.clear();
         }
+        self.state.nostr.picture_display_url.clear();
         self.state.send.global_search_results.clear();
         self.state.toast = Some("Nostr profile cache cleared.".to_string());
         self.save_app_data();
@@ -2291,6 +2390,7 @@ impl AppCore {
         self.state.nostr.name = "Rebel".to_string();
         self.state.nostr.about.clear();
         self.state.nostr.picture.clear();
+        self.state.nostr.picture_display_url.clear();
         self.state.nostr.lud16.clear();
         self.state.nostr.nip05.clear();
         self.state.nostr.deleted = false;
@@ -2365,10 +2465,17 @@ impl AppCore {
                     .fetch_events(filter)
                     .timeout(Duration::from_secs(10))
                     .await?;
+                let mut profile = None;
                 if let Some(event) = events.iter().max_by_key(|event| event.created_at.as_secs()) {
                     apply_metadata_content(&mut nostr, &event.content)?;
+                    profile = Some(profile_contact_from_metadata_json(
+                        event.pubkey,
+                        event.content.clone(),
+                        event.created_at.as_secs(),
+                        true,
+                    ));
                 }
-                Ok::<_, anyhow::Error>(AsyncMsg::NostrProfileLoaded(nostr))
+                Ok::<_, anyhow::Error>(AsyncMsg::NostrProfileLoaded { nostr, profile })
             }
             .await
             .unwrap_or_else(|e| AsyncMsg::Error(format!("Nostr profile refresh failed: {e:#}")));
@@ -2535,10 +2642,12 @@ impl AppCore {
                         contacts.push(Contact {
                             id: contact_id(&npub),
                             npub: npub.clone(),
-                            name: fields
-                                .get(3)
-                                .cloned()
-                                .unwrap_or_else(|| truncate_middle(&npub, 18)),
+                            name: nostr_contact_display_name(
+                                None,
+                                None,
+                                fields.get(3).cloned(),
+                                &npub,
+                            ),
                             followed: true,
                             picture: String::new(),
                             lightning_address: String::new(),
@@ -2548,7 +2657,7 @@ impl AppCore {
                     }
                     if !pubkeys.is_empty() {
                         let metadata_filter = Filter::new()
-                            .authors(pubkeys)
+                            .authors(pubkeys.clone())
                             .kind(Kind::Metadata)
                             .limit(250);
                         let metadata_events = client
@@ -2564,10 +2673,12 @@ impl AppCore {
                             else {
                                 continue;
                             };
-                            contact.name = metadata
-                                .display_name
-                                .or(metadata.name)
-                                .unwrap_or_else(|| contact.name.clone());
+                            contact.name = nostr_contact_display_name(
+                                metadata.display_name,
+                                metadata.name,
+                                Some(contact.name.clone()),
+                                &npub,
+                            );
                             contact.picture = metadata
                                 .picture
                                 .map(|u| u.to_string())
@@ -2576,9 +2687,50 @@ impl AppCore {
                                 .lud16
                                 .unwrap_or_else(|| contact.lightning_address.clone());
                         }
+                        let mut records = metadata_events
+                            .iter()
+                            .map(|event| {
+                                profile_contact_from_metadata_json(
+                                    event.pubkey,
+                                    event.content.clone(),
+                                    event.created_at.as_secs(),
+                                    true,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        for contact in contacts {
+                            if records
+                                .iter()
+                                .any(|record| record.contact.npub == contact.npub)
+                            {
+                                continue;
+                            }
+                            let Ok(key) = public_key_from_npub_or_hex(&contact.npub) else {
+                                continue;
+                            };
+                            let mut record =
+                                profile_contact_from_metadata_json(key, "{}".to_string(), 0, true);
+                            record.contact.name = contact.name;
+                            record.contact.lightning_address = contact.lightning_address;
+                            record.contact.lnurl = contact.lnurl;
+                            records.push(record);
+                        }
+                        return Ok::<_, anyhow::Error>(AsyncMsg::NostrContactsLoaded(records));
                     }
                 }
-                Ok::<_, anyhow::Error>(AsyncMsg::NostrContactsLoaded(contacts))
+                let records = contacts
+                    .into_iter()
+                    .filter_map(|contact| {
+                        let key = public_key_from_npub_or_hex(&contact.npub).ok()?;
+                        let mut record =
+                            profile_contact_from_metadata_json(key, "{}".to_string(), 0, true);
+                        record.contact.name = contact.name;
+                        record.contact.lightning_address = contact.lightning_address;
+                        record.contact.lnurl = contact.lnurl;
+                        Some(record)
+                    })
+                    .collect();
+                Ok::<_, anyhow::Error>(AsyncMsg::NostrContactsLoaded(records))
             }
             .await
             .unwrap_or_else(|e| {
@@ -2757,6 +2909,7 @@ impl AppCore {
     fn hydrate_cached_profile_pictures(&mut self) {
         let cache_dir = self.cache_dir.clone();
         let profile_db = self.profile_db.as_ref();
+        hydrate_own_profile_picture(profile_db, &cache_dir, &mut self.state.nostr);
         for contact in &mut self.state.nostr.contacts {
             hydrate_contact_picture(profile_db, &cache_dir, contact);
         }
@@ -2818,6 +2971,90 @@ fn hydrate_contact_picture(
     if contact.picture.is_empty() {
         contact.picture = entry.picture_remote_url;
     }
+}
+
+fn hydrate_own_profile_picture(
+    profile_db: Option<&rusqlite::Connection>,
+    data_dir: &PathBuf,
+    nostr: &mut crate::NostrState,
+) {
+    if nostr.picture_display_url.starts_with("file://") {
+        nostr.picture_display_url.clear();
+    }
+    let Some(npub) = nostr.npub.as_deref() else {
+        return;
+    };
+    let Ok(pubkey) = public_key_from_npub_or_hex(npub) else {
+        return;
+    };
+    let pubkey_hex = pubkey.to_hex();
+    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+    else {
+        return;
+    };
+    if !entry.picture_remote_url.is_empty() && nostr.picture.is_empty() {
+        nostr.picture = entry.picture_remote_url.clone();
+    }
+    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
+    {
+        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
+            nostr.picture_display_url = file_url;
+            return;
+        }
+    }
+    nostr.picture_display_url = nostr.picture.clone();
+}
+
+fn save_own_profile_picture_remote_url(
+    profile_db: Option<&rusqlite::Connection>,
+    pubkey_hex: &str,
+    nostr: &crate::NostrState,
+) {
+    let Some(conn) = profile_db else {
+        return;
+    };
+    let previous = load_profile(conn, pubkey_hex).ok().flatten();
+    let same_remote = previous
+        .as_ref()
+        .is_some_and(|entry| entry.picture_remote_url == nostr.picture);
+    let metadata_json = metadata_from_state(nostr)
+        .ok()
+        .and_then(|metadata| serde_json::to_string(&metadata).ok())
+        .unwrap_or_else(|| {
+            previous
+                .as_ref()
+                .map(|entry| entry.metadata_json.clone())
+                .unwrap_or_else(|| "{}".to_string())
+        });
+    let entry = ProfileCacheEntry {
+        pubkey: pubkey_hex.to_string(),
+        metadata_json,
+        name: nostr.name.clone(),
+        picture_remote_url: nostr.picture.clone(),
+        picture_cached_url: if same_remote {
+            previous
+                .as_ref()
+                .map(|entry| entry.picture_cached_url.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        },
+        picture_cached_at: if same_remote {
+            previous
+                .as_ref()
+                .map(|entry| entry.picture_cached_at)
+                .unwrap_or_default()
+        } else {
+            0
+        },
+        lightning_address: nostr.lud16.clone(),
+        lnurl: String::new(),
+        event_created_at: previous
+            .as_ref()
+            .map(|entry| entry.event_created_at)
+            .unwrap_or_default(),
+    };
+    let _ = save_profile(conn, &entry);
 }
 
 fn apply_activity_metadata(
@@ -3356,6 +3593,78 @@ mod tests {
         let assignments = zap_receipt_activity_assignments(&[older, newer], &[item]);
 
         assert_eq!(assignments, vec![(0, 1)]);
+    }
+
+    #[test]
+    fn local_own_profile_picture_edit_seeds_profile_cache_row() {
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let conn = open_profile_cache(cache_dir.path()).expect("profile cache");
+        let pubkey_hex = "79ff3bfdd4e403159b9b0cba2cc9745eaa514637e1d4ec2ae166b743341be1af";
+        let picture = "https://example.com/new-picture.jpg";
+        let nostr = crate::NostrState {
+            npub: Some(pubkey_hex.to_string()),
+            name: "Rebel".to_string(),
+            about: String::new(),
+            picture: picture.to_string(),
+            picture_display_url: picture.to_string(),
+            lud16: String::new(),
+            nip05: String::new(),
+            deleted: false,
+            contacts: Vec::new(),
+        };
+
+        save_own_profile_picture_remote_url(Some(&conn), pubkey_hex, &nostr);
+        update_cached_picture(&conn, pubkey_hex, picture).expect("mark picture cached");
+
+        let entry = load_profile(&conn, pubkey_hex)
+            .expect("load profile")
+            .expect("profile row");
+        assert_eq!(entry.picture_remote_url, picture);
+        assert_eq!(entry.picture_cached_url, picture);
+    }
+
+    #[test]
+    fn local_own_profile_picture_edit_clears_stale_cached_url_when_remote_changes() {
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let conn = open_profile_cache(cache_dir.path()).expect("profile cache");
+        let pubkey_hex = "79ff3bfdd4e403159b9b0cba2cc9745eaa514637e1d4ec2ae166b743341be1af";
+        save_profile(
+            &conn,
+            &ProfileCacheEntry {
+                pubkey: pubkey_hex.to_string(),
+                metadata_json: "{}".to_string(),
+                name: "Rebel".to_string(),
+                picture_remote_url: "https://example.com/old-picture.jpg".to_string(),
+                picture_cached_url: "https://example.com/old-picture.jpg".to_string(),
+                picture_cached_at: 42,
+                lightning_address: String::new(),
+                lnurl: String::new(),
+                event_created_at: 7,
+            },
+        )
+        .expect("seed profile row");
+        let new_picture = "https://example.com/new-picture.jpg";
+        let nostr = crate::NostrState {
+            npub: Some(pubkey_hex.to_string()),
+            name: "Rebel".to_string(),
+            about: String::new(),
+            picture: new_picture.to_string(),
+            picture_display_url: new_picture.to_string(),
+            lud16: String::new(),
+            nip05: String::new(),
+            deleted: false,
+            contacts: Vec::new(),
+        };
+
+        save_own_profile_picture_remote_url(Some(&conn), pubkey_hex, &nostr);
+
+        let entry = load_profile(&conn, pubkey_hex)
+            .expect("load profile")
+            .expect("profile row");
+        assert_eq!(entry.picture_remote_url, new_picture);
+        assert_eq!(entry.picture_cached_url, "");
+        assert_eq!(entry.picture_cached_at, 0);
+        assert_eq!(entry.event_created_at, 7);
     }
 
     #[tokio::test]

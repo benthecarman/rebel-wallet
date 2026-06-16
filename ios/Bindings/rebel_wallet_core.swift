@@ -1417,7 +1417,16 @@ public struct NostrState: Equatable, Hashable {
     public var npub: String?
     public var name: String
     public var about: String
+    /**
+     * Remote profile picture URL from Nostr metadata. This is the value that
+     * gets republished in kind-0 metadata.
+     */
     public var picture: String
+    /**
+     * Render-ready profile picture URL. Rust may point this at a normalized
+     * cached `file://` image while keeping `picture` as the remote source.
+     */
+    public var pictureDisplayUrl: String
     public var lud16: String
     public var nip05: String
     public var deleted: Bool
@@ -1425,11 +1434,20 @@ public struct NostrState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(npub: String?, name: String, about: String, picture: String, lud16: String, nip05: String, deleted: Bool, contacts: [Contact]) {
+    public init(npub: String?, name: String, about: String, 
+        /**
+         * Remote profile picture URL from Nostr metadata. This is the value that
+         * gets republished in kind-0 metadata.
+         */picture: String, 
+        /**
+         * Render-ready profile picture URL. Rust may point this at a normalized
+         * cached `file://` image while keeping `picture` as the remote source.
+         */pictureDisplayUrl: String, lud16: String, nip05: String, deleted: Bool, contacts: [Contact]) {
         self.npub = npub
         self.name = name
         self.about = about
         self.picture = picture
+        self.pictureDisplayUrl = pictureDisplayUrl
         self.lud16 = lud16
         self.nip05 = nip05
         self.deleted = deleted
@@ -1456,6 +1474,7 @@ public struct FfiConverterTypeNostrState: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 about: FfiConverterString.read(from: &buf), 
                 picture: FfiConverterString.read(from: &buf), 
+                pictureDisplayUrl: FfiConverterString.read(from: &buf), 
                 lud16: FfiConverterString.read(from: &buf), 
                 nip05: FfiConverterString.read(from: &buf), 
                 deleted: FfiConverterBool.read(from: &buf), 
@@ -1468,6 +1487,7 @@ public struct FfiConverterTypeNostrState: FfiConverterRustBuffer {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.about, into: &buf)
         FfiConverterString.write(value.picture, into: &buf)
+        FfiConverterString.write(value.pictureDisplayUrl, into: &buf)
         FfiConverterString.write(value.lud16, into: &buf)
         FfiConverterString.write(value.nip05, into: &buf)
         FfiConverterBool.write(value.deleted, into: &buf)
@@ -3193,7 +3213,7 @@ public struct FfiConverterTypeSendDestinationKind: FfiConverterRustBuffer {
         case 2: return .lightning
         
         case 3: return .onChain
-
+        
         case 4: return .ark
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3215,10 +3235,10 @@ public struct FfiConverterTypeSendDestinationKind: FfiConverterRustBuffer {
         case .onChain:
             writeInt(&buf, Int32(3))
         
-
+        
         case .ark:
             writeInt(&buf, Int32(4))
-
+        
         }
     }
 }

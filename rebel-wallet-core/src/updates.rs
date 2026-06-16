@@ -1,10 +1,9 @@
 use bark::Wallet;
 
-use crate::nostr_support::PrimalProfileContact;
+use crate::nostr_support::FetchedProfileContact;
 use crate::persistence::ZapReceiptRecord;
 use crate::{
-    ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency,
-    SendDestinationKind,
+    ActivityItem, AppAction, AppState, NostrMessage, NostrState, PriceCurrency, SendDestinationKind,
 };
 
 #[derive(uniffi::Enum, Clone, Debug)]
@@ -84,21 +83,24 @@ pub(crate) enum AsyncMsg {
     },
     ZapReceiptsLoaded {
         receipts: Vec<ZapReceiptRecord>,
-        records: Vec<PrimalProfileContact>,
+        records: Vec<FetchedProfileContact>,
     },
     Seed(String),
-    NostrProfileLoaded(NostrState),
-    NostrContactsLoaded(Vec<Contact>),
+    NostrProfileLoaded {
+        nostr: NostrState,
+        profile: Option<FetchedProfileContact>,
+    },
+    NostrContactsLoaded(Vec<FetchedProfileContact>),
     PrimalContactsLoaded {
-        records: Vec<PrimalProfileContact>,
+        records: Vec<FetchedProfileContact>,
         show_toast: bool,
     },
     NostrSearchLoaded {
         query: String,
-        contacts: Vec<PrimalProfileContact>,
+        contacts: Vec<FetchedProfileContact>,
     },
     PrimalProfilesLoaded {
-        records: Vec<PrimalProfileContact>,
+        records: Vec<FetchedProfileContact>,
     },
     PrimalProfilesFailed {
         pubkeys: Vec<String>,
