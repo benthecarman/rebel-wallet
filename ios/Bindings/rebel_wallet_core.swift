@@ -3165,6 +3165,7 @@ public enum SendDestinationKind: Equatable, Hashable {
     
     case unknown
     case lightning
+    case onChain
     case ark
 
 
@@ -3191,7 +3192,9 @@ public struct FfiConverterTypeSendDestinationKind: FfiConverterRustBuffer {
         
         case 2: return .lightning
         
-        case 3: return .ark
+        case 3: return .onChain
+
+        case 4: return .ark
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -3209,9 +3212,13 @@ public struct FfiConverterTypeSendDestinationKind: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case .ark:
+        case .onChain:
             writeInt(&buf, Int32(3))
         
+
+        case .ark:
+            writeInt(&buf, Int32(4))
+
         }
     }
 }

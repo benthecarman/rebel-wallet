@@ -2,7 +2,10 @@ use bark::Wallet;
 
 use crate::nostr_support::PrimalProfileContact;
 use crate::persistence::ZapReceiptRecord;
-use crate::{ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency};
+use crate::{
+    ActivityItem, AppAction, AppState, Contact, NostrMessage, NostrState, PriceCurrency,
+    SendDestinationKind,
+};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppUpdate {
@@ -56,7 +59,7 @@ pub(crate) enum AsyncMsg {
         destination: String,
         amount_sat: u64,
         estimate_amount_sat: u64,
-        is_lightning: bool,
+        kind: SendDestinationKind,
     },
     SendFeeEstimated {
         request_id: u64,

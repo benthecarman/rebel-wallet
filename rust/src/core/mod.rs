@@ -15,7 +15,7 @@ use bark::Wallet;
 use bip39::Mnemonic;
 use bitcoin::{
     bip32::{DerivationPath, Xpriv},
-    Amount,
+    Address as BitcoinAddress, Amount,
 };
 use flume::Sender;
 use nostr_sdk::prelude::{
@@ -45,6 +45,7 @@ use crate::profile_cache::{
     open_profile_cache, profile_picture_file_url, save_profile, update_cached_picture,
     ProfileCacheEntry,
 };
+use crate::state::{send_destination_kind, sort_contacts_by_name_npub};
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
@@ -52,7 +53,7 @@ use crate::zaps::{check_zap_endpoint, fetch_received_zap_receipts, request_zap_i
 use crate::{
     ActivityItem, AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
     Contact, MainTab, NostrMessage, PriceCurrency, ReceiveMethod, ReceivePhase, Screen,
-    SecretStore, SendPhase, SetupState, WalletNetwork,
+    SecretStore, SendDestinationKind, SendPhase, SetupState, WalletNetwork,
 };
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
@@ -72,20 +73,23 @@ fn msats_to_display_sats(msats: u64) -> String {
     }
 }
 
-fn send_fee_estimate_request(destination: &str, amount_sat: u64) -> Option<(u64, bool)> {
+fn send_fee_estimate_request(
+    destination: &str,
+    amount_sat: u64,
+) -> Option<(u64, SendDestinationKind)> {
     let destination = destination.trim();
     if destination.is_empty() {
         return None;
     }
 
     if is_lnurl_pay_destination(destination) {
-        return (amount_sat > 0).then_some((amount_sat, true));
+        return (amount_sat > 0).then_some((amount_sat, SendDestinationKind::Lightning));
     }
 
     let lower = destination.to_lowercase();
     if lower.starts_with("lightning:") || lower.starts_with("ln") {
         if amount_sat > 0 {
-            return Some((amount_sat, true));
+            return Some((amount_sat, SendDestinationKind::Lightning));
         }
 
         let invoice = destination
@@ -95,10 +99,27 @@ fn send_fee_estimate_request(destination: &str, amount_sat: u64) -> Option<(u64,
         let invoice = Bolt11Invoice::from_str(invoice).ok()?;
         let invoice_msat = invoice.amount_milli_satoshis()?;
         let invoice_sat = invoice_msat.checked_add(999)? / 1_000;
-        return (invoice_sat > 0).then_some((invoice_sat, true));
+        return (invoice_sat > 0).then_some((invoice_sat, SendDestinationKind::Lightning));
     }
 
-    (amount_sat > 0).then_some((amount_sat, false))
+    let kind = match send_destination_kind(destination) {
+        kind @ (SendDestinationKind::Ark | SendDestinationKind::OnChain) => kind,
+        SendDestinationKind::Unknown | SendDestinationKind::Lightning => return None,
+    };
+    (amount_sat > 0).then_some((amount_sat, kind))
+}
+
+async fn checked_bitcoin_address(wallet: &Wallet, address: &str) -> anyhow::Result<BitcoinAddress> {
+    let address = BitcoinAddress::from_str(address).context("invalid on-chain address")?;
+    let network = wallet.network().await?;
+    address
+        .require_network(network)
+        .context("address is not valid for configured network")
+}
+
+fn send_screen_removed(previous: &[Screen], next: &[Screen]) -> bool {
+    previous.iter().any(|screen| matches!(screen, Screen::Send))
+        && !next.iter().any(|screen| matches!(screen, Screen::Send))
 }
 
 fn derive_nostr_keys_from_mnemonic(mnemonic: &str) -> anyhow::Result<Keys> {
@@ -354,9 +375,20 @@ impl AppCore {
                 self.state.router.screen_stack.push(screen);
             }
             AppAction::PopScreen => {
+                let previous = self.state.router.screen_stack.clone();
                 self.state.router.screen_stack.pop();
+                if send_screen_removed(&previous, &self.state.router.screen_stack) {
+                    self.reset_send_draft();
+                }
             }
-            AppAction::UpdateScreenStack { stack } => self.state.router.screen_stack = stack,
+            AppAction::UpdateScreenStack { stack } => {
+                let should_reset_send =
+                    send_screen_removed(&self.state.router.screen_stack, &stack);
+                self.state.router.screen_stack = stack;
+                if should_reset_send {
+                    self.reset_send_draft();
+                }
+            }
             AppAction::SelectReceiveMethod { method } => self.state.receive.method = method,
             AppAction::SetReceiveAmount { amount_sat } => {
                 self.state.receive.amount_sat = amount_sat;
@@ -491,6 +523,7 @@ impl AppCore {
                         lnurl,
                         last_used: now_unix(),
                     });
+                    self.sort_contacts();
                     self.save_app_data();
                 }
             }
@@ -515,6 +548,7 @@ impl AppCore {
                     c.lnurl = lnurl;
                     c.picture = picture;
                     c.last_used = now_unix();
+                    self.sort_contacts();
                     self.save_app_data();
                 }
             }
@@ -546,6 +580,7 @@ impl AppCore {
             }
             AppAction::DeleteContact { contact_id } => {
                 self.state.nostr.contacts.retain(|c| c.id != contact_id);
+                self.sort_contacts();
                 self.save_app_data();
             }
             AppAction::PublishNostrProfile => self.publish_nostr_profile(),
@@ -670,7 +705,7 @@ impl AppCore {
                 destination,
                 amount_sat,
                 estimate_amount_sat,
-                is_lightning,
+                kind,
             } => {
                 if self.send_fee_estimate_is_current(request_id, &destination, amount_sat) {
                     self.perform_send_fee_estimate(
@@ -678,7 +713,7 @@ impl AppCore {
                         destination,
                         amount_sat,
                         estimate_amount_sat,
-                        is_lightning,
+                        kind,
                     );
                 }
             }
@@ -737,6 +772,7 @@ impl AppCore {
                     .map(|contact| contact.id.clone())
                     .collect::<Vec<_>>();
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
+                self.sort_contacts();
                 self.zap_receipts = receipts;
                 self.save_app_data();
                 self.prefetch_profile_pictures(contact_ids);
@@ -760,6 +796,7 @@ impl AppCore {
                     .map(|contact| contact.id.clone())
                     .collect::<Vec<_>>();
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
+                self.sort_contacts();
                 self.state.toast = Some("Nostr contacts refreshed from Primal.".to_string());
                 self.save_app_data();
                 self.prefetch_profile_pictures(contact_ids);
@@ -775,6 +812,7 @@ impl AppCore {
                     .map(|contact| contact.id.clone())
                     .collect::<Vec<_>>();
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
+                self.sort_contacts();
                 if show_toast {
                     self.state.toast = Some("Nostr contacts refreshed from Primal.".to_string());
                 }
@@ -798,6 +836,7 @@ impl AppCore {
                     .map(|contact| contact.id.clone())
                     .collect::<Vec<_>>();
                 merge_contacts(&mut self.state.nostr.contacts, contacts);
+                self.sort_contacts();
                 self.save_app_data();
                 self.prefetch_profile_pictures(contact_ids);
             }
@@ -1282,20 +1321,30 @@ impl AppCore {
             self.state.toast = Some("Insufficient balance for this send.".to_string());
             return;
         }
-        let lower = destination.to_lowercase();
         if self.state.send.zap_enabled {
             self.pay_zap_destination(destination, self.state.send.amount_sat);
         } else if is_lnurl_pay_destination(&destination) {
             self.pay_lnurl_destination(destination, self.state.send.amount_sat);
-        } else if lower.starts_with("lightning:") || lower.starts_with("ln") {
-            let invoice = destination
-                .strip_prefix("lightning:")
-                .or_else(|| destination.strip_prefix("LIGHTNING:"))
-                .unwrap_or(&destination)
-                .to_string();
-            self.pay_lightning_invoice(invoice, Some(self.state.send.amount_sat));
         } else {
-            self.pay_ark_address(destination, self.state.send.amount_sat);
+            match self.state.send.destination_kind {
+                SendDestinationKind::Lightning => {
+                    let invoice = destination
+                        .strip_prefix("lightning:")
+                        .or_else(|| destination.strip_prefix("LIGHTNING:"))
+                        .unwrap_or(&destination)
+                        .to_string();
+                    self.pay_lightning_invoice(invoice, Some(self.state.send.amount_sat));
+                }
+                SendDestinationKind::OnChain => {
+                    self.pay_onchain_address(destination, self.state.send.amount_sat);
+                }
+                SendDestinationKind::Ark => {
+                    self.pay_ark_address(destination, self.state.send.amount_sat);
+                }
+                SendDestinationKind::Unknown => {
+                    self.state.toast = Some("Enter a valid payment destination.".to_string());
+                }
+            }
         }
     }
 
@@ -1346,6 +1395,7 @@ impl AppCore {
                 .cloned()
             {
                 self.state.nostr.contacts.push(contact);
+                self.sort_contacts();
                 self.save_app_data();
             }
         }
@@ -1407,8 +1457,7 @@ impl AppCore {
         }
 
         let amount_sat = self.state.send.amount_sat;
-        let Some((estimate_amount_sat, is_lightning)) =
-            send_fee_estimate_request(&destination, amount_sat)
+        let Some((estimate_amount_sat, kind)) = send_fee_estimate_request(&destination, amount_sat)
         else {
             self.clear_send_fee_estimate();
             return;
@@ -1424,7 +1473,7 @@ impl AppCore {
                 destination,
                 amount_sat,
                 estimate_amount_sat,
-                is_lightning,
+                kind,
             }));
         });
     }
@@ -1435,7 +1484,7 @@ impl AppCore {
         destination: String,
         amount_sat: u64,
         estimate_amount_sat: u64,
-        is_lightning: bool,
+        kind: SendDestinationKind,
     ) {
         let Some(wallet) = self.wallet.clone() else {
             self.clear_send_fee_estimate();
@@ -1445,10 +1494,24 @@ impl AppCore {
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let estimate_amount = Amount::from_sat(estimate_amount_sat);
-            let result = if is_lightning {
-                wallet.estimate_lightning_send_fee(estimate_amount).await
-            } else {
-                wallet.estimate_arkoor_payment_fee(estimate_amount).await
+            let result = match kind {
+                SendDestinationKind::Lightning => {
+                    wallet.estimate_lightning_send_fee(estimate_amount).await
+                }
+                SendDestinationKind::Ark => {
+                    wallet.estimate_arkoor_payment_fee(estimate_amount).await
+                }
+                SendDestinationKind::OnChain => {
+                    match checked_bitcoin_address(&wallet, &destination).await {
+                        Ok(address) => {
+                            wallet
+                                .estimate_send_onchain(&address, estimate_amount)
+                                .await
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                SendDestinationKind::Unknown => Err(anyhow::anyhow!("invalid payment destination")),
             };
             let msg = match result {
                 Ok(estimate) => AsyncMsg::SendFeeEstimated {
@@ -2053,6 +2116,47 @@ impl AppCore {
         });
     }
 
+    fn pay_onchain_address(&mut self, address: String, amount_sat: u64) {
+        if amount_sat == 0 {
+            self.state.toast = Some("Enter an amount before sending.".to_string());
+            return;
+        }
+        if amount_sat < 330 {
+            self.state.toast = Some("Amount too low to send.".to_string());
+            return;
+        }
+        if amount_sat > self.state.wallet.balance_sat {
+            self.state.toast = Some("Insufficient balance for this on-chain payment.".to_string());
+            return;
+        }
+        let Some(wallet) = self.wallet.clone() else {
+            self.state.toast = Some("Wallet is not ready yet.".to_string());
+            return;
+        };
+        self.state.busy.sending_payment = true;
+        self.state.send.phase = SendPhase::Sending;
+        self.state.send.last_result = None;
+        let tx = self.tx.clone();
+        let annotation =
+            self.payment_annotation(address.clone(), None, -(amount_sat as i64), false);
+        self.rt.spawn(async move {
+            let msg = match checked_bitcoin_address(&wallet, &address).await {
+                Ok(address) => match wallet
+                    .send_onchain(address, Amount::from_sat(amount_sat))
+                    .await
+                {
+                    Ok(_) => AsyncMsg::Paid {
+                        result: "On-chain payment sent.".to_string(),
+                        annotation,
+                    },
+                    Err(e) => AsyncMsg::Error(format!("On-chain payment failed: {e:#}")),
+                },
+                Err(e) => AsyncMsg::Error(format!("{e:#}")),
+            };
+            let _ = tx.send(CoreMsg::Async(msg));
+        });
+    }
+
     fn generate_nostr_key(&mut self) {
         let keys = Keys::generate();
         match (keys.secret_key().to_bech32(), keys.public_key().to_bech32()) {
@@ -2630,6 +2734,7 @@ impl AppCore {
             Ok(data) => {
                 self.state.nostr = data.nostr;
                 self.hydrate_cached_profile_pictures();
+                self.sort_contacts();
                 self.state.receive.amount_sat = data.receive_amount_sat;
                 self.state.receive.memo = data.receive_memo;
                 self.state.wallet.network = data.network;
@@ -2658,6 +2763,10 @@ impl AppCore {
         for contact in &mut self.state.send.global_search_results {
             hydrate_contact_picture(profile_db, &cache_dir, contact);
         }
+    }
+
+    fn sort_contacts(&mut self) {
+        sort_contacts_by_name_npub(&mut self.state.nostr.contacts);
     }
 
     fn save_app_data(&self) {
@@ -2990,6 +3099,25 @@ mod tests {
             .unwrap()
             .as_secret_bytes(),
         );
+    }
+
+    #[test]
+    fn detects_send_screen_removed_from_route_stack() {
+        assert!(send_screen_removed(&[Screen::Send], &[]));
+        assert!(send_screen_removed(
+            &[
+                Screen::ContactDetail {
+                    contact_id: "alice".to_string()
+                },
+                Screen::Send,
+            ],
+            &[Screen::ContactDetail {
+                contact_id: "alice".to_string()
+            }]
+        ));
+        assert!(!send_screen_removed(&[], &[Screen::Send]));
+        assert!(!send_screen_removed(&[Screen::Send], &[Screen::Send]));
+        assert!(!send_screen_removed(&[Screen::Receive], &[]));
     }
 
     #[test]

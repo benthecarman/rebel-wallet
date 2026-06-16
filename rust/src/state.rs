@@ -1,3 +1,7 @@
+use std::str::FromStr;
+
+use bark::ark::Address as ArkAddress;
+use bitcoin::Address as BitcoinAddress;
 use serde::{Deserialize, Serialize};
 
 use crate::{MAINNET_ESPLORA, MAINNET_SERVER, SIGNET_ESPLORA, SIGNET_SERVER};
@@ -308,6 +312,7 @@ pub enum SendPhase {
 pub enum SendDestinationKind {
     Unknown,
     Lightning,
+    OnChain,
     Ark,
 }
 
@@ -565,8 +570,11 @@ impl AppState {
             && self.send.phase != SendPhase::Sending
             && !self.send.estimating_fee
             && self.send.error_text.is_none()
-            && (self.send.destination_kind == SendDestinationKind::Lightning
-                || self.send.amount_sat > 0);
+            && match self.send.destination_kind {
+                SendDestinationKind::Lightning => true,
+                SendDestinationKind::Ark | SendDestinationKind::OnChain => self.send.amount_sat > 0,
+                SendDestinationKind::Unknown => false,
+            };
         if !self.send.zap_available {
             self.send.zap_enabled = false;
         }
@@ -695,7 +703,8 @@ pub(crate) fn format_signed_sats(amount: i64, signed: bool) -> String {
 }
 
 pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
-    let lower = destination.trim().to_ascii_lowercase();
+    let destination = destination.trim();
+    let lower = destination.to_ascii_lowercase();
     if lower.is_empty() {
         SendDestinationKind::Unknown
     } else if lower.starts_with("lightning:")
@@ -703,8 +712,12 @@ pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
         || is_valid_lightning_address(destination)
     {
         SendDestinationKind::Lightning
-    } else {
+    } else if BitcoinAddress::from_str(destination).is_ok() {
+        SendDestinationKind::OnChain
+    } else if ArkAddress::from_str(destination).is_ok() {
         SendDestinationKind::Ark
+    } else {
+        SendDestinationKind::Unknown
     }
 }
 
@@ -733,9 +746,9 @@ fn send_search_results(
     contacts.sort_by(|a, b| {
         contact_has_lightning_address(b)
             .cmp(&contact_has_lightning_address(a))
-            .then_with(|| b.last_used.cmp(&a.last_used))
             .then_with(|| normalize_search(&a.name).cmp(&normalize_search(&b.name)))
-            .then_with(|| a.npub.cmp(&b.npub))
+            .then_with(|| normalize_search(&a.npub).cmp(&normalize_search(&b.npub)))
+            .then_with(|| a.id.cmp(&b.id))
     });
 
     contacts
@@ -756,6 +769,15 @@ fn send_search_results(
                 || normalize_search(&contact.lnurl).contains(&needle)
         })
         .collect()
+}
+
+pub(crate) fn sort_contacts_by_name_npub(contacts: &mut [Contact]) {
+    contacts.sort_by(|a, b| {
+        normalize_search(&a.name)
+            .cmp(&normalize_search(&b.name))
+            .then_with(|| normalize_search(&a.npub).cmp(&normalize_search(&b.npub)))
+            .then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 fn contact_has_lightning_address(contact: &Contact) -> bool {
@@ -792,7 +814,8 @@ fn is_sendable_search_query(query: &str) -> bool {
     let trimmed = query.trim();
     let lower = trimmed.to_ascii_lowercase();
     trimmed.len() >= 6
-        && (lower.starts_with("ark")
+        && (ArkAddress::from_str(trimmed).is_ok()
+            || BitcoinAddress::from_str(trimmed).is_ok()
             || lower.starts_with("lightning:")
             || lower.starts_with("lnbc")
             || lower.starts_with("lntb")
@@ -815,8 +838,18 @@ fn send_error_text(
     if total_cost_sat.unwrap_or(amount_sat) > balance_sat {
         return Some("Insufficient balance for this send.".to_string());
     }
-    if destination_kind == SendDestinationKind::Ark && amount_sat == 0 {
-        return Some("Enter an amount before sending to an Ark address.".to_string());
+    if matches!(
+        destination_kind,
+        SendDestinationKind::Ark | SendDestinationKind::OnChain
+    ) && amount_sat == 0
+    {
+        return Some(format!(
+            "Enter an amount before sending to {}.",
+            match destination_kind {
+                SendDestinationKind::OnChain => "an on-chain address",
+                _ => "an Ark address",
+            }
+        ));
     }
     None
 }
@@ -854,6 +887,8 @@ mod tests {
 
     #[test]
     fn derives_send_destination_kind_and_validation() {
+        const ARK_ADDR: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
+
         let mut state = AppState::initial();
         state.wallet.balance_sat = 1_000;
 
@@ -863,11 +898,13 @@ mod tests {
         assert!(state.send.can_submit);
         assert_eq!(state.send.error_text, None);
 
-        state.send.destination = "ark1example".to_string();
+        state.send.destination = ARK_ADDR.to_string();
+        state.send.search_query = ARK_ADDR.to_string();
         state.send.amount_sat = 0;
         state.refresh_derived();
         assert_eq!(state.send.destination_kind, SendDestinationKind::Ark);
         assert!(!state.send.can_submit);
+        assert!(state.send.can_continue_search);
         assert_eq!(
             state.send.error_text.as_deref(),
             Some("Enter an amount before sending to an Ark address.")
@@ -881,10 +918,36 @@ mod tests {
             Some("Insufficient balance for this send.")
         );
 
+        state.send.destination = "ark1example".to_string();
+        state.send.search_query = "ark1example".to_string();
+        state.send.amount_sat = 1;
+        state.send.total_cost_sat = None;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::Unknown);
+        assert!(!state.send.can_submit);
+        assert!(!state.send.can_continue_search);
+
         state.send.destination = " Alice@Example.com ".to_string();
         state.send.amount_sat = 1;
         state.refresh_derived();
         assert_eq!(state.send.destination_kind, SendDestinationKind::Lightning);
+        assert!(state.send.can_submit);
+
+        let onchain_address = "bc1qrrz8r05xuyjh667a2nfgvh96d5x47aug0prxwm";
+        state.send.destination = onchain_address.to_string();
+        state.send.search_query = onchain_address.to_string();
+        state.send.amount_sat = 0;
+        state.refresh_derived();
+        assert_eq!(state.send.destination_kind, SendDestinationKind::OnChain);
+        assert!(!state.send.can_submit);
+        assert!(state.send.can_continue_search);
+        assert_eq!(
+            state.send.error_text.as_deref(),
+            Some("Enter an amount before sending to an on-chain address.")
+        );
+
+        state.send.amount_sat = 1;
+        state.refresh_derived();
         assert!(state.send.can_submit);
 
         state.send.amount_sat = 900;
@@ -1131,22 +1194,22 @@ mod tests {
     }
 
     #[test]
-    fn send_search_results_sort_names_ignoring_case() {
+    fn send_search_results_sort_by_npub_not_mutable_profile_fields() {
         let mut state = AppState::initial();
         state.nostr.contacts = vec![
             Contact {
                 id: "1".to_string(),
-                npub: "npub1".to_string(),
+                npub: "npub-b".to_string(),
                 name: "bravo".to_string(),
                 followed: true,
                 picture: String::new(),
                 lightning_address: "bravo@example.com".to_string(),
                 lnurl: String::new(),
-                last_used: 0,
+                last_used: 100,
             },
             Contact {
                 id: "2".to_string(),
-                npub: "npub2".to_string(),
+                npub: "npub-a".to_string(),
                 name: "Alpha".to_string(),
                 followed: true,
                 picture: String::new(),
@@ -1158,8 +1221,8 @@ mod tests {
 
         state.refresh_derived();
 
-        assert_eq!(state.send.search_results[0].name, "Alpha");
-        assert_eq!(state.send.search_results[1].name, "bravo");
+        assert_eq!(state.send.search_results[0].npub, "npub-a");
+        assert_eq!(state.send.search_results[1].npub, "npub-b");
     }
 
     #[test]
@@ -1194,6 +1257,55 @@ mod tests {
         assert_eq!(state.send.search_results[0].name, "same");
         assert_eq!(state.send.search_results[1].npub, "npub-b");
         assert_eq!(state.send.search_results[1].name, "Same");
+    }
+
+    #[test]
+    fn sorts_contacts_by_name_then_npub() {
+        let mut state = AppState::initial();
+        state.nostr.contacts = vec![
+            Contact {
+                id: "1".to_string(),
+                npub: "npub-b".to_string(),
+                name: "  Same  ".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "b@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+            Contact {
+                id: "2".to_string(),
+                npub: "npub-c".to_string(),
+                name: "alpha".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "c@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+            Contact {
+                id: "3".to_string(),
+                npub: "npub-a".to_string(),
+                name: "same".to_string(),
+                followed: true,
+                picture: String::new(),
+                lightning_address: "a@example.com".to_string(),
+                lnurl: String::new(),
+                last_used: 0,
+            },
+        ];
+
+        sort_contacts_by_name_npub(&mut state.nostr.contacts);
+
+        assert_eq!(
+            state
+                .nostr
+                .contacts
+                .iter()
+                .map(|contact| contact.npub.as_str())
+                .collect::<Vec<_>>(),
+            vec!["npub-c", "npub-a", "npub-b"]
+        );
     }
 
     #[test]

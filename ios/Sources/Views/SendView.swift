@@ -342,19 +342,26 @@ struct SendDestinationSummary: View {
     let kind: SendDestinationKind
     let clear: () -> Void
 
-    private var isLightning: Bool {
-        kind == .lightning
+    private var presentation: (icon: String, color: Color, title: String) {
+        switch kind {
+        case .lightning:
+            return ("bolt.fill", rebelBlue, "Lightning invoice")
+        case .onChain:
+            return ("bitcoinsign.circle.fill", rebelRed, "On-chain address")
+        case .ark, .unknown:
+            return ("link", rebelGreen, "Ark address")
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Image(systemName: isLightning ? "bolt.fill" : "link")
-                    .foregroundStyle(isLightning ? rebelBlue : rebelGreen)
+                Image(systemName: presentation.icon)
+                    .foregroundStyle(presentation.color)
                     .frame(width: 32, height: 32)
                     .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(isLightning ? "Lightning invoice" : "Ark address")
+                    Text(presentation.title)
                         .font(.headline)
                     Text(destination)
                         .font(.caption.monospaced())

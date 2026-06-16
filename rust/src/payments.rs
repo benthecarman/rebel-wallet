@@ -71,6 +71,21 @@ pub(crate) async fn parse_send_destination(
         }
     }
 
+    for option in request
+        .options
+        .iter()
+        .filter(|option| option.errors.is_empty())
+    {
+        if let BarkPaymentMethod::Bitcoin(address) = &option.method {
+            return Some(ParsedSendDestination {
+                destination: address.assume_checked_ref().to_string(),
+                amount_sat,
+                memo,
+                toast: None,
+            });
+        }
+    }
+
     let toast = request
         .options
         .iter()
@@ -79,8 +94,12 @@ pub(crate) async fn parse_send_destination(
                 .errors
                 .first()
                 .map(|e| format!("Invalid payment request: {e}")),
-            BarkPaymentMethod::Bitcoin(_) | BarkPaymentMethod::OutputScript(_) => {
-                Some("On-chain payment QR codes are not supported yet.".to_string())
+            BarkPaymentMethod::Bitcoin(_) => option
+                .errors
+                .first()
+                .map(|e| format!("Invalid on-chain payment request: {e}")),
+            BarkPaymentMethod::OutputScript(_) => {
+                Some("Output script payment QR codes are not supported yet.".to_string())
             }
             BarkPaymentMethod::Offer(_) => {
                 Some("BOLT12 payment QR codes are not supported yet.".to_string())
