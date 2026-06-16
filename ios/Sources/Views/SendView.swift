@@ -204,41 +204,27 @@ struct SendFeeSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let fee = send.feeEstimateDisplay {
-                FeeSummaryRow(
-                    label: "Estimated fee",
-                    value: fee,
-                    fiatValue: send.feeEstimateFiatDisplay,
-                    isUpdating: send.estimatingFee
-                )
-                if let total = send.totalCostDisplay {
-                    FeeSummaryRow(
-                        label: "Total",
-                        value: total,
-                        fiatValue: send.totalCostFiatDisplay
-                    )
-                }
-            } else if send.estimatingFee {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(rebelRed)
-                    Text("Estimating fee...")
-                }
-                .font(.subheadline)
-                .foregroundStyle(mutedText)
-            } else if let error = send.feeEstimateError {
+            FeeSummaryRow(
+                label: "Estimated fee",
+                value: send.feeEstimateDisplay ?? (send.estimatingFee ? "Estimating..." : "-"),
+                fiatValue: send.feeEstimateFiatDisplay,
+                isUpdating: send.estimatingFee
+            )
+
+            FeeSummaryRow(
+                label: "Total",
+                value: send.totalCostDisplay ?? totalPlaceholder,
+                fiatValue: send.totalCostFiatDisplay
+            )
+
+            if let error = send.feeEstimateError {
                 Text("Fee estimate unavailable")
                     .font(.subheadline.weight(.semibold))
+                    .padding(.top, 2)
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(mutedText)
                     .lineLimit(2)
-            } else {
-                FeeSummaryRow(
-                    label: "Estimated fee",
-                    value: "-",
-                    fiatValue: nil
-                )
             }
         }
         .padding(14)
@@ -246,6 +232,10 @@ struct SendFeeSummary: View {
         .foregroundStyle(primaryText)
         .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+
+    private var totalPlaceholder: String {
+        send.amountSat > 0 ? send.amountDisplay : "-"
     }
 }
 
@@ -271,12 +261,11 @@ struct FeeSummaryRow: View {
                 Text(value)
                     .fontWeight(.semibold)
                     .monospacedDigit()
-                if let fiatValue {
-                    Text(fiatValue)
-                        .font(.caption)
-                        .foregroundStyle(mutedText)
-                        .monospacedDigit()
-                }
+                Text(fiatValue ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(mutedText)
+                    .monospacedDigit()
+                    .opacity(fiatValue == nil ? 0 : 1)
             }
         }
         .font(.subheadline)
