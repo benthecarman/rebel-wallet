@@ -10,6 +10,7 @@ pub enum AppAction {
     ReplaceWallet {
         mnemonic: String,
     },
+    DeleteWallet,
     ShowSeed,
     SyncWallet,
     MaintainVtxos,
@@ -43,6 +44,12 @@ pub enum AppAction {
     BeginReceiveRequest,
     CreateArkAddress,
     CreateLightningInvoice,
+    SetLightningAddressName {
+        name: String,
+    },
+    RegisterLightningAddress,
+    VerifyLightningAddressRegistration,
+    ClearLightningAddressRegistration,
     SetSendSearchQuery {
         query: String,
     },

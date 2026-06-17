@@ -92,91 +92,14 @@ struct ProfileSummaryPanel: View {
                 ProfileActionRow(icon: "key.fill", title: "Nostr Keys", color: rebelBlue) {
                     mode = .keys
                 }
+                ProfileActionRow(icon: "bolt.badge.checkmark", title: "Lightning Address", color: rebelGreen) {
+                    manager.dispatch(.pushScreen(screen: .lightningAddress))
+                }
             }
 
-            LightningAddressPanel(manager: manager)
             BalancePanel(wallet: manager.state.wallet)
         }
     }
-}
-
-struct LightningAddressPanel: View {
-    @Bindable var manager: AppManager
-    @Environment(\.walletAccent) private var walletAccent
-
-    private var claimedAddress: String? {
-        manager.state.lightningAddress.address
-    }
-
-    private var domain: String {
-        claimedAddress?
-            .split(separator: "@")
-            .last
-            .map(String.init) ?? "arkzap.me"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "bolt.badge.checkmark")
-                    .foregroundStyle(rebelGreen)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Lightning Address")
-                        .font(.headline)
-                    Text(domain)
-                        .font(.caption)
-                        .foregroundStyle(mutedText)
-                        .lineLimit(1)
-                }
-                Spacer()
-            }
-
-            if let claimedAddress {
-                Text(truncateLightningAddress(claimedAddress))
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(raisedSurface, in: RoundedRectangle(cornerRadius: 8))
-
-                HStack(spacing: 10) {
-                    Button {
-                        UIPasteboard.general.string = claimedAddress
-                        manager.requestHaptic(.impactLight)
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-
-                    ShareLink(item: claimedAddress) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                }
-            } else {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Preparing Arkzap address")
-                        .font(.caption)
-                        .foregroundStyle(mutedText)
-                }
-            }
-        }
-        .padding(14)
-        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
-    }
-}
-
-private func truncateLightningAddress(_ value: String) -> String {
-    let maxLength = 34
-    guard value.count > maxLength else { return value }
-    let prefixCount = 14
-    let suffixCount = maxLength - prefixCount - 3
-    return "\(value.prefix(prefixCount))...\(value.suffix(suffixCount))"
 }
 
 struct EditProfilePanel: View {
@@ -190,7 +113,7 @@ struct EditProfilePanel: View {
     @State private var confirmDelete = false
     @Environment(\.walletAccent) private var walletAccent
 
-    private var arkLightningAddress: String? {
+    private var rebelLightningAddress: String? {
         manager.state.lightningAddress.address
     }
 
@@ -235,12 +158,12 @@ struct EditProfilePanel: View {
                         .profileField()
 
                     Button {
-                        if let arkLightningAddress {
-                            lightningAddress = arkLightningAddress
+                        if let rebelLightningAddress {
+                            lightningAddress = rebelLightningAddress
                             manager.requestHaptic(.selection)
                         }
                     } label: {
-                        Label("Use Arkzap", systemImage: "bolt.badge.checkmark")
+                        Label("Use Rebel", systemImage: "bolt.badge.checkmark")
                             .labelStyle(.iconOnly)
                             .frame(width: 44, height: 44)
                             .foregroundStyle(primaryText)
@@ -248,8 +171,8 @@ struct EditProfilePanel: View {
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
                     }
                     .buttonStyle(.plain)
-                    .disabled(arkLightningAddress == nil)
-                    .accessibilityLabel("Use Arkzap Lightning address")
+                    .disabled(rebelLightningAddress == nil)
+                    .accessibilityLabel("Use Rebel Lightning address")
                 }
 
                 TextField("NIP-05", text: $nip05)
@@ -400,32 +323,6 @@ struct NostrKeysPanel: View {
         }
 
         presenter.present(sheet, animated: true)
-    }
-}
-
-private extension UIApplication {
-    func rebelTopViewController() -> UIViewController? {
-        connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .rootViewController?
-            .rebelTopPresentedViewController()
-    }
-}
-
-private extension UIViewController {
-    func rebelTopPresentedViewController() -> UIViewController {
-        if let presentedViewController {
-            return presentedViewController.rebelTopPresentedViewController()
-        }
-        if let navigationController = self as? UINavigationController {
-            return navigationController.visibleViewController?.rebelTopPresentedViewController() ?? navigationController
-        }
-        if let tabBarController = self as? UITabBarController {
-            return tabBarController.selectedViewController?.rebelTopPresentedViewController() ?? tabBarController
-        }
-        return self
     }
 }
 

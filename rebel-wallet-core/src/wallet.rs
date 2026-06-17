@@ -54,7 +54,7 @@ pub(crate) async fn open_bark_wallet(
     }
 }
 
-fn remove_wallet_database_files(db_path: &Path) -> anyhow::Result<()> {
+pub(crate) fn remove_wallet_database_files(db_path: &Path) -> anyhow::Result<()> {
     for suffix in ["", "-wal", "-shm"] {
         let path = PathBuf::from(format!("{}{}", db_path.display(), suffix));
         match std::fs::remove_file(&path) {

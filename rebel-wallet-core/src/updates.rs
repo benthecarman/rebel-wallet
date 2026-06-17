@@ -64,6 +64,18 @@ pub(crate) enum AsyncMsg {
         payment_hash: String,
     },
     LightningAddressReady(String),
+    LightningAddressRegistrationUpdated {
+        name: String,
+        lightning_address: String,
+        ark_address: String,
+        invoice: Option<String>,
+        purchase_id: Option<String>,
+        amount_msats: Option<u64>,
+        active: bool,
+        paid: bool,
+        paid_from_wallet: bool,
+        warning: Option<String>,
+    },
     SendFeeEstimateDue {
         request_id: u64,
         destination: String,

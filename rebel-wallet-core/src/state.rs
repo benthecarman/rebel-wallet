@@ -5,6 +5,7 @@ use bark::ark::Address as ArkAddress;
 use bitcoin::Address as BitcoinAddress;
 use serde::{Deserialize, Serialize};
 
+use crate::custom_address::validate_custom_address_name;
 use crate::{MAINNET_ESPLORA, MAINNET_SERVER, SIGNET_ESPLORA, SIGNET_SERVER};
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -90,6 +91,7 @@ pub enum Screen {
     Send,
     Receive,
     Profile,
+    LightningAddress,
     Backup,
     Restore,
     Network,
@@ -240,6 +242,29 @@ pub struct WalletState {
 pub struct LightningAddressState {
     pub address: Option<String>,
     pub backing_ark_address: Option<String>,
+    pub arkzap_address: Option<String>,
+    pub custom_address: Option<String>,
+    pub custom_name: String,
+    pub registration_phase: LightningAddressRegistrationPhase,
+    pub registration_status_text: String,
+    pub registration_error: Option<String>,
+    pub registration_name_error: Option<String>,
+    pub registration_address: Option<String>,
+    pub registration_invoice: Option<String>,
+    pub registration_purchase_id: Option<String>,
+    pub registration_amount_sat: u64,
+    pub registration_amount_display: String,
+    pub registration_can_submit: bool,
+    pub registration_can_check_status: bool,
+}
+
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum LightningAddressRegistrationPhase {
+    Idle,
+    Registering,
+    AwaitingPayment,
+    Verifying,
+    Active,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -473,6 +498,20 @@ impl AppState {
             lightning_address: LightningAddressState {
                 address: None,
                 backing_ark_address: None,
+                arkzap_address: None,
+                custom_address: None,
+                custom_name: String::new(),
+                registration_phase: LightningAddressRegistrationPhase::Idle,
+                registration_status_text: "Ready".to_string(),
+                registration_error: None,
+                registration_name_error: Some("Enter a custom name.".to_string()),
+                registration_address: None,
+                registration_invoice: None,
+                registration_purchase_id: None,
+                registration_amount_sat: 0,
+                registration_amount_display: format_sats(0),
+                registration_can_submit: false,
+                registration_can_check_status: false,
             },
             nostr: NostrState {
                 npub: None,
@@ -591,12 +630,43 @@ impl AppState {
             self.send.zap_enabled = false;
         }
 
-        self.lightning_address.address = self
+        self.lightning_address.arkzap_address = self
             .lightning_address
             .backing_ark_address
             .as_ref()
             .filter(|address| !address.trim().is_empty())
             .map(|address| arkzap_lightning_address(address));
+        self.lightning_address.address = self
+            .lightning_address
+            .custom_address
+            .as_ref()
+            .filter(|address| !address.trim().is_empty())
+            .cloned()
+            .or_else(|| self.lightning_address.arkzap_address.clone());
+        self.lightning_address.registration_amount_display =
+            format_sats(self.lightning_address.registration_amount_sat);
+        self.lightning_address.registration_name_error =
+            validate_custom_address_name(&self.lightning_address.custom_name);
+        self.lightning_address.registration_can_submit = self
+            .lightning_address
+            .backing_ark_address
+            .as_ref()
+            .is_some_and(|address| !address.trim().is_empty())
+            && self.lightning_address.registration_name_error.is_none()
+            && !matches!(
+                self.lightning_address.registration_phase,
+                LightningAddressRegistrationPhase::Registering
+                    | LightningAddressRegistrationPhase::Verifying
+            );
+        self.lightning_address.registration_can_check_status = self
+            .lightning_address
+            .registration_purchase_id
+            .as_ref()
+            .is_some_and(|id| !id.trim().is_empty())
+            && matches!(
+                self.lightning_address.registration_phase,
+                LightningAddressRegistrationPhase::AwaitingPayment
+            );
     }
 
     pub(crate) fn reset_receive_draft(&mut self) {
@@ -614,12 +684,16 @@ impl AppState {
 
 pub(crate) fn arkzap_lightning_address(ark_address: &str) -> String {
     let ark_address = ark_address.trim();
-    let domain = if ark_address.starts_with("tark") {
+    let domain = arkzap_domain_for_ark_address(ark_address);
+    format!("{ark_address}@{domain}")
+}
+
+pub(crate) fn arkzap_domain_for_ark_address(ark_address: &str) -> &'static str {
+    if ark_address.trim().starts_with("tark") {
         "signet.arkzap.me"
     } else {
         "arkzap.me"
-    };
-    format!("{ark_address}@{domain}")
+    }
 }
 
 fn supported_price_currencies() -> Vec<CurrencyOption> {
@@ -1060,6 +1134,35 @@ mod tests {
         state.receive.lightning_paid = true;
         state.refresh_derived();
         assert_eq!(state.receive.lightning_status_display, "Paid");
+    }
+
+    #[test]
+    fn derives_custom_lightning_address_registration_state() {
+        let mut state = AppState::initial();
+        state.lightning_address.backing_ark_address = Some("tark1example".to_string());
+        state.refresh_derived();
+
+        assert_eq!(
+            state.lightning_address.arkzap_address.as_deref(),
+            Some("tark1example@signet.arkzap.me")
+        );
+        assert_eq!(
+            state.lightning_address.address.as_deref(),
+            Some("tark1example@signet.arkzap.me")
+        );
+        assert!(!state.lightning_address.registration_can_submit);
+
+        state.lightning_address.custom_name = "alice".to_string();
+        state.refresh_derived();
+        assert_eq!(state.lightning_address.registration_name_error, None);
+        assert!(state.lightning_address.registration_can_submit);
+
+        state.lightning_address.custom_address = Some("alice@signet.arkzap.me".to_string());
+        state.refresh_derived();
+        assert_eq!(
+            state.lightning_address.address.as_deref(),
+            Some("alice@signet.arkzap.me")
+        );
     }
 
     #[test]

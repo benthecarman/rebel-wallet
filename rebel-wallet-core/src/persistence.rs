@@ -16,9 +16,26 @@ pub(crate) struct PersistedAppData {
     #[serde(default, skip_serializing)]
     pub(crate) lightning_address_ark_address: Option<String>,
     #[serde(default)]
+    pub(crate) custom_lightning_address: Option<String>,
+    #[serde(default)]
+    pub(crate) custom_lightning_address_name: String,
+    #[serde(default)]
+    pub(crate) pending_custom_lightning_address: Option<PendingCustomLightningAddress>,
+    #[serde(default)]
     pub(crate) payment_annotations: Vec<PaymentAnnotation>,
     #[serde(default)]
     pub(crate) zap_receipts: Vec<ZapReceiptRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct PendingCustomLightningAddress {
+    pub(crate) name: String,
+    pub(crate) lightning_address: String,
+    pub(crate) ark_address: String,
+    pub(crate) invoice: String,
+    #[serde(alias = "payment_hash")]
+    pub(crate) purchase_id: String,
+    pub(crate) amount_msats: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,6 +171,9 @@ mod tests {
 
         assert_eq!(data.network, WalletNetwork::Signet);
         assert_eq!(data.lightning_address_ark_address, None);
+        assert_eq!(data.custom_lightning_address, None);
+        assert_eq!(data.custom_lightning_address_name, "");
+        assert!(data.pending_custom_lightning_address.is_none());
         assert!(data.payment_annotations.is_empty());
         assert!(data.zap_receipts.is_empty());
         assert!(!data.nostr.deleted);

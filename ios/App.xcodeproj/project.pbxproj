@@ -21,12 +21,14 @@
 		67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */; };
 		67FF93F9D8D2C554E9276533 /* AppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 182BE8950E50F58DF4E9DFDB /* AppManager.swift */; };
 		737B461EAB6B2553322AF574 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */; };
+		77560E1840FC1750DD978DFF /* LightningAddressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 503FC468B99283614CA26E34 /* LightningAddressView.swift */; };
 		77918D97F5494E74BC085BC7 /* QRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76402BBB1CEAF24094C36E2 /* QRCodeView.swift */; };
 		7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */; };
 		8C969DF3CAF763FFE4B79252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EC33CB686ACF317A895B9BB7 /* Assets.xcassets */; };
 		A7A986D21CE49F9EC3ADCB18 /* BackupRestoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEE4097AE328C49061CF79C /* BackupRestoreViews.swift */; };
 		AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */; };
 		B757D13B7C830FB1E21C287A /* SendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5043C96A336BFDB3828A80 /* SendView.swift */; };
+		CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */; };
 		D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */; };
 		D4D47575C3B6FFA1C555EF10 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747F6D6E419A7475169ACED6 /* CommonComponents.swift */; };
 		E621BAA395FB93293F83B59E /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF276A85A4339254182EB73 /* SetupView.swift */; };
@@ -43,6 +45,7 @@
 		182BE8950E50F58DF4E9DFDB /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
 		1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStyles.swift; sourceTree = "<group>"; };
 		49D88A349FD70A9153DD2C03 /* App.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		503FC468B99283614CA26E34 /* LightningAddressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightningAddressView.swift; sourceTree = "<group>"; };
 		6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		6AF276A85A4339254182EB73 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		747F6D6E419A7475169ACED6 /* CommonComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonComponents.swift; sourceTree = "<group>"; };
@@ -52,6 +55,7 @@
 		8F8285F313C1C4D80E03963B /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
 		91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = RebelWalletCore.xcframework; path = Frameworks/RebelWalletCore.xcframework; sourceTree = "<group>"; };
 		936FB1B08FF781A9F9997609 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitPresentation.swift; sourceTree = "<group>"; };
 		B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWalletView.swift; sourceTree = "<group>"; };
 		B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rebel_wallet_core.swift; sourceTree = "<group>"; };
 		BC5043C96A336BFDB3828A80 /* SendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendView.swift; sourceTree = "<group>"; };
@@ -85,6 +89,14 @@
 			);
 			sourceTree = "<group>";
 		};
+		4F919D87D7161E9F367D051A /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
 		6589618691820EE07F22E58B /* Bindings */ = {
 			isa = PBXGroup;
 			children = (
@@ -106,6 +118,7 @@
 				9BED51F3FB75136969C70004 /* Capabilities */,
 				ECD83B51022EE290BFCC4280 /* Components */,
 				8EB165A1A41A6C1DBA2779EF /* Services */,
+				4F919D87D7161E9F367D051A /* Utilities */,
 				A3FB5A3A73FC5C9493069E5D /* Views */,
 			);
 			path = Sources;
@@ -135,6 +148,7 @@
 				82FC9EE794A5E7927FEE7DF8 /* ContactDetailView.swift */,
 				771215578CB9B3F8F64C9139 /* ContactsView.swift */,
 				16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */,
+				503FC468B99283614CA26E34 /* LightningAddressView.swift */,
 				B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */,
 				6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */,
 				D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */,
@@ -253,6 +267,7 @@
 				11A29977382725FC272B253A /* ContentView.swift in Sources */,
 				737B461EAB6B2553322AF574 /* Haptics.swift in Sources */,
 				AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */,
+				77560E1840FC1750DD978DFF /* LightningAddressView.swift in Sources */,
 				2F71F386BE8E65B77B9C4A44 /* MainWalletView.swift in Sources */,
 				67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */,
 				D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */,
@@ -263,6 +278,7 @@
 				B757D13B7C830FB1E21C287A /* SendView.swift in Sources */,
 				09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */,
 				E621BAA395FB93293F83B59E /* SetupView.swift in Sources */,
+				CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */,
 				2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */,
 				7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */,
 			);

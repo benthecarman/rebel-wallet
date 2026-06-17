@@ -8,6 +8,7 @@ use flume::{Receiver, Sender};
 mod actions;
 mod activity;
 mod core;
+mod custom_address;
 mod nostr_support;
 mod payments;
 mod persistence;
@@ -23,9 +24,10 @@ pub use actions::AppAction;
 use profile_cache::normalize_profile_picture_to_jpeg;
 pub use state::{
     ActivityIconKind, ActivityItem, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, CurrencyOption, LightningAddressState, MainTab, NetworkOption, NostrMessage,
-    NostrState, PriceCurrency, ReceiveMethod, ReceivePhase, ReceiveState, Router, Screen,
-    SendDestinationKind, SendPhase, SendState, SetupState, WalletNetwork, WalletState,
+    Contact, CurrencyOption, LightningAddressRegistrationPhase, LightningAddressState, MainTab,
+    NetworkOption, NostrMessage, NostrState, PriceCurrency, ReceiveMethod, ReceivePhase,
+    ReceiveState, Router, Screen, SendDestinationKind, SendPhase, SendState, SetupState,
+    WalletNetwork, WalletState,
 };
 pub use updates::{AppUpdate, HapticFeedback};
 pub(crate) use updates::{AsyncMsg, CoreMsg};

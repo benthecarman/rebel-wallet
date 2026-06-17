@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Bindable var manager: AppManager
@@ -47,6 +48,16 @@ struct SettingsView: View {
                     }
                 }
 
+                SettingsCard(title: "Danger Zone") {
+                    SettingsRow(
+                        title: "Delete Wallet",
+                        caption: "Remove local wallet data and start over",
+                        accent: rebelRed
+                    ) {
+                        presentDeleteWalletConfirmation()
+                    }
+                }
+
                 Text("Secrets are stored in iOS Keychain. Wallet data uses local sqlite.")
                     .font(.caption)
                     .foregroundStyle(mutedText)
@@ -58,6 +69,35 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .background(pageBackground)
         .foregroundStyle(primaryText)
+    }
+
+    private func presentDeleteWalletConfirmation() {
+        guard let presenter = UIApplication.shared.rebelTopViewController() else {
+            return
+        }
+
+        let sheet = UIAlertController(
+            title: "Delete wallet and start over?",
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Delete Wallet", style: .destructive) { _ in
+            manager.dispatch(.deleteWallet)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if UIDevice.current.userInterfaceIdiom == .pad, let popover = sheet.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.maxY,
+                width: 1,
+                height: 1
+            )
+            popover.permittedArrowDirections = []
+        }
+
+        presenter.present(sheet, animated: true)
     }
 }
 
