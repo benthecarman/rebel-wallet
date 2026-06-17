@@ -1,7 +1,11 @@
-use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
+use std::collections::HashSet;
+
+use bark::movement::{Movement, MovementStatus, PaymentMethod as BarkPaymentMethod};
 use bark::subsystem::{RoundMovement, Subsystem};
 
 use crate::{state, ActivityIconKind, ActivityItem, Contact};
+
+const ARK_RECEIVE_COALESCE_WINDOW_SECS: u64 = 30;
 
 pub(crate) fn activity_from_movement(
     movement: Movement,
@@ -192,9 +196,105 @@ pub(crate) fn is_user_visible_movement(movement: &Movement) -> bool {
     !is_round_refresh_movement(movement)
 }
 
+pub(crate) fn visible_activity_movements(history: Vec<Movement>) -> Vec<Movement> {
+    let mut seen_ark_receive_outputs = HashSet::new();
+    history
+        .into_iter()
+        .filter(is_user_visible_movement)
+        .filter(|movement| {
+            let Some(key) = duplicate_ark_receive_key(movement) else {
+                return true;
+            };
+            seen_ark_receive_outputs.insert(key)
+        })
+        .collect()
+}
+
+pub(crate) fn coalesce_activity_items(items: Vec<ActivityItem>) -> Vec<ActivityItem> {
+    let mut coalesced: Vec<ActivityItem> = Vec::new();
+    for item in items {
+        if let Some(previous) = coalesced.last_mut() {
+            if should_coalesce_ark_receive(previous, &item) {
+                merge_activity_amounts(previous, item);
+                continue;
+            }
+        }
+        coalesced.push(item);
+    }
+    coalesced
+}
+
 fn is_round_refresh_movement(movement: &Movement) -> bool {
     movement.subsystem.name == Subsystem::ROUND.as_name()
         && movement.subsystem.kind == RoundMovement::Refresh.to_string()
+}
+
+fn duplicate_ark_receive_key(movement: &Movement) -> Option<Vec<bark::ark::VtxoId>> {
+    if !is_ark_receive_movement(movement) || movement.output_vtxos.is_empty() {
+        return None;
+    }
+    let mut output_vtxos = movement.output_vtxos.clone();
+    output_vtxos.sort();
+    Some(output_vtxos)
+}
+
+fn is_ark_receive_movement(movement: &Movement) -> bool {
+    movement.status == MovementStatus::Successful
+        && movement.subsystem.name == Subsystem::ARKOOR.as_name()
+        && movement.subsystem.kind == "receive"
+        && movement.effective_balance.to_sat() > 0
+        && movement
+            .received_on
+            .iter()
+            .any(|destination| matches!(destination.destination, BarkPaymentMethod::Ark(_)))
+}
+
+fn should_coalesce_ark_receive(previous: &ActivityItem, item: &ActivityItem) -> bool {
+    if !is_coalescible_ark_receive(previous) || !is_coalescible_ark_receive(item) {
+        return false;
+    }
+    if previous.ark_address.as_deref() != item.ark_address.as_deref() {
+        return false;
+    }
+    previous.completed_at_unix.abs_diff(item.completed_at_unix) <= ARK_RECEIVE_COALESCE_WINDOW_SECS
+}
+
+fn is_coalescible_ark_receive(item: &ActivityItem) -> bool {
+    item.icon_kind == ActivityIconKind::Received
+        && item.amount_sat > 0
+        && item
+            .ark_address
+            .as_ref()
+            .is_some_and(|address| !address.is_empty())
+        && item.method_display == "Ark"
+}
+
+fn merge_activity_amounts(target: &mut ActivityItem, item: ActivityItem) {
+    target.amount_sat = target.amount_sat.saturating_add(item.amount_sat);
+    target.payment_amount_sat = target
+        .payment_amount_sat
+        .saturating_add(item.payment_amount_sat);
+    target.amount_display = state::format_sats(target.amount_sat.unsigned_abs());
+    target.signed_amount_display = state::format_signed_sats(target.amount_sat, true);
+    target.amount_fiat_display = None;
+    if target.subtitle.is_empty() {
+        target.subtitle = item.subtitle;
+    }
+    if target.message_text.is_none() {
+        target.message_text = item.message_text;
+    }
+    if target.lightning_invoice.is_none() {
+        target.lightning_invoice = item.lightning_invoice;
+    }
+    if target.lightning_offer.is_none() {
+        target.lightning_offer = item.lightning_offer;
+    }
+    if target.lightning_payment_hash.is_none() {
+        target.lightning_payment_hash = item.lightning_payment_hash;
+    }
+    if target.lightning_payment_preimage.is_none() {
+        target.lightning_payment_preimage = item.lightning_payment_preimage;
+    }
 }
 
 fn activity_method_icon(destination: Option<&BarkPaymentMethod>, inbound: bool) -> &'static str {
@@ -338,6 +438,37 @@ mod tests {
     const ARK_ADDR: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
     const LIGHTNING_OFFER: &str = "lno1pqpzwyq2qe3k7enxv4j3pjgrrwzv24nmzfjypx2a8m264ws9vht3uxp5vpypnluuzl67n4waq78syn2tdngnvypje2da9t4emyq25n29m84dszkfggehf3z35uj56pmxqgp5vfme44926w23gc282xn3pp0j7y8pc7je8e8qxrhmtwrjrnj4kzcqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqjnrlnqdqf52q7jwgcnxgnuseav37nvs0zn06dyfs79hk7uk8lrxuqzqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
 
+    fn ark_receive_movement(
+        id: u32,
+        amount_sat: u64,
+        output_vtxos: &[u8],
+        completed_at: chrono::DateTime<chrono::Local>,
+    ) -> Movement {
+        let ark_address = ArkAddress::from_str(ARK_ADDR).unwrap();
+        let mut movement = Movement::new(
+            MovementId(id),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: Subsystem::ARKOOR.as_name().to_string(),
+                kind: "receive".to_string(),
+            },
+            completed_at,
+        );
+        movement.time.completed_at = Some(completed_at);
+        movement.intended_balance = SignedAmount::from_sat(amount_sat as i64);
+        movement.effective_balance = SignedAmount::from_sat(amount_sat as i64);
+        movement.received_on = vec![MovementDestination::ark(
+            ark_address,
+            Amount::from_sat(amount_sat),
+        )];
+        movement.output_vtxos = output_vtxos.iter().map(|seed| vtxo_id(*seed)).collect();
+        movement
+    }
+
+    fn vtxo_id(seed: u8) -> bark::ark::VtxoId {
+        bark::ark::VtxoId::from_slice(&[seed; bark::ark::VtxoId::ENCODE_SIZE]).unwrap()
+    }
+
     #[test]
     fn activity_helpers_return_render_ready_labels() {
         let offer = BarkPaymentMethod::from_type_value("offer", LIGHTNING_OFFER).unwrap();
@@ -388,6 +519,42 @@ mod tests {
             chrono::Local::now(),
         );
         assert!(is_user_visible_movement(&receive));
+    }
+
+    #[test]
+    fn dedupes_duplicate_ark_receive_movements_by_output_vtxos() {
+        let now = chrono::Local::now();
+        let first = ark_receive_movement(4, 1_000, &[1, 2], now);
+        let duplicate = ark_receive_movement(5, 1_000, &[2, 1], now);
+
+        let visible = visible_activity_movements(vec![first, duplicate]);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, MovementId(4));
+    }
+
+    #[test]
+    fn coalesces_adjacent_ark_receive_activity_for_same_address() {
+        let now = chrono::Local::now();
+        let first =
+            activity_from_movement(ark_receive_movement(6, 1_000, &[1], now), &[], None, None);
+        let second = activity_from_movement(
+            ark_receive_movement(7, 2_500, &[2], now - chrono::Duration::seconds(30)),
+            &[],
+            None,
+            None,
+        );
+
+        let items = coalesce_activity_items(vec![first, second]);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].amount_sat, 3_500);
+        assert_eq!(items[0].payment_amount_sat, 3_500);
+        assert_eq!(items[0].amount_display, state::format_sats(3_500));
+        assert_eq!(
+            items[0].signed_amount_display,
+            state::format_signed_sats(3_500, true)
+        );
     }
 
     #[test]

@@ -24,7 +24,9 @@ use nostr_sdk::prelude::{
 };
 use tokio::runtime::Runtime;
 
-use crate::activity::{activity_from_movement, is_user_visible_movement};
+use crate::activity::{
+    activity_from_movement, coalesce_activity_items, visible_activity_movements,
+};
 use crate::custom_address::{
     amount_msats_to_sat, quote_registration, register_address, validate_custom_address_name,
     verify_registration, RegisterResult, RegisterStatus,
@@ -180,7 +182,7 @@ async fn wallet_synced_msg(
     let balance = wallet.balance().await.context("balance failed")?;
     let history = wallet.history().await.context("history failed")?;
     let mut activity = Vec::new();
-    for movement in history.into_iter().filter(is_user_visible_movement) {
+    for movement in visible_activity_movements(history) {
         let lightning_details = movement_lightning_details_from_vtxos(wallet, &movement).await;
         let mut item = activity_from_movement(
             movement,
@@ -196,6 +198,7 @@ async fn wallet_synced_msg(
         }
         activity.push(item);
     }
+    let mut activity = coalesce_activity_items(activity);
     apply_activity_metadata(&mut activity, contacts, payment_annotations, zap_receipts);
     Ok(AsyncMsg::WalletSynced {
         balance_sat: balance.spendable.to_sat(),
@@ -4498,7 +4501,8 @@ mod tests {
         let backing_ark_address = history
             .iter()
             .filter(|movement| {
-                is_user_visible_movement(movement) && movement.effective_balance.to_sat() > 0
+                crate::activity::is_user_visible_movement(movement)
+                    && movement.effective_balance.to_sat() > 0
             })
             .find_map(|movement| {
                 movement
@@ -4508,7 +4512,8 @@ mod tests {
             });
         println!("backing_ark_address={backing_ark_address:?}");
         for movement in history.iter().filter(|movement| {
-            is_user_visible_movement(movement) && movement.effective_balance.to_sat() > 0
+            crate::activity::is_user_visible_movement(movement)
+                && movement.effective_balance.to_sat() > 0
         }) {
             let movement_hash = movement
                 .lightning_payment_hash()
