@@ -292,14 +292,6 @@ struct ContactRow: View {
     }
 }
 
-private func truncateMiddle(_ value: String, maxLength: Int) -> String {
-    guard value.count > maxLength, maxLength > 3 else { return value }
-    let edgeCount = (maxLength - 3) / 2
-    let prefix = value.prefix(edgeCount)
-    let suffix = value.suffix(edgeCount)
-    return "\(prefix)...\(suffix)"
-}
-
 struct DirectMessageRow: View {
     let message: NostrMessage
 

@@ -56,6 +56,22 @@ pub(crate) fn profile_contact_from_metadata_json(
     event_created_at: u64,
     followed: bool,
 ) -> FetchedProfileContact {
+    profile_contact_from_metadata_json_with_petname(
+        key,
+        metadata_json,
+        event_created_at,
+        followed,
+        None,
+    )
+}
+
+pub(crate) fn profile_contact_from_metadata_json_with_petname(
+    key: NostrPublicKey,
+    metadata_json: String,
+    event_created_at: u64,
+    followed: bool,
+    petname: Option<String>,
+) -> FetchedProfileContact {
     let npub = key.to_bech32().unwrap_or_else(|_| key.to_hex());
     let pubkey_hex = key.to_hex();
     let profile = serde_json::from_str::<PrimalProfile>(&metadata_json).ok();
@@ -65,11 +81,11 @@ pub(crate) fn profile_contact_from_metadata_json(
             nostr_contact_display_name(
                 profile.display_name.clone(),
                 profile.name.clone(),
-                None,
+                petname.clone(),
                 &npub,
             )
         })
-        .unwrap_or_else(|| fallback_nostr_name(&npub));
+        .unwrap_or_else(|| nostr_contact_display_name(None, None, petname, &npub));
     let picture = profile
         .as_ref()
         .and_then(|profile| profile.image.clone().or(profile.picture.clone()))
@@ -479,7 +495,7 @@ pub(crate) fn apply_metadata_content(nostr: &mut NostrState, content: &str) -> a
         return Ok(());
     }
 
-    let metadata = Metadata::from_json(content.to_string())?;
+    let metadata = Metadata::from_json(content)?;
     nostr.name = nostr_contact_display_name(
         metadata.display_name,
         metadata.name,

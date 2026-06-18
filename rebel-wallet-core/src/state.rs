@@ -1,12 +1,11 @@
-use std::str::FromStr;
-
-use bark::ark::lightning::{Offer, OfferAmount};
-use bark::ark::Address as ArkAddress;
-use bitcoin::Address as BitcoinAddress;
 use serde::{Deserialize, Serialize};
 
 use crate::custom_address::validate_custom_address_name;
 use crate::{MAINNET_ESPLORA, MAINNET_SERVER, SIGNET_ESPLORA, SIGNET_SERVER};
+
+mod send;
+
+pub(crate) use send::sort_contacts_by_name_npub;
 
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
@@ -114,8 +113,9 @@ pub enum PriceCurrency {
     GBP,
 }
 
-#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WalletNetwork {
+    #[default]
     Mainnet,
     Signet,
 }
@@ -419,6 +419,7 @@ pub enum ActivityIconKind {
 
 impl AppState {
     pub(crate) fn initial() -> Self {
+        let network = WalletNetwork::default();
         Self {
             rev: 0,
             show_launch_splash: true,
@@ -429,12 +430,12 @@ impl AppState {
             },
             setup: SetupState::NeedsSetup,
             wallet: WalletState {
-                network: WalletNetwork::Mainnet,
-                network_name: WalletNetwork::Mainnet.display_name().to_string(),
-                default_server_address: WalletNetwork::Mainnet.server_address().to_string(),
-                default_esplora_address: WalletNetwork::Mainnet.esplora_address().to_string(),
-                server_address: WalletNetwork::Mainnet.server_address().to_string(),
-                esplora_address: WalletNetwork::Mainnet.esplora_address().to_string(),
+                network,
+                network_name: network.display_name().to_string(),
+                default_server_address: network.server_address().to_string(),
+                default_esplora_address: network.esplora_address().to_string(),
+                server_address: network.server_address().to_string(),
+                esplora_address: network.esplora_address().to_string(),
                 price_currency: PriceCurrency::BTC,
                 price_currency_code: PriceCurrency::BTC.code().to_string(),
                 price_currency_name: PriceCurrency::BTC.display_name().to_string(),
@@ -590,45 +591,7 @@ impl AppState {
             }
         };
 
-        self.send.amount_display = format_sats(self.send.amount_sat);
-        self.send.fee_estimate_display = self.send.fee_estimate_sat.map(format_sats);
-        self.send.total_cost_display = self.send.total_cost_sat.map(format_sats);
-        self.send.fee_estimate_fiat_display = self.send.fee_estimate_sat.and_then(|amount| {
-            format_non_btc_fiat_sats(amount, self.wallet.btc_price, &self.wallet.price_currency)
-        });
-        self.send.total_cost_fiat_display = self.send.total_cost_sat.and_then(|amount| {
-            format_non_btc_fiat_sats(amount, self.wallet.btc_price, &self.wallet.price_currency)
-        });
-        self.send.search_results = send_search_results(
-            &self.send.search_query,
-            &self.nostr.contacts,
-            &self.send.global_search_results,
-            self.nostr.npub.as_deref(),
-        );
-        self.send.can_continue_search = is_sendable_search_query(&self.send.search_query);
-        if self.send.destination.trim().is_empty() && self.send.phase == SendPhase::Editing {
-            self.send.phase = SendPhase::Drafting;
-        }
-        self.send.destination_kind = send_destination_kind(&self.send.destination);
-        self.send.error_text = send_error_text(
-            &self.send.destination,
-            self.send.destination_kind.clone(),
-            self.send.amount_sat,
-            self.send.total_cost_sat,
-            self.wallet.balance_sat,
-        );
-        self.send.can_submit = !self.send.destination.trim().is_empty()
-            && self.send.phase != SendPhase::Sending
-            && !self.send.estimating_fee
-            && self.send.error_text.is_none()
-            && match self.send.destination_kind {
-                SendDestinationKind::Lightning => true,
-                SendDestinationKind::Ark | SendDestinationKind::OnChain => self.send.amount_sat > 0,
-                SendDestinationKind::Unknown => false,
-            };
-        if !self.send.zap_available {
-            self.send.zap_enabled = false;
-        }
+        send::refresh_send_derived(self);
 
         self.lightning_address.arkzap_address = self
             .lightning_address
@@ -788,198 +751,8 @@ pub(crate) fn format_signed_sats(amount: i64, signed: bool) -> String {
     format!("{prefix}{} sats", grouped_digits(magnitude))
 }
 
-pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
-    let destination = destination.trim();
-    let lower = destination.to_ascii_lowercase();
-    if lower.is_empty() {
-        SendDestinationKind::Unknown
-    } else if lower.starts_with("lightning:")
-        || lower.starts_with("ln")
-        || is_valid_lightning_address(destination)
-    {
-        SendDestinationKind::Lightning
-    } else if BitcoinAddress::from_str(destination).is_ok() {
-        SendDestinationKind::OnChain
-    } else if ArkAddress::from_str(destination).is_ok() {
-        SendDestinationKind::Ark
-    } else {
-        SendDestinationKind::Unknown
-    }
-}
-
-fn send_search_results(
-    query: &str,
-    contacts: &[Contact],
-    global_results: &[Contact],
-    own_npub: Option<&str>,
-) -> Vec<Contact> {
-    let needle = normalize_search(query);
-    let own_npub = own_npub.map(normalize_search);
-    let mut contacts = contacts
-        .iter()
-        .cloned()
-        .chain(global_results.iter().cloned())
-        .map(|mut contact| {
-            contact.name = contact.name.trim().to_string();
-            contact
-        })
-        .fold(Vec::<Contact>::new(), |mut out, contact| {
-            if !out.iter().any(|c| c.npub == contact.npub) {
-                out.push(contact);
-            }
-            out
-        });
-    contacts.sort_by(|a, b| {
-        contact_has_lightning_address(b)
-            .cmp(&contact_has_lightning_address(a))
-            .then_with(|| normalize_search(&a.name).cmp(&normalize_search(&b.name)))
-            .then_with(|| normalize_search(&a.npub).cmp(&normalize_search(&b.npub)))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-
-    contacts
-        .into_iter()
-        .filter(|contact| {
-            if let Some(own_npub) = &own_npub {
-                if normalize_search(&contact.npub) == *own_npub {
-                    return false;
-                }
-            }
-            contact_has_lightning_address(contact)
-        })
-        .filter(|contact| {
-            needle.is_empty()
-                || normalize_search(&contact.name).contains(&needle)
-                || normalize_search(&contact.npub).contains(&needle)
-                || normalize_search(&contact.lightning_address).contains(&needle)
-                || normalize_search(&contact.lnurl).contains(&needle)
-        })
-        .collect()
-}
-
-pub(crate) fn sort_contacts_by_name_npub(contacts: &mut [Contact]) {
-    contacts.sort_by(|a, b| {
-        normalize_search(&a.name)
-            .cmp(&normalize_search(&b.name))
-            .then_with(|| normalize_search(&a.npub).cmp(&normalize_search(&b.npub)))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-}
-
-fn contact_has_lightning_address(contact: &Contact) -> bool {
-    is_valid_lightning_address(&contact.lightning_address)
-}
-
-fn is_valid_lightning_address(address: &str) -> bool {
-    let address = address.trim();
-    let Some((local, domain)) = address.split_once('@') else {
-        return false;
-    };
-    if local.is_empty() || domain.is_empty() || domain.contains('@') {
-        return false;
-    }
-    if !local
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
-    {
-        return false;
-    }
-    let domain = domain.to_ascii_lowercase();
-    if !domain.contains('.') || domain.starts_with('.') || domain.ends_with('.') {
-        return false;
-    }
-    domain.split('.').all(|label| {
-        !label.is_empty()
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    })
-}
-
-fn is_sendable_search_query(query: &str) -> bool {
-    let trimmed = query.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    trimmed.len() >= 6
-        && (ArkAddress::from_str(trimmed).is_ok()
-            || BitcoinAddress::from_str(trimmed).is_ok()
-            || lower.starts_with("lightning:")
-            || lower.starts_with("lnbc")
-            || lower.starts_with("lntb")
-            || lower.starts_with("lno")
-            || lower.starts_with("lnurl")
-            || trimmed.contains('@')
-            || lower.starts_with("http://")
-            || lower.starts_with("https://"))
-}
-
 fn normalize_search(value: &str) -> String {
     value.trim().to_ascii_lowercase()
-}
-
-fn send_error_text(
-    destination: &str,
-    destination_kind: SendDestinationKind,
-    amount_sat: u64,
-    total_cost_sat: Option<u64>,
-    balance_sat: u64,
-) -> Option<String> {
-    let effective_amount_sat =
-        if amount_sat == 0 && destination_kind == SendDestinationKind::Lightning {
-            offer_amount_sat(destination).unwrap_or(0)
-        } else {
-            amount_sat
-        };
-    if total_cost_sat.unwrap_or(effective_amount_sat) > balance_sat {
-        return Some("Insufficient balance for this send.".to_string());
-    }
-    if send_requires_amount(destination, destination_kind.clone()) && amount_sat == 0 {
-        return Some(format!(
-            "Enter an amount before sending to {}.",
-            match destination_kind {
-                SendDestinationKind::OnChain => "an on-chain address",
-                SendDestinationKind::Lightning => "this Lightning destination",
-                _ => "an Ark address",
-            }
-        ));
-    }
-    None
-}
-
-fn send_requires_amount(destination: &str, destination_kind: SendDestinationKind) -> bool {
-    match destination_kind {
-        SendDestinationKind::Ark | SendDestinationKind::OnChain => true,
-        SendDestinationKind::Lightning => {
-            is_lnurl_or_lightning_address(destination) || is_amountless_offer(destination)
-        }
-        SendDestinationKind::Unknown => false,
-    }
-}
-
-fn is_amountless_offer(destination: &str) -> bool {
-    offer_amount_sat(destination).is_some_and(|amount| amount == 0)
-}
-
-fn offer_amount_sat(destination: &str) -> Option<u64> {
-    let destination = strip_lightning_prefix(destination.trim());
-    let offer = Offer::from_str(destination).ok()?;
-    match offer.amount() {
-        Some(OfferAmount::Bitcoin { amount_msats }) => Some(amount_msats.checked_add(999)? / 1_000),
-        Some(OfferAmount::Currency { .. }) => Some(0),
-        None => Some(0),
-    }
-}
-
-fn is_lnurl_or_lightning_address(destination: &str) -> bool {
-    let destination = strip_lightning_prefix(destination.trim());
-    let lower = destination.to_ascii_lowercase();
-    lower.starts_with("lnurl") || is_valid_lightning_address(destination)
-}
-
-fn strip_lightning_prefix(destination: &str) -> &str {
-    destination
-        .strip_prefix("lightning:")
-        .or_else(|| destination.strip_prefix("LIGHTNING:"))
-        .unwrap_or(destination)
 }
 
 fn grouped_digits(amount: u64) -> String {
@@ -990,7 +763,7 @@ fn grouped_digits(amount: u64) -> String {
     for (idx, ch) in digits.chars().enumerate() {
         if idx > 0
             && (idx == first_group_len
-                || (idx > first_group_len && (idx - first_group_len) % 3 == 0))
+                || (idx > first_group_len && (idx - first_group_len).is_multiple_of(3)))
         {
             out.push(',');
         }

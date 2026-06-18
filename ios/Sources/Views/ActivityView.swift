@@ -193,9 +193,3 @@ struct ActivityPreviewLine: View {
         .padding(.vertical, 11)
     }
 }
-
-private func truncateMiddle(_ value: String, maxLength: Int) -> String {
-    guard value.count > maxLength, maxLength > 3 else { return value }
-    let edgeCount = (maxLength - 3) / 2
-    return "\(value.prefix(edgeCount))...\(value.suffix(edgeCount))"
-}

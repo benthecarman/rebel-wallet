@@ -5,6 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Semaphore;
 
+use crate::nostr_support::{metadata_from_state, public_key_from_npub_or_hex};
+use crate::{Contact, NostrState};
+
 const MAX_PROFILE_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_PROFILE_IMAGE_DIMENSION: u32 = 400;
 const MAX_CONCURRENT_PROFILE_IMAGE_DOWNLOADS: usize = 4;
@@ -202,6 +205,137 @@ pub(crate) fn profile_picture_file_url(data_dir: &Path, pubkey: &str) -> Option<
         .map(|duration| duration.as_secs())
         .unwrap_or_default();
     Some(format!("file://{}?v={}", path.display(), mtime))
+}
+
+pub(crate) fn hydrate_contact_picture(
+    profile_db: Option<&Connection>,
+    data_dir: &Path,
+    contact: &mut Contact,
+) {
+    if contact.picture.starts_with("file://") {
+        contact.picture.clear();
+    }
+    let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+        return;
+    };
+    let pubkey_hex = pubkey.to_hex();
+    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+    else {
+        return;
+    };
+    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
+    {
+        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
+            contact.picture = file_url;
+            return;
+        }
+    }
+    if contact.picture.is_empty() {
+        contact.picture = entry.picture_remote_url;
+    }
+}
+
+pub(crate) fn hydrate_own_profile_picture(
+    profile_db: Option<&Connection>,
+    data_dir: &Path,
+    nostr: &mut NostrState,
+) {
+    if nostr.picture_display_url.starts_with("file://") {
+        nostr.picture_display_url.clear();
+    }
+    let Some(npub) = nostr.npub.as_deref() else {
+        return;
+    };
+    let Ok(pubkey) = public_key_from_npub_or_hex(npub) else {
+        return;
+    };
+    let pubkey_hex = pubkey.to_hex();
+    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
+    else {
+        return;
+    };
+    if !entry.picture_remote_url.is_empty() && nostr.picture.is_empty() {
+        nostr.picture = entry.picture_remote_url.clone();
+    }
+    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
+    {
+        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
+            nostr.picture_display_url = file_url;
+            return;
+        }
+    }
+    nostr.picture_display_url = nostr.picture.clone();
+}
+
+pub(crate) fn save_own_profile_picture_remote_url(
+    profile_db: Option<&Connection>,
+    pubkey_hex: &str,
+    nostr: &NostrState,
+) {
+    let Some(conn) = profile_db else {
+        return;
+    };
+    let previous = load_profile(conn, pubkey_hex).ok().flatten();
+    let same_remote = previous
+        .as_ref()
+        .is_some_and(|entry| entry.picture_remote_url == nostr.picture);
+    let metadata_json = metadata_from_state(nostr)
+        .ok()
+        .and_then(|metadata| serde_json::to_string(&metadata).ok())
+        .unwrap_or_else(|| {
+            previous
+                .as_ref()
+                .map(|entry| entry.metadata_json.clone())
+                .unwrap_or_else(|| "{}".to_string())
+        });
+    let entry = ProfileCacheEntry {
+        pubkey: pubkey_hex.to_string(),
+        metadata_json,
+        name: nostr.name.clone(),
+        picture_remote_url: nostr.picture.clone(),
+        picture_cached_url: if same_remote {
+            previous
+                .as_ref()
+                .map(|entry| entry.picture_cached_url.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        },
+        picture_cached_at: if same_remote {
+            previous
+                .as_ref()
+                .map(|entry| entry.picture_cached_at)
+                .unwrap_or_default()
+        } else {
+            0
+        },
+        lightning_address: nostr.lud16.clone(),
+        lnurl: String::new(),
+        event_created_at: previous
+            .as_ref()
+            .map(|entry| entry.event_created_at)
+            .unwrap_or_default(),
+    };
+    let _ = save_profile(conn, &entry);
+}
+
+pub(crate) fn sanitize_persisted_contact_pictures(
+    profile_db: Option<&Connection>,
+    contacts: &mut [Contact],
+) {
+    for contact in contacts {
+        if !contact.picture.starts_with("file://") {
+            continue;
+        }
+        let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
+            contact.picture.clear();
+            continue;
+        };
+        contact.picture = profile_db
+            .and_then(|conn| load_profile(conn, &pubkey.to_hex()).ok().flatten())
+            .map(|entry| entry.picture_remote_url)
+            .unwrap_or_default();
+    }
 }
 
 pub(crate) async fn download_profile_picture(

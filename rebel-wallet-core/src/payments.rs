@@ -2,17 +2,18 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context};
-use bark::ark::lightning::PaymentHash;
+use bark::ark::lightning::{Offer, OfferAmount, PaymentHash};
 use bark::ark::Address as ArkAddress;
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::movement::{Movement, MovementStatus, PaymentMethod as BarkPaymentMethod};
 use bark::payment_request::AvailablePaymentMethod;
 use bark::Wallet;
+use bitcoin::Address as BitcoinAddress;
 use flume::Sender;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use crate::{AsyncMsg, CoreMsg};
+use crate::{AsyncMsg, CoreMsg, SendDestinationKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SendPaymentPreference {
@@ -120,6 +121,34 @@ fn send_payment_destination(method: &BarkPaymentMethod) -> Option<SendPaymentDes
 
 pub(crate) fn embedded_send_amount_sat(destination: &str) -> Option<u64> {
     bolt11_amount_sat(destination).or_else(|| bitcoin_uri_amount_sat(destination))
+}
+
+pub(crate) fn send_destination_kind(destination: &str) -> SendDestinationKind {
+    let destination = destination.trim();
+    let lower = destination.to_ascii_lowercase();
+    if lower.is_empty() {
+        SendDestinationKind::Unknown
+    } else if lower.starts_with("lightning:")
+        || lower.starts_with("ln")
+        || is_valid_lightning_address(destination)
+    {
+        SendDestinationKind::Lightning
+    } else if BitcoinAddress::from_str(destination).is_ok() {
+        SendDestinationKind::OnChain
+    } else if ArkAddress::from_str(destination).is_ok() {
+        SendDestinationKind::Ark
+    } else {
+        SendDestinationKind::Unknown
+    }
+}
+
+pub(crate) fn lightning_offer_amount_sat(destination: &str) -> Option<u64> {
+    let destination = strip_lightning_prefix(destination.trim());
+    let offer = Offer::from_str(destination).ok()?;
+    match offer.amount() {
+        Some(OfferAmount::Bitcoin { amount_msats }) => Some(amount_msats.checked_add(999)? / 1_000),
+        Some(OfferAmount::Currency { .. }) | None => Some(0),
+    }
 }
 
 fn bolt11_amount_sat(destination: &str) -> Option<u64> {
@@ -286,7 +315,7 @@ pub(crate) fn lnurl_pay_url(destination: &str) -> anyhow::Result<reqwest::Url> {
     let lower = destination.to_ascii_lowercase();
     if lower.starts_with("lnurl") {
         let (hrp, bytes) = bech32::decode(destination).context("invalid LNURL")?;
-        if hrp.to_string().to_ascii_lowercase() != "lnurl" {
+        if !hrp.to_string().eq_ignore_ascii_case("lnurl") {
             bail!("invalid LNURL prefix");
         }
         let url = String::from_utf8(bytes).context("LNURL does not contain a valid URL")?;
@@ -300,14 +329,14 @@ pub(crate) fn lnurl_pay_url(destination: &str) -> anyhow::Result<reqwest::Url> {
     bail!("not a Lightning address or LNURL")
 }
 
-fn strip_lightning_prefix(destination: &str) -> &str {
+pub(crate) fn strip_lightning_prefix(destination: &str) -> &str {
     destination
         .strip_prefix("lightning:")
         .or_else(|| destination.strip_prefix("LIGHTNING:"))
         .unwrap_or(destination)
 }
 
-fn is_valid_lightning_address(address: &str) -> bool {
+pub(crate) fn is_valid_lightning_address(address: &str) -> bool {
     let address = address.trim();
     let Some((local, domain)) = address.split_once('@') else {
         return false;
@@ -334,7 +363,7 @@ fn is_valid_lightning_address(address: &str) -> bool {
 }
 
 pub(crate) fn msats_to_display_sats(msats: u64) -> String {
-    if msats % 1_000 == 0 {
+    if msats.is_multiple_of(1_000) {
         (msats / 1_000).to_string()
     } else {
         format!("{:.3}", msats as f64 / 1_000.0)

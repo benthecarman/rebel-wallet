@@ -6,149 +6,71 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Context;
-use bark::ark::lightning::{Offer, OfferAmount, PaymentHash, Preimage};
+use bark::ark::lightning::{PaymentHash, Preimage};
 use bark::ark::vtxo::Full;
-use bark::ark::{Address as ArkAddress, Vtxo, VtxoPolicy};
+use bark::ark::{Vtxo, VtxoPolicy};
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
 use bark::Wallet;
 use bip39::Mnemonic;
 use bitcoin::{
     bip32::{DerivationPath, Xpriv},
-    Address as BitcoinAddress, Amount,
+    Amount,
 };
 use flume::Sender;
 use nostr_sdk::prelude::{
     nip04, Contact as NostrContact, ContactListBuilder, EventBuilder, EventBuilderTemplate, Filter,
-    FinalizeEvent, JsonUtil, Keys, Kind, Metadata, PublicKey as NostrPublicKey, Tag, ToBech32,
+    FinalizeEvent, Keys, Kind, PublicKey as NostrPublicKey, Tag, ToBech32,
 };
 use tokio::runtime::Runtime;
 
 use crate::activity::{
-    activity_from_movement, coalesce_activity_items, visible_activity_movements,
-};
-use crate::custom_address::{
-    amount_msats_to_sat, quote_registration, register_address, validate_custom_address_name,
-    verify_registration, RegisterResult, RegisterStatus,
+    activity_from_movement, apply_activity_metadata, coalesce_activity_items,
+    visible_activity_movements,
 };
 use crate::nostr_support::{
     apply_metadata_content, contact_id, deleted_profile_content, mark_profile_deleted,
     merge_contacts, metadata_from_state, nostr_client, nostr_contact_display_name,
-    primal_follow_contacts, primal_profile_contacts, primal_search_profiles,
-    profile_contact_from_metadata_json, public_key_from_npub_or_hex, upload_profile_picture,
-    FetchedProfileContact,
+    primal_follow_contacts, primal_search_profiles, profile_contact_from_metadata_json,
+    profile_contact_from_metadata_json_with_petname, public_key_from_npub_or_hex,
+    upload_profile_picture,
 };
-use crate::payments::{
-    embedded_send_amount_sat, is_lnurl_pay_destination, monitor_ark_receive,
-    monitor_lightning_receive, parse_send_destination, resolve_lnurl_pay_invoice,
-};
-use crate::persistence::{
-    PaymentAnnotation, PendingCustomLightningAddress, PersistedAppData, PersistedPriceCurrency,
-    ServerConfig, ZapReceiptRecord,
-};
+use crate::payments::{monitor_ark_receive, monitor_lightning_receive};
+use crate::persistence::{PaymentAnnotation, ZapReceiptRecord};
 use crate::price::fetch_bitcoin_price;
 use crate::profile_cache::{
-    clear_profile_cache, clear_profile_picture_dir, download_profile_picture,
-    ensure_profile_picture_dir, load_profile, new_profile_picture_download_semaphore,
-    open_profile_cache, profile_picture_file_url, save_profile, update_cached_picture,
-    ProfileCacheEntry,
-};
-use crate::state::{
-    arkzap_domain_for_ark_address, send_destination_kind, sort_contacts_by_name_npub,
+    clear_profile_cache, clear_profile_picture_dir, ensure_profile_picture_dir,
+    new_profile_picture_download_semaphore, open_profile_cache,
+    save_own_profile_picture_remote_url, update_cached_picture,
 };
 use crate::time::{now_label, now_unix};
 use crate::updates::{AppUpdate, AsyncMsg, CoreMsg, HapticFeedback};
-use crate::wallet::{open_bark_wallet, remove_wallet_database_files, WalletOpenMode};
-use crate::zaps::{fetch_received_zap_receipts, request_zap_invoice};
+use crate::wallet::WalletOpenMode;
 use crate::{
-    ActivityItem, AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind,
-    Contact, LightningAddressRegistrationPhase, MainTab, NostrMessage, PriceCurrency,
-    ReceiveMethod, ReceivePhase, Screen, SecretStore, SendDestinationKind, SendPhase, SetupState,
-    WalletNetwork,
+    AppAction, AppState, BusyState, CapabilityRequest, CapabilityRequestKind, Contact,
+    LightningAddressRegistrationPhase, MainTab, NostrMessage, PriceCurrency, ReceiveMethod,
+    ReceivePhase, Screen, SecretStore, SendPhase, SetupState,
 };
+
+mod custom_address_flow;
+mod profile_prefetch;
+mod send_flow;
+mod wallet_lifecycle;
 
 const WALLET_SEED_KEY: &str = "wallet_seed";
 const NOSTR_SECRET_KEY: &str = "nostr_secret";
 const NOSTR_DERIVATION_PATH: &str = "m/44'/1237'/0'/0/0";
-const SEND_FEE_ESTIMATE_DEBOUNCE: Duration = Duration::from_millis(350);
 
 fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
     format!("{pubkey}:{remote_url}")
 }
 
 fn msats_to_display_sats(msats: u64) -> String {
-    if msats % 1_000 == 0 {
+    if msats.is_multiple_of(1_000) {
         (msats / 1_000).to_string()
     } else {
         format!("{:.3}", msats as f64 / 1_000.0)
     }
-}
-
-fn send_fee_estimate_request(
-    destination: &str,
-    amount_sat: u64,
-) -> Option<(u64, SendDestinationKind)> {
-    let destination = destination.trim();
-    if destination.is_empty() {
-        return None;
-    }
-
-    if is_lnurl_pay_destination(destination) {
-        return (amount_sat > 0).then_some((amount_sat, SendDestinationKind::Lightning));
-    }
-
-    let lower = destination.to_lowercase();
-    if lower.starts_with("lightning:") || lower.starts_with("ln") {
-        if amount_sat > 0 {
-            return Some((amount_sat, SendDestinationKind::Lightning));
-        }
-
-        let invoice = destination
-            .strip_prefix("lightning:")
-            .or_else(|| destination.strip_prefix("LIGHTNING:"))
-            .unwrap_or(destination);
-        if let Ok(invoice) = Bolt11Invoice::from_str(invoice) {
-            let invoice_msat = invoice.amount_milli_satoshis()?;
-            let invoice_sat = invoice_msat.checked_add(999)? / 1_000;
-            return (invoice_sat > 0).then_some((invoice_sat, SendDestinationKind::Lightning));
-        }
-        if let Some(offer) = parsed_offer(invoice) {
-            return offer_amount_sat(&offer).map(|amount| (amount, SendDestinationKind::Lightning));
-        }
-        return None;
-    }
-
-    let kind = match send_destination_kind(destination) {
-        kind @ (SendDestinationKind::Ark | SendDestinationKind::OnChain) => kind,
-        SendDestinationKind::Unknown | SendDestinationKind::Lightning => return None,
-    };
-    (amount_sat > 0).then_some((amount_sat, kind))
-}
-
-fn parsed_offer(destination: &str) -> Option<Offer> {
-    let destination = destination
-        .strip_prefix("lightning:")
-        .or_else(|| destination.strip_prefix("LIGHTNING:"))
-        .unwrap_or(destination);
-    Offer::from_str(destination.trim()).ok()
-}
-
-fn offer_amount_sat(offer: &Offer) -> Option<u64> {
-    match offer.amount()? {
-        OfferAmount::Bitcoin { amount_msats } => {
-            let sat = amount_msats.checked_add(999)? / 1_000;
-            (sat > 0).then_some(sat)
-        }
-        OfferAmount::Currency { .. } => None,
-    }
-}
-
-async fn checked_bitcoin_address(wallet: &Wallet, address: &str) -> anyhow::Result<BitcoinAddress> {
-    let address = BitcoinAddress::from_str(address).context("invalid on-chain address")?;
-    let network = wallet.network().await?;
-    address
-        .require_network(network)
-        .context("address is not valid for configured network")
 }
 
 fn send_screen_removed(previous: &[Screen], next: &[Screen]) -> bool {
@@ -284,156 +206,6 @@ fn preimage_from_vtxo_witnesses(vtxo: &Vtxo<Full>) -> Option<Preimage> {
         }
     }
     None
-}
-
-async fn register_and_pay_custom_lightning_address(
-    wallet: Wallet,
-    domain: String,
-    name: String,
-    ark_address_text: String,
-) -> anyhow::Result<AsyncMsg> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .context("failed to build custom address client")?;
-    let quote = quote_registration(&client, &domain, &name, &ark_address_text).await?;
-    let ark_address = ArkAddress::from_str(&quote.ark_address).context("invalid Ark address")?;
-    let signature = wallet
-        .sign_address_message(&ark_address, quote.message.as_bytes())
-        .await
-        .context("failed to sign custom address registration")?
-        .to_string();
-
-    let response = register_address(
-        &client,
-        &domain,
-        &quote.name,
-        &quote.ark_address,
-        &signature,
-    )
-    .await?;
-
-    if response.active {
-        return Ok(registration_update_from_result(
-            response, true, true, false, None,
-        ));
-    }
-
-    let amount_sat = response.fee_sats;
-    let invoice = response.invoice.clone();
-    if invoice.trim().is_empty() {
-        anyhow::bail!("registration response did not include an invoice");
-    }
-    let purchase_id = response.id.to_string();
-    let pending_response = RegisterResult { ..response };
-
-    let balance = wallet.balance().await.context("balance failed")?;
-    if balance.spendable.to_sat() < amount_sat {
-        return Ok(registration_update_from_result(
-            pending_response,
-            false,
-            false,
-            false,
-            None,
-        ));
-    }
-
-    match pay_registration_invoice(&wallet, &invoice, amount_sat).await {
-        Ok(()) => {
-            for _ in 0..12 {
-                let status = verify_registration(&client, &domain, &purchase_id).await?;
-                if status.active {
-                    return Ok(registration_update_from_status_with_payment(status, true));
-                }
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-            Ok(registration_update_from_result(
-                pending_response,
-                false,
-                true,
-                true,
-                Some("Payment sent. Check status in a moment.".to_string()),
-            ))
-        }
-        Err(e) => Ok(registration_update_from_result(
-            pending_response,
-            false,
-            false,
-            false,
-            Some(format!(
-                "Could not pay from wallet balance: {e:#}. Scan the invoice to pay externally."
-            )),
-        )),
-    }
-}
-
-async fn pay_registration_invoice(
-    wallet: &Wallet,
-    invoice_text: &str,
-    amount_sat: u64,
-) -> anyhow::Result<()> {
-    let invoice =
-        Bolt11Invoice::from_str(invoice_text).context("registration invoice was invalid")?;
-    let expected_msat = amount_sat
-        .checked_mul(1_000)
-        .ok_or_else(|| anyhow::anyhow!("registration amount is too large"))?;
-    match invoice.amount_milli_satoshis() {
-        Some(invoice_msat) if invoice_msat == expected_msat => {}
-        Some(invoice_msat) => anyhow::bail!(
-            "registration invoice amount mismatch: requested {} sats, got {} sats",
-            amount_sat,
-            msats_to_display_sats(invoice_msat)
-        ),
-        None => anyhow::bail!("registration invoice did not include an amount"),
-    }
-    wallet
-        .pay_lightning_invoice(invoice, Some(Amount::from_sat(amount_sat)), true)
-        .await
-        .context("Lightning payment failed")?;
-    Ok(())
-}
-
-fn registration_update_from_result(
-    response: RegisterResult,
-    active: bool,
-    paid: bool,
-    paid_from_wallet: bool,
-    warning: Option<String>,
-) -> AsyncMsg {
-    AsyncMsg::LightningAddressRegistrationUpdated {
-        name: response.name,
-        lightning_address: response.lightning_address,
-        ark_address: response.ark_address,
-        invoice: Some(response.invoice),
-        purchase_id: Some(response.id.to_string()),
-        amount_msats: Some(response.fee_sats.saturating_mul(1_000)),
-        active,
-        paid: paid || response.state == "settled",
-        paid_from_wallet,
-        warning,
-    }
-}
-
-fn registration_update_from_status(status: RegisterStatus) -> AsyncMsg {
-    registration_update_from_status_with_payment(status, false)
-}
-
-fn registration_update_from_status_with_payment(
-    status: RegisterStatus,
-    paid_from_wallet: bool,
-) -> AsyncMsg {
-    AsyncMsg::LightningAddressRegistrationUpdated {
-        name: status.name,
-        lightning_address: status.lightning_address,
-        ark_address: status.ark_address,
-        invoice: Some(status.invoice),
-        purchase_id: Some(status.id.to_string()),
-        amount_msats: Some(status.fee_sats.saturating_mul(1_000)),
-        active: status.active,
-        paid: status.state == "settled" || status.active,
-        paid_from_wallet,
-        warning: None,
-    }
 }
 
 pub(crate) fn spawn_actor(
@@ -1256,368 +1028,13 @@ impl AppCore {
         self.pending_haptics.push(feedback);
     }
 
-    fn bootstrap(&mut self) {
-        self.load_app_data();
-        self.refresh_cached_contact_profiles_on_startup();
-        self.load_nostr_key();
-        self.refresh_price();
-        if let Some(mnemonic) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
-            self.state.busy.bootstrapping = true;
-            self.state.busy.opening_wallet = true;
-            self.open_wallet(mnemonic, WalletOpenMode::OpenOrCreate);
-        }
-    }
-
-    fn open_wallet(&self, mnemonic: String, mode: WalletOpenMode) {
-        let tx = self.tx.clone();
-        let data_dir = self.data_dir.clone();
-        let server_config = ServerConfig::from_wallet(&self.state.wallet);
-        self.rt.spawn(async move {
-            let result = async {
-                let mnemonic = Mnemonic::from_str(&mnemonic).context("invalid recovery phrase")?;
-                let wallet = open_bark_wallet(data_dir, &mnemonic, mode, server_config).await?;
-                Ok::<_, anyhow::Error>((wallet, mnemonic.to_string()))
-            }
-            .await;
-            let msg = match result {
-                Ok((wallet, mnemonic)) => AsyncMsg::WalletReady { wallet, mnemonic },
-                Err(e) => AsyncMsg::Error(format!("Wallet setup failed: {e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
+    fn request_capability(&mut self, kind: CapabilityRequestKind) {
+        self.next_capability_id += 1;
+        self.state.capability_request = Some(CapabilityRequest {
+            id: self.next_capability_id,
+            kind,
         });
-    }
-
-    fn delete_wallet(&mut self) {
-        self.wallet = None;
-
-        let mut errors = Vec::new();
-        if !self.secrets.delete_secret(WALLET_SEED_KEY.to_string()) {
-            errors.push("wallet seed".to_string());
-        }
-        let _ = self.secrets.delete_secret(NOSTR_SECRET_KEY.to_string());
-
-        for network in [WalletNetwork::Mainnet, WalletNetwork::Signet] {
-            let db_path = self.data_dir.join(network.db_file_name());
-            if let Err(e) = remove_wallet_database_files(&db_path) {
-                errors.push(format!("{e:#}"));
-            }
-        }
-
-        match std::fs::remove_file(&self.app_data_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => errors.push(format!(
-                "failed to remove {}: {e}",
-                self.app_data_path.display()
-            )),
-        }
-
-        self.payment_annotations.clear();
-        self.zap_receipts.clear();
-        self.profile_picture_downloads.clear();
-        self.profile_info_requests.clear();
-
-        let mut state = AppState::initial();
-        state.show_launch_splash = false;
-        self.state = state;
-
-        if errors.is_empty() {
-            self.state.toast = Some("Wallet deleted. Start over to create or restore.".to_string());
-            self.request_haptic(HapticFeedback::NotificationSuccess);
-        } else {
-            self.state.toast = Some(format!(
-                "Wallet reset with cleanup warnings: {}",
-                errors.join(", ")
-            ));
-            self.request_haptic(HapticFeedback::NotificationWarning);
-        }
-    }
-
-    fn select_network(&mut self, network: WalletNetwork) {
-        let server_config = ServerConfig::for_network(network.clone());
-        let server_address = server_config.server_address;
-        let esplora_address = server_config.esplora_address;
-
-        let wallet_server_changed = self.state.wallet.server_address != server_address
-            || self.state.wallet.esplora_address != esplora_address;
-        let changed = self.state.wallet.network != network || wallet_server_changed;
-        self.state.wallet.network = network;
-        self.state.wallet.server_address = server_address;
-        self.state.wallet.esplora_address = esplora_address;
-        self.state.lightning_address.backing_ark_address = None;
-        self.save_app_data();
-
-        if wallet_server_changed {
-            if let Some(seed) = self.secrets.get_secret(WALLET_SEED_KEY.to_string()) {
-                self.wallet = None;
-                self.state.busy.opening_wallet = true;
-                self.open_wallet(seed, WalletOpenMode::OpenOrCreate);
-                self.state.toast = Some("Network changed. Reconnecting wallet.".to_string());
-                self.request_haptic(HapticFeedback::NotificationSuccess);
-            } else {
-                self.state.toast = Some("Network changed.".to_string());
-                self.request_haptic(HapticFeedback::NotificationSuccess);
-            }
-        } else if changed {
-            self.ensure_lightning_address();
-            self.state.toast = Some("Network changed.".to_string());
-            self.request_haptic(HapticFeedback::NotificationSuccess);
-        } else {
-            self.state.toast = Some("Network already selected.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-        }
-    }
-
-    fn set_price_currency(&mut self, currency: PriceCurrency) {
-        self.state.wallet.price_currency = currency;
-        self.state.wallet.btc_price = None;
-        self.save_app_data();
-        self.request_haptic(HapticFeedback::NotificationSuccess);
-        self.refresh_price();
-    }
-
-    fn ensure_lightning_address(&mut self) {
-        if let Some(address) = self.load_lightning_address_ark_address() {
-            self.state.lightning_address.backing_ark_address = Some(address);
-            return;
-        }
-        if self
-            .state
-            .lightning_address
-            .backing_ark_address
-            .as_ref()
-            .is_some_and(|address| !address.trim().is_empty())
-        {
-            if let Some(address) = self.state.lightning_address.backing_ark_address.as_ref() {
-                self.save_lightning_address_ark_address(address);
-            }
-            return;
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            return;
-        };
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let msg = match wallet.new_address().await {
-                Ok(address) => AsyncMsg::LightningAddressReady(address.to_string()),
-                Err(e) => AsyncMsg::Error(format!("Could not create Arkzap address: {e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn load_lightning_address_ark_address(&self) -> Option<String> {
-        load_wallet_metadata_value(
-            &self.data_dir,
-            self.state.wallet.network,
-            "lightning_address_ark_address",
-        )
-    }
-
-    fn save_lightning_address_ark_address(&self, address: &str) {
-        let _ = save_wallet_metadata_value(
-            &self.data_dir,
-            self.state.wallet.network,
-            "lightning_address_ark_address",
-            address,
-        );
-    }
-
-    fn register_lightning_address(&mut self) {
-        self.state.refresh_derived();
-        let name = self.state.lightning_address.custom_name.trim().to_string();
-        if let Some(error) = validate_custom_address_name(&name) {
-            self.state.lightning_address.registration_error = Some(error);
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        }
-
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        };
-        let Some(ark_address) = self
-            .state
-            .lightning_address
-            .backing_ark_address
-            .clone()
-            .filter(|address| !address.trim().is_empty())
-        else {
-            self.ensure_lightning_address();
-            self.state.toast = Some("Preparing Arkzap address.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        };
-
-        let domain = arkzap_domain_for_ark_address(&ark_address).to_string();
-        self.state.lightning_address.registration_phase =
-            LightningAddressRegistrationPhase::Registering;
-        self.state.lightning_address.registration_status_text = "Registering".to_string();
-        self.state.lightning_address.registration_error = None;
-        self.state.lightning_address.registration_address = None;
-        self.state.lightning_address.registration_invoice = None;
-        self.state.lightning_address.registration_purchase_id = None;
-        self.state.lightning_address.registration_amount_sat = 0;
-        self.request_haptic(HapticFeedback::ImpactMedium);
-
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let msg = register_and_pay_custom_lightning_address(wallet, domain, name, ark_address)
-                .await
-                .unwrap_or_else(|e| {
-                    AsyncMsg::Error(format!(
-                        "Custom Lightning address registration failed: {e:#}"
-                    ))
-                });
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn verify_lightning_address_registration(&mut self) {
-        let Some(purchase_id) = self
-            .state
-            .lightning_address
-            .registration_purchase_id
-            .clone()
-            .filter(|id| !id.trim().is_empty())
-        else {
-            self.state.toast = Some("No registration invoice to check.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        };
-        let Some(ark_address) = self
-            .state
-            .lightning_address
-            .backing_ark_address
-            .clone()
-            .filter(|address| !address.trim().is_empty())
-        else {
-            self.state.toast = Some("Arkzap address is not ready yet.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        };
-        let domain = arkzap_domain_for_ark_address(&ark_address).to_string();
-
-        self.state.lightning_address.registration_phase =
-            LightningAddressRegistrationPhase::Verifying;
-        self.state.lightning_address.registration_status_text = "Checking".to_string();
-        self.state.lightning_address.registration_error = None;
         self.request_haptic(HapticFeedback::ImpactLight);
-
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(20))
-                .build()
-                .context("failed to build custom address client");
-            let msg = match client {
-                Ok(client) => verify_registration(&client, &domain, &purchase_id)
-                    .await
-                    .map(registration_update_from_status),
-                Err(e) => Err(e),
-            }
-            .unwrap_or_else(|e| {
-                AsyncMsg::Error(format!("Custom Lightning address status failed: {e:#}"))
-            });
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn clear_lightning_address_registration(&mut self) {
-        let has_custom_address = self
-            .state
-            .lightning_address
-            .custom_address
-            .as_ref()
-            .is_some_and(|address| !address.trim().is_empty());
-        self.state.lightning_address.registration_phase = if has_custom_address {
-            LightningAddressRegistrationPhase::Active
-        } else {
-            LightningAddressRegistrationPhase::Idle
-        };
-        self.state.lightning_address.registration_status_text = if has_custom_address {
-            "Active".to_string()
-        } else {
-            "Ready".to_string()
-        };
-        self.state.lightning_address.registration_error = None;
-        self.state.lightning_address.registration_address = None;
-        self.state.lightning_address.registration_invoice = None;
-        self.state.lightning_address.registration_purchase_id = None;
-        self.state.lightning_address.registration_amount_sat = 0;
-    }
-
-    fn clear_stale_lightning_address_registration_for_name(&mut self, name: &str) {
-        let pending_matches_name = self
-            .state
-            .lightning_address
-            .registration_address
-            .as_deref()
-            .and_then(|address| address.split_once('@').map(|(local_part, _)| local_part))
-            .is_some_and(|local_part| local_part == name);
-        if pending_matches_name {
-            return;
-        }
-        self.clear_lightning_address_registration();
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn apply_lightning_address_registration_update(
-        &mut self,
-        name: String,
-        lightning_address: String,
-        ark_address: String,
-        invoice: Option<String>,
-        purchase_id: Option<String>,
-        amount_msats: Option<u64>,
-        active: bool,
-        paid: bool,
-        paid_from_wallet: bool,
-        warning: Option<String>,
-    ) {
-        self.state.lightning_address.custom_name = name;
-        self.state.lightning_address.registration_address = Some(lightning_address.clone());
-        self.state.lightning_address.backing_ark_address = Some(ark_address.clone());
-        self.save_lightning_address_ark_address(&ark_address);
-        self.state.lightning_address.registration_invoice = invoice;
-        self.state.lightning_address.registration_purchase_id = purchase_id;
-        self.state.lightning_address.registration_amount_sat = amount_msats
-            .and_then(|amount| amount_msats_to_sat(amount).ok())
-            .unwrap_or(0);
-
-        if active {
-            self.state.lightning_address.custom_address = Some(lightning_address);
-            self.state.lightning_address.registration_phase =
-                LightningAddressRegistrationPhase::Active;
-            self.state.lightning_address.registration_status_text = "Active".to_string();
-            self.state.lightning_address.registration_error = None;
-            self.state.lightning_address.registration_invoice = None;
-            self.state.lightning_address.registration_purchase_id = None;
-            self.state.lightning_address.registration_amount_sat = 0;
-            self.state.toast = Some(if paid_from_wallet {
-                "Custom Lightning address registered and paid.".to_string()
-            } else {
-                "Custom Lightning address registered.".to_string()
-            });
-            self.request_haptic(HapticFeedback::NotificationSuccess);
-        } else {
-            self.state.lightning_address.registration_phase =
-                LightningAddressRegistrationPhase::AwaitingPayment;
-            self.state.lightning_address.registration_status_text = if paid {
-                "Payment received".to_string()
-            } else {
-                "Awaiting payment".to_string()
-            };
-            self.state.lightning_address.registration_error = warning.clone();
-            if let Some(warning) = warning {
-                self.state.toast = Some(warning);
-                self.request_haptic(HapticFeedback::NotificationWarning);
-            }
-        }
-
-        self.save_app_data();
-        self.sync_wallet();
     }
 
     fn refresh_price(&self) {
@@ -1841,993 +1258,6 @@ impl AppCore {
                     ))));
                 }
             }
-        });
-    }
-
-    fn pay_destination(&mut self) {
-        let destination = self.state.send.destination.trim().to_string();
-        if destination.is_empty() {
-            self.state.toast = Some("Enter a destination first.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        }
-        let total_cost_sat = self
-            .state
-            .send
-            .total_cost_sat
-            .unwrap_or(self.state.send.amount_sat);
-        if total_cost_sat > self.state.wallet.balance_sat {
-            self.state.toast = Some("Insufficient balance for this send.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        }
-        if self.state.send.zap_enabled {
-            self.request_haptic(HapticFeedback::ImpactMedium);
-            self.pay_zap_destination(destination, self.state.send.amount_sat);
-        } else if is_lnurl_pay_destination(&destination) {
-            self.request_haptic(HapticFeedback::ImpactMedium);
-            self.pay_lnurl_destination(destination, self.state.send.amount_sat);
-        } else {
-            match self.state.send.destination_kind {
-                SendDestinationKind::Lightning => {
-                    self.request_haptic(HapticFeedback::ImpactMedium);
-                    if let Some(offer) = parsed_offer(&destination) {
-                        self.pay_lightning_offer(offer, self.state.send.amount_sat);
-                    } else {
-                        let invoice = destination
-                            .strip_prefix("lightning:")
-                            .or_else(|| destination.strip_prefix("LIGHTNING:"))
-                            .unwrap_or(&destination)
-                            .to_string();
-                        self.pay_lightning_invoice(invoice, Some(self.state.send.amount_sat));
-                    }
-                }
-                SendDestinationKind::OnChain => {
-                    self.request_haptic(HapticFeedback::ImpactMedium);
-                    self.pay_onchain_address(destination, self.state.send.amount_sat);
-                }
-                SendDestinationKind::Ark => {
-                    self.request_haptic(HapticFeedback::ImpactMedium);
-                    self.pay_ark_address(destination, self.state.send.amount_sat);
-                }
-                SendDestinationKind::Unknown => {
-                    self.state.toast = Some("Enter a valid payment destination.".to_string());
-                    self.request_haptic(HapticFeedback::NotificationWarning);
-                }
-            }
-        }
-    }
-
-    fn set_send_destination(&mut self, destination: String) {
-        let raw = destination.trim().to_string();
-        if raw.is_empty() {
-            self.reset_send_draft();
-            return;
-        }
-
-        let was_amount_locked = self.state.send.amount_locked;
-        let parsed = self
-            .wallet
-            .clone()
-            .and_then(|wallet| self.rt.block_on(parse_send_destination(wallet, &raw)));
-        if let Some(parsed) = parsed {
-            self.state.send.destination = parsed.destination;
-            if let Some(amount_sat) = parsed.amount_sat {
-                self.state.send.amount_sat = amount_sat;
-                self.state.send.amount_locked = true;
-            } else {
-                if was_amount_locked {
-                    self.state.send.amount_sat = 0;
-                }
-                self.state.send.amount_locked = false;
-            }
-            if let Some(memo) = parsed.memo.filter(|m| !m.trim().is_empty()) {
-                self.state.send.memo = memo;
-            }
-            if let Some(toast) = parsed.toast {
-                self.state.toast = Some(toast);
-            }
-        } else {
-            self.state.send.destination = raw.clone();
-            if let Some(amount_sat) = embedded_send_amount_sat(&raw) {
-                self.state.send.amount_sat = amount_sat;
-                self.state.send.amount_locked = true;
-            } else {
-                if was_amount_locked {
-                    self.state.send.amount_sat = 0;
-                }
-                self.state.send.amount_locked = false;
-            }
-        }
-        self.state.send.search_query = raw;
-        self.state.send.phase = SendPhase::Editing;
-        self.request_send_fee_estimate();
-    }
-
-    fn select_send_contact(&mut self, contact_id: String) {
-        if !self
-            .state
-            .nostr
-            .contacts
-            .iter()
-            .any(|contact| contact.id == contact_id)
-        {
-            if let Some(contact) = self
-                .state
-                .send
-                .search_results
-                .iter()
-                .find(|contact| contact.id == contact_id)
-                .cloned()
-            {
-                self.state.nostr.contacts.push(contact);
-                self.sort_contacts();
-                self.save_app_data();
-            }
-        }
-
-        let Some(contact) = self
-            .state
-            .nostr
-            .contacts
-            .iter_mut()
-            .find(|contact| contact.id == contact_id)
-        else {
-            self.state.toast = Some("Contact not found.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        };
-
-        let destination = if !contact.lightning_address.trim().is_empty() {
-            contact.lightning_address.clone()
-        } else {
-            contact.lnurl.clone()
-        };
-
-        if destination.trim().is_empty() {
-            self.state.toast = Some("This contact does not have a Lightning address.".to_string());
-            self.request_haptic(HapticFeedback::NotificationWarning);
-            return;
-        }
-
-        contact.last_used = now_unix();
-        self.state.send.selected_contact_id = Some(contact.id.clone());
-        self.state.send.zap_enabled = false;
-        self.state.send.zap_available = public_key_from_npub_or_hex(&contact.npub).is_ok();
-        self.save_app_data();
-        self.request_haptic(HapticFeedback::ImpactLight);
-        self.set_send_destination(destination);
-    }
-
-    fn reset_send_draft(&mut self) {
-        self.state.send.destination.clear();
-        self.state.send.search_query.clear();
-        self.state.send.global_search_results.clear();
-        self.state.send.selected_contact_id = None;
-        self.state.send.zap_enabled = false;
-        self.state.send.zap_available = false;
-        self.state.send.amount_sat = 0;
-        self.state.send.amount_locked = false;
-        self.state.send.memo.clear();
-        self.state.send.last_result = None;
-        self.state.send.phase = SendPhase::Drafting;
-        self.clear_send_fee_estimate();
-    }
-
-    fn request_send_fee_estimate(&mut self) {
-        self.send_fee_estimate_request_id = self.send_fee_estimate_request_id.saturating_add(1);
-
-        let destination = self.state.send.destination.trim().to_string();
-        if destination.is_empty() {
-            self.clear_send_fee_estimate();
-            return;
-        }
-
-        let amount_sat = self.state.send.amount_sat;
-        let Some((estimate_amount_sat, kind)) = send_fee_estimate_request(&destination, amount_sat)
-        else {
-            self.clear_send_fee_estimate();
-            return;
-        };
-
-        self.state.send.estimating_fee = true;
-        let tx = self.tx.clone();
-        let request_id = self.send_fee_estimate_request_id;
-        self.rt.spawn(async move {
-            tokio::time::sleep(SEND_FEE_ESTIMATE_DEBOUNCE).await;
-            let _ = tx.send(CoreMsg::Async(AsyncMsg::SendFeeEstimateDue {
-                request_id,
-                destination,
-                amount_sat,
-                estimate_amount_sat,
-                kind,
-            }));
-        });
-    }
-
-    fn perform_send_fee_estimate(
-        &mut self,
-        request_id: u64,
-        destination: String,
-        amount_sat: u64,
-        estimate_amount_sat: u64,
-        kind: SendDestinationKind,
-    ) {
-        let Some(wallet) = self.wallet.clone() else {
-            self.clear_send_fee_estimate();
-            return;
-        };
-
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let estimate_amount = Amount::from_sat(estimate_amount_sat);
-            let result = match kind {
-                SendDestinationKind::Lightning => {
-                    wallet.estimate_lightning_send_fee(estimate_amount).await
-                }
-                SendDestinationKind::Ark => {
-                    wallet.estimate_arkoor_payment_fee(estimate_amount).await
-                }
-                SendDestinationKind::OnChain => {
-                    match checked_bitcoin_address(&wallet, &destination).await {
-                        Ok(address) => {
-                            wallet
-                                .estimate_send_onchain(&address, estimate_amount)
-                                .await
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                SendDestinationKind::Unknown => Err(anyhow::anyhow!("invalid payment destination")),
-            };
-            let msg = match result {
-                Ok(estimate) => AsyncMsg::SendFeeEstimated {
-                    request_id,
-                    destination,
-                    amount_sat,
-                    fee_sat: estimate.fee.to_sat(),
-                    total_sat: estimate.gross_amount.to_sat(),
-                },
-                Err(e) => AsyncMsg::SendFeeEstimateFailed {
-                    request_id,
-                    destination,
-                    amount_sat,
-                    error: format!("{e:#}"),
-                },
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn clear_send_fee_estimate(&mut self) {
-        self.send_fee_estimate_request_id = self.send_fee_estimate_request_id.saturating_add(1);
-        self.state.send.estimating_fee = false;
-        self.state.send.fee_estimate_sat = None;
-        self.state.send.total_cost_sat = None;
-        self.state.send.fee_estimate_error = None;
-    }
-
-    fn send_fee_estimate_is_current(
-        &self,
-        request_id: u64,
-        destination: &str,
-        amount_sat: u64,
-    ) -> bool {
-        self.send_fee_estimate_request_id == request_id
-            && self.state.send.destination.trim() == destination
-            && self.state.send.amount_sat == amount_sat
-    }
-
-    fn clear_send_contact_selection(&mut self) {
-        self.state.send.selected_contact_id = None;
-        self.state.send.zap_enabled = false;
-        self.state.send.zap_available = false;
-    }
-
-    fn selected_send_contact(&self) -> Option<Contact> {
-        let contact_id = self.state.send.selected_contact_id.as_ref()?;
-        self.state
-            .nostr
-            .contacts
-            .iter()
-            .find(|contact| &contact.id == contact_id)
-            .cloned()
-    }
-
-    fn payment_annotation(
-        &self,
-        destination: String,
-        invoice: Option<String>,
-        amount_sat: i64,
-        zap: bool,
-    ) -> Option<PaymentAnnotation> {
-        let contact_id = self.state.send.selected_contact_id.clone()?;
-        Some(PaymentAnnotation {
-            contact_id: Some(contact_id),
-            destination,
-            invoice,
-            payment_hash: None,
-            amount_sat,
-            outbound: amount_sat < 0,
-            zap,
-            created_at: now_unix(),
-        })
-    }
-
-    fn upsert_payment_annotation(&mut self, annotation: PaymentAnnotation) {
-        let duplicate = self.payment_annotations.iter().any(|existing| {
-            existing.payment_hash.is_some() && existing.payment_hash == annotation.payment_hash
-                || existing.invoice.is_some() && existing.invoice == annotation.invoice
-        });
-        if !duplicate {
-            self.payment_annotations.push(annotation);
-        }
-    }
-
-    fn scan_zap_receipts(&self) {
-        let keys = match self.nostr_keys() {
-            Ok(keys) => keys,
-            Err(_) => return,
-        };
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let Ok(receipts) = fetch_received_zap_receipts(keys.public_key()).await else {
-                return;
-            };
-            let pubkeys = receipts
-                .iter()
-                .filter_map(|receipt| NostrPublicKey::from_hex(&receipt.sender_pubkey).ok())
-                .collect::<Vec<_>>();
-            let records = primal_profile_contacts(pubkeys, false)
-                .await
-                .unwrap_or_default();
-            let _ = tx.send(CoreMsg::Async(AsyncMsg::ZapReceiptsLoaded {
-                receipts,
-                records,
-            }));
-        });
-    }
-
-    fn request_capability(&mut self, kind: CapabilityRequestKind) {
-        self.next_capability_id += 1;
-        self.state.capability_request = Some(CapabilityRequest {
-            id: self.next_capability_id,
-            kind,
-        });
-        self.request_haptic(HapticFeedback::ImpactLight);
-    }
-
-    fn cache_fetched_profile_contacts(
-        &mut self,
-        records: Vec<FetchedProfileContact>,
-    ) -> Vec<Contact> {
-        records
-            .into_iter()
-            .map(|record| self.cache_fetched_profile_contact(record))
-            .collect()
-    }
-
-    /// Saves fetched profile metadata and returns a render-ready contact.
-    ///
-    /// This is the only actor path that should turn fetched profile metadata
-    /// into UI contact state. It preserves the remote URL in SQLite and swaps
-    /// the render URL to a cached `file://` pfp when the cache is current.
-    fn cache_fetched_profile_contact(&mut self, record: FetchedProfileContact) -> Contact {
-        let mut contact = record.contact;
-        let cached = self
-            .profile_db
-            .as_ref()
-            .and_then(|conn| load_profile(conn, &record.pubkey_hex).ok().flatten());
-        let cached_file_url = cached
-            .as_ref()
-            .filter(|entry| {
-                !record.picture_remote_url.is_empty()
-                    && entry.picture_cached_url == record.picture_remote_url
-            })
-            .and_then(|_| profile_picture_file_url(&self.cache_dir, &record.pubkey_hex));
-
-        if let Some(file_url) = cached_file_url {
-            contact.picture = file_url;
-        } else if !record.picture_remote_url.is_empty() {
-            contact.picture = record.picture_remote_url.clone();
-        }
-
-        if let Some(conn) = self.profile_db.as_ref() {
-            let previous = cached.unwrap_or_else(|| ProfileCacheEntry {
-                pubkey: record.pubkey_hex.clone(),
-                metadata_json: "{}".to_string(),
-                name: String::new(),
-                picture_remote_url: String::new(),
-                picture_cached_url: String::new(),
-                picture_cached_at: 0,
-                lightning_address: String::new(),
-                lnurl: String::new(),
-                event_created_at: 0,
-            });
-            let same_remote = previous.picture_remote_url == record.picture_remote_url;
-            let entry = ProfileCacheEntry {
-                pubkey: record.pubkey_hex,
-                metadata_json: record.metadata_json,
-                name: contact.name.clone(),
-                picture_remote_url: record.picture_remote_url.clone(),
-                picture_cached_url: if same_remote {
-                    previous.picture_cached_url
-                } else {
-                    String::new()
-                },
-                picture_cached_at: if same_remote {
-                    previous.picture_cached_at
-                } else {
-                    0
-                },
-                lightning_address: contact.lightning_address.clone(),
-                lnurl: contact.lnurl.clone(),
-                event_created_at: record.event_created_at,
-            };
-            let _ = save_profile(conn, &entry);
-        }
-
-        contact
-    }
-
-    fn prefetch_profile_pictures(&mut self, contact_ids: Vec<String>) {
-        let contacts = contact_ids
-            .into_iter()
-            .filter_map(|contact_id| {
-                self.state
-                    .send
-                    .search_results
-                    .iter()
-                    .chain(self.state.send.global_search_results.iter())
-                    .chain(self.state.nostr.contacts.iter())
-                    .find(|contact| contact.id == contact_id)
-                    .cloned()
-            })
-            .collect();
-        self.prefetch_profile_pictures_for_contacts(contacts);
-    }
-
-    fn prefetch_activity_profile_pictures(&mut self) {
-        let mut contacts = Vec::new();
-        for contact in self
-            .state
-            .activity
-            .iter()
-            .filter_map(|item| item.counterparty.clone())
-        {
-            if !contacts
-                .iter()
-                .any(|existing: &Contact| existing.npub == contact.npub)
-            {
-                contacts.push(contact);
-            }
-        }
-        self.prefetch_profile_pictures_for_contacts(contacts);
-    }
-
-    fn refresh_cached_contact_profiles_on_startup(&mut self) {
-        let contacts = self.state.nostr.contacts.clone();
-        self.prefetch_profile_pictures_for_contacts(contacts.clone());
-        let pubkeys = contacts
-            .into_iter()
-            .filter_map(|contact| public_key_from_npub_or_hex(&contact.npub).ok())
-            .filter(|pubkey| self.profile_info_requests.insert(pubkey.to_hex()))
-            .collect();
-        self.spawn_primal_profile_prefetch(pubkeys);
-    }
-
-    fn prefetch_profile_pictures_for_contacts(&mut self, contacts: Vec<Contact>) {
-        let mut missing_profile_pubkeys = Vec::new();
-        for contact in contacts {
-            let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-                continue;
-            };
-            let pubkey_hex = pubkey.to_hex();
-            if !self.prefetch_profile_picture_for_pubkey(&pubkey_hex, &contact.picture) {
-                if self.profile_info_requests.insert(pubkey_hex.clone()) {
-                    missing_profile_pubkeys.push(pubkey);
-                }
-            }
-        }
-
-        self.spawn_primal_profile_prefetch(missing_profile_pubkeys);
-    }
-
-    /// Ensures a profile picture flows through the Rust disk cache instead of
-    /// leaving views to fetch remote pfp URLs directly.
-    ///
-    /// Returns `false` when no remote URL is known yet; callers that have a
-    /// pubkey can then fetch profile metadata and retry through this function.
-    fn prefetch_profile_picture_for_pubkey(&mut self, pubkey_hex: &str, picture: &str) -> bool {
-        let mut remote_url = picture.to_string();
-        if remote_url.starts_with("file://") {
-            return true;
-        }
-        if remote_url.trim().is_empty() {
-            remote_url = self
-                .profile_db
-                .as_ref()
-                .and_then(|conn| load_profile(conn, pubkey_hex).ok().flatten())
-                .map(|entry| entry.picture_remote_url)
-                .unwrap_or_default();
-        }
-
-        if remote_url.trim().is_empty() {
-            return false;
-        }
-
-        let cached_file_url = self
-            .profile_db
-            .as_ref()
-            .and_then(|conn| load_profile(conn, pubkey_hex).ok().flatten())
-            .filter(|entry| entry.picture_cached_url == remote_url)
-            .and_then(|_| profile_picture_file_url(&self.cache_dir, pubkey_hex));
-        if cached_file_url.is_some() {
-            self.refresh_contact_picture_for_pubkey(pubkey_hex);
-            self.refresh_own_profile_picture_for_pubkey(pubkey_hex);
-            return true;
-        }
-
-        self.spawn_profile_picture_download(pubkey_hex.to_string(), remote_url);
-        true
-    }
-
-    fn spawn_primal_profile_prefetch(&self, pubkeys: Vec<NostrPublicKey>) {
-        if pubkeys.is_empty() {
-            return;
-        }
-
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let pubkey_hexes = pubkeys.iter().map(|key| key.to_hex()).collect::<Vec<_>>();
-            match primal_profile_contacts(pubkeys, true).await {
-                Ok(records) => {
-                    let _ = tx.send(CoreMsg::Async(AsyncMsg::PrimalProfilesLoaded { records }));
-                }
-                Err(_) => {
-                    let _ = tx.send(CoreMsg::Async(AsyncMsg::PrimalProfilesFailed {
-                        pubkeys: pubkey_hexes,
-                    }));
-                }
-            }
-        });
-    }
-
-    fn spawn_profile_picture_download(&mut self, pubkey: String, remote_url: String) {
-        if remote_url.trim().is_empty() {
-            return;
-        }
-        let Some(scheme) = remote_url.split(':').next().map(|s| s.to_ascii_lowercase()) else {
-            return;
-        };
-        if scheme != "https" && scheme != "http" {
-            return;
-        }
-
-        let download_key = profile_picture_download_key(&pubkey, &remote_url);
-        if !self.profile_picture_downloads.insert(download_key) {
-            return;
-        }
-
-        let tx = self.tx.clone();
-        let cache_dir = self.cache_dir.clone();
-        let semaphore = self.profile_picture_download_semaphore.clone();
-        self.rt.spawn(async move {
-            let client = reqwest::Client::new();
-            let failed_pubkey = pubkey.clone();
-            let failed_remote_url = remote_url.clone();
-            match download_profile_picture(client, cache_dir, pubkey, remote_url, semaphore).await {
-                Ok((pubkey, remote_url)) => {
-                    let _ = tx.send(CoreMsg::Async(AsyncMsg::ProfilePictureCached {
-                        pubkey,
-                        remote_url,
-                    }));
-                }
-                Err(err) => {
-                    let _ = err;
-                    let _ = tx.send(CoreMsg::Async(AsyncMsg::ProfilePictureCacheFailed {
-                        pubkey: failed_pubkey,
-                        remote_url: failed_remote_url,
-                    }));
-                }
-            }
-        });
-    }
-
-    fn refresh_contact_picture_for_pubkey(&mut self, pubkey: &str) {
-        let Some(file_url) = profile_picture_file_url(&self.cache_dir, pubkey) else {
-            return;
-        };
-        for contact in &mut self.state.nostr.contacts {
-            let Ok(contact_pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-                continue;
-            };
-            if contact_pubkey.to_hex() == pubkey {
-                contact.picture = file_url.clone();
-            }
-        }
-        for contact in &mut self.state.send.global_search_results {
-            let Ok(contact_pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-                continue;
-            };
-            if contact_pubkey.to_hex() == pubkey {
-                contact.picture = file_url.clone();
-            }
-        }
-        self.save_app_data();
-    }
-
-    fn refresh_own_profile_picture_for_pubkey(&mut self, pubkey: &str) {
-        let Some(npub) = self.state.nostr.npub.as_deref() else {
-            return;
-        };
-        let Ok(own_pubkey) = public_key_from_npub_or_hex(npub) else {
-            return;
-        };
-        if own_pubkey.to_hex() != pubkey {
-            return;
-        }
-        let Some(file_url) = profile_picture_file_url(&self.cache_dir, pubkey) else {
-            return;
-        };
-        self.state.nostr.picture_display_url = file_url;
-        self.save_app_data();
-    }
-
-    fn refresh_activity_picture_for_pubkey(&mut self, pubkey: &str) {
-        let Some(file_url) = profile_picture_file_url(&self.cache_dir, pubkey) else {
-            return;
-        };
-        for item in &mut self.state.activity {
-            let Some(contact) = item.counterparty.as_mut() else {
-                continue;
-            };
-            let Ok(contact_pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-                continue;
-            };
-            if contact_pubkey.to_hex() == pubkey {
-                contact.picture = file_url.clone();
-            }
-        }
-    }
-
-    fn pay_lightning_invoice(&mut self, invoice: String, amount_sat: Option<u64>) {
-        if let Some(amount_sat) = amount_sat.filter(|amount| *amount > 0) {
-            if amount_sat > self.state.wallet.balance_sat {
-                self.state.toast =
-                    Some("Insufficient balance for this Lightning payment.".to_string());
-                return;
-            }
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let annotation = self.payment_annotation(
-            String::new(),
-            Some(invoice.clone()),
-            amount_sat.map(|amount| -(amount as i64)).unwrap_or(0),
-            false,
-        );
-        self.rt.spawn(async move {
-            let user_amount = amount_sat.filter(|a| *a > 0).map(Amount::from_sat);
-            let parsed = Bolt11Invoice::from_str(&invoice);
-            let msg = match parsed {
-                Ok(invoice) => {
-                    let annotation = annotation.map(|mut annotation| {
-                        annotation.payment_hash = Some(invoice.payment_hash().to_string());
-                        annotation
-                    });
-                    match wallet
-                        .pay_lightning_invoice(invoice, user_amount, true)
-                        .await
-                    {
-                        Ok(_) => AsyncMsg::Paid {
-                            result: "Lightning invoice paid.".to_string(),
-                            annotation,
-                        },
-                        Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
-                    }
-                }
-                Err(e) => AsyncMsg::Error(format!("Invalid Lightning invoice: {e}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn pay_lightning_offer(&mut self, offer: Offer, amount_sat: u64) {
-        let offer_text = offer.to_string();
-        let payment_amount_sat = if amount_sat > 0 {
-            Some(amount_sat)
-        } else {
-            offer_amount_sat(&offer)
-        };
-        if payment_amount_sat.is_none() {
-            self.state.toast =
-                Some("Enter an amount before sending to this Lightning offer.".to_string());
-            return;
-        }
-        if let Some(amount_sat) = payment_amount_sat {
-            if amount_sat > self.state.wallet.balance_sat {
-                self.state.toast =
-                    Some("Insufficient balance for this Lightning payment.".to_string());
-                return;
-            }
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let user_amount = (amount_sat > 0).then_some(Amount::from_sat(amount_sat));
-        let annotation = self.payment_annotation(
-            offer_text,
-            None,
-            payment_amount_sat
-                .map(|amount| -(amount as i64))
-                .unwrap_or(0),
-            false,
-        );
-        self.rt.spawn(async move {
-            let msg = match wallet.pay_lightning_offer(offer, user_amount, true).await {
-                Ok(invoice) => AsyncMsg::Paid {
-                    result: "Lightning offer paid.".to_string(),
-                    annotation: annotation.map(|mut annotation| {
-                        annotation.invoice = Some(invoice.to_string());
-                        annotation.payment_hash = Some(invoice.payment_hash().to_string());
-                        annotation
-                    }),
-                },
-                Err(e) => AsyncMsg::Error(format!("Lightning offer payment failed: {e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn pay_lnurl_destination(&mut self, destination: String, amount_sat: u64) {
-        if amount_sat == 0 {
-            self.state.toast =
-                Some("Enter an amount before sending to this Lightning address.".to_string());
-            return;
-        }
-        if amount_sat > self.state.wallet.balance_sat {
-            self.state.toast = Some("Insufficient balance for this Lightning payment.".to_string());
-            return;
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let annotation =
-            self.payment_annotation(destination.clone(), None, -(amount_sat as i64), false);
-        self.rt.spawn(async move {
-            let msg = match resolve_lnurl_pay_invoice(&destination, amount_sat).await {
-                Ok(invoice) => match Bolt11Invoice::from_str(&invoice) {
-                    Ok(invoice) => match amount_sat.checked_mul(1_000) {
-                        Some(requested_msat) => match invoice.amount_milli_satoshis() {
-                            Some(invoice_msat) if invoice_msat == requested_msat => {
-                                let invoice_text = invoice.to_string();
-                                let payment_hash = invoice.payment_hash().to_string();
-                                match wallet
-                                    .pay_lightning_invoice(
-                                        invoice,
-                                        Some(Amount::from_sat(amount_sat)),
-                                        true,
-                                    )
-                                    .await
-                                {
-                                    Ok(_) => AsyncMsg::Paid {
-                                        result: "Lightning address payment sent.".to_string(),
-                                        annotation: annotation.map(|mut annotation| {
-                                            annotation.invoice = Some(invoice_text);
-                                            annotation.payment_hash = Some(payment_hash);
-                                            annotation
-                                        }),
-                                    },
-                                    Err(e) => {
-                                        AsyncMsg::Error(format!("Lightning payment failed: {e:#}"))
-                                    }
-                                }
-                            }
-                            Some(invoice_msat) => AsyncMsg::Error(format!(
-                                "LNURL invoice amount mismatch: requested {} sats, got {} sats.",
-                                amount_sat,
-                                msats_to_display_sats(invoice_msat)
-                            )),
-                            None => AsyncMsg::Error(
-                                "LNURL invoice did not include an amount.".to_string(),
-                            ),
-                        },
-                        None => AsyncMsg::Error(
-                            "LNURL payment failed: send amount is too large.".to_string(),
-                        ),
-                    },
-                    Err(e) => AsyncMsg::Error(format!("Invalid LNURL invoice: {e}")),
-                },
-                Err(e) => AsyncMsg::Error(format!("LNURL payment failed: {e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn pay_zap_destination(&mut self, destination: String, amount_sat: u64) {
-        if amount_sat == 0 {
-            self.state.toast = Some("Enter an amount before sending a zap.".to_string());
-            return;
-        }
-        if amount_sat > self.state.wallet.balance_sat {
-            self.state.toast = Some("Insufficient balance for this zap.".to_string());
-            return;
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        let keys = match self.nostr_keys() {
-            Ok(keys) => keys,
-            Err(e) => {
-                self.state.toast = Some(format!("{e:#}"));
-                return;
-            }
-        };
-        let Some(contact) = self.selected_send_contact() else {
-            self.state.toast = Some("Select a zap-capable contact before zapping.".to_string());
-            return;
-        };
-        let recipient_pubkey = match public_key_from_npub_or_hex(&contact.npub) {
-            Ok(pubkey) => pubkey,
-            Err(e) => {
-                self.state.toast = Some(format!("Invalid contact Nostr key: {e:#}"));
-                return;
-            }
-        };
-
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let memo = self.state.send.memo.clone();
-        let annotation =
-            self.payment_annotation(destination.clone(), None, -(amount_sat as i64), true);
-        self.rt.spawn(async move {
-            let msg =
-                match request_zap_invoice(&destination, recipient_pubkey, amount_sat, &memo, &keys)
-                    .await
-                {
-                    Ok(invoice) => match Bolt11Invoice::from_str(&invoice) {
-                        Ok(invoice) => match amount_sat.checked_mul(1_000) {
-                            Some(requested_msat) => match invoice.amount_milli_satoshis() {
-                                Some(invoice_msat) if invoice_msat == requested_msat => {
-                                    let invoice_text = invoice.to_string();
-                                    let payment_hash = invoice.payment_hash().to_string();
-                                    match wallet
-                                        .pay_lightning_invoice(
-                                            invoice,
-                                            Some(Amount::from_sat(amount_sat)),
-                                            true,
-                                        )
-                                        .await
-                                    {
-                                        Ok(_) => AsyncMsg::Paid {
-                                            result: "Zap sent.".to_string(),
-                                            annotation: annotation.map(|mut annotation| {
-                                                annotation.invoice = Some(invoice_text);
-                                                annotation.payment_hash = Some(payment_hash);
-                                                annotation
-                                            }),
-                                        },
-                                        Err(e) => {
-                                            AsyncMsg::Error(format!("Zap payment failed: {e:#}"))
-                                        }
-                                    }
-                                }
-                                Some(invoice_msat) => AsyncMsg::Error(format!(
-                                    "Zap invoice amount mismatch: requested {} sats, got {} sats.",
-                                    amount_sat,
-                                    msats_to_display_sats(invoice_msat)
-                                )),
-                                None => AsyncMsg::Error(
-                                    "Zap invoice did not include an amount.".to_string(),
-                                ),
-                            },
-                            None => {
-                                AsyncMsg::Error("Zap failed: send amount is too large.".to_string())
-                            }
-                        },
-                        Err(e) => AsyncMsg::Error(format!("Invalid zap invoice: {e}")),
-                    },
-                    Err(e) => AsyncMsg::Error(format!("Zap failed: {e:#}")),
-                };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn pay_ark_address(&mut self, address: String, amount_sat: u64) {
-        if amount_sat == 0 {
-            self.state.toast = Some("Enter an amount before sending.".to_string());
-            return;
-        }
-        if amount_sat > self.state.wallet.balance_sat {
-            self.state.toast = Some("Insufficient balance for this Ark payment.".to_string());
-            return;
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let annotation =
-            self.payment_annotation(address.clone(), None, -(amount_sat as i64), false);
-        self.rt.spawn(async move {
-            let msg = match address.parse() {
-                Ok(address) => match wallet
-                    .send_arkoor_payment(&address, Amount::from_sat(amount_sat))
-                    .await
-                {
-                    Ok(_) => AsyncMsg::Paid {
-                        result: "Ark payment sent.".to_string(),
-                        annotation,
-                    },
-                    Err(e) => AsyncMsg::Error(format!("Ark payment failed: {e:#}")),
-                },
-                Err(e) => AsyncMsg::Error(format!("Invalid Ark address: {e}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
-        });
-    }
-
-    fn pay_onchain_address(&mut self, address: String, amount_sat: u64) {
-        if amount_sat == 0 {
-            self.state.toast = Some("Enter an amount before sending.".to_string());
-            return;
-        }
-        if amount_sat < 330 {
-            self.state.toast = Some("Amount too low to send.".to_string());
-            return;
-        }
-        if amount_sat > self.state.wallet.balance_sat {
-            self.state.toast = Some("Insufficient balance for this on-chain payment.".to_string());
-            return;
-        }
-        let Some(wallet) = self.wallet.clone() else {
-            self.state.toast = Some("Wallet is not ready yet.".to_string());
-            return;
-        };
-        self.state.busy.sending_payment = true;
-        self.state.send.phase = SendPhase::Sending;
-        self.state.send.last_result = None;
-        let tx = self.tx.clone();
-        let annotation =
-            self.payment_annotation(address.clone(), None, -(amount_sat as i64), false);
-        self.rt.spawn(async move {
-            let msg = match checked_bitcoin_address(&wallet, &address).await {
-                Ok(address) => match wallet
-                    .send_onchain(address, Amount::from_sat(amount_sat))
-                    .await
-                {
-                    Ok(_) => AsyncMsg::Paid {
-                        result: "On-chain payment sent.".to_string(),
-                        annotation,
-                    },
-                    Err(e) => AsyncMsg::Error(format!("On-chain payment failed: {e:#}")),
-                },
-                Err(e) => AsyncMsg::Error(format!("{e:#}")),
-            };
-            let _ = tx.send(CoreMsg::Async(msg));
         });
     }
 
@@ -3252,37 +1682,23 @@ impl AppCore {
                             .fetch_events(metadata_filter)
                             .timeout(Duration::from_secs(10))
                             .await?;
-                        for metadata_event in metadata_events.iter() {
-                            let npub = metadata_event.pubkey.to_bech32().unwrap();
-                            let Some(contact) = contacts.iter_mut().find(|c| c.npub == npub) else {
-                                continue;
-                            };
-                            let Ok(metadata) = Metadata::from_json(metadata_event.content.clone())
-                            else {
-                                continue;
-                            };
-                            contact.name = nostr_contact_display_name(
-                                metadata.display_name,
-                                metadata.name,
-                                Some(contact.name.clone()),
-                                &npub,
-                            );
-                            contact.picture = metadata
-                                .picture
-                                .map(|u| u.to_string())
-                                .unwrap_or_else(|| contact.picture.clone());
-                            contact.lightning_address = metadata
-                                .lud16
-                                .unwrap_or_else(|| contact.lightning_address.clone());
-                        }
                         let mut records = metadata_events
                             .iter()
                             .map(|event| {
-                                profile_contact_from_metadata_json(
+                                let npub = event
+                                    .pubkey
+                                    .to_bech32()
+                                    .unwrap_or_else(|_| event.pubkey.to_hex());
+                                let petname = contacts
+                                    .iter()
+                                    .find(|contact| contact.npub == npub)
+                                    .map(|contact| contact.name.clone());
+                                profile_contact_from_metadata_json_with_petname(
                                     event.pubkey,
                                     event.content.clone(),
                                     event.created_at.as_secs(),
                                     true,
+                                    petname,
                                 )
                             })
                             .collect::<Vec<_>>();
@@ -3465,535 +1881,6 @@ impl AppCore {
             let _ = tx.send(CoreMsg::Async(result));
         });
     }
-
-    fn load_app_data(&mut self) {
-        let Ok(raw) = std::fs::read_to_string(&self.app_data_path) else {
-            return;
-        };
-        match serde_json::from_str::<PersistedAppData>(&raw) {
-            Ok(data) => {
-                self.state.nostr = data.nostr;
-                self.hydrate_cached_profile_pictures();
-                self.sort_contacts();
-                self.state.receive.amount_sat = data.receive_amount_sat;
-                self.state.receive.memo = data.receive_memo;
-                self.state.wallet.network = data.network;
-                let server_config = ServerConfig::for_network(self.state.wallet.network.clone());
-                self.state.wallet.server_address = server_config.server_address;
-                self.state.wallet.esplora_address = server_config.esplora_address;
-                self.state.wallet.price_currency = data.price_currency.currency;
-                self.state.lightning_address.backing_ark_address = data
-                    .lightning_address_ark_address
-                    .filter(|address| !address.trim().is_empty());
-                self.state.lightning_address.custom_address = data
-                    .custom_lightning_address
-                    .filter(|address| !address.trim().is_empty());
-                self.state.lightning_address.custom_name = data.custom_lightning_address_name;
-                if let Some(pending) = data
-                    .pending_custom_lightning_address
-                    .filter(pending_custom_lightning_address_matches_name)
-                {
-                    self.state.lightning_address.custom_name = pending.name;
-                    self.state.lightning_address.backing_ark_address =
-                        Some(pending.ark_address.clone());
-                    self.state.lightning_address.registration_address =
-                        Some(pending.lightning_address);
-                    self.state.lightning_address.registration_invoice = Some(pending.invoice);
-                    self.state.lightning_address.registration_purchase_id =
-                        Some(pending.purchase_id);
-                    self.state.lightning_address.registration_amount_sat =
-                        amount_msats_to_sat(pending.amount_msats).unwrap_or(0);
-                    self.state.lightning_address.registration_phase =
-                        LightningAddressRegistrationPhase::AwaitingPayment;
-                    self.state.lightning_address.registration_status_text =
-                        "Awaiting payment".to_string();
-                } else if self
-                    .state
-                    .lightning_address
-                    .custom_address
-                    .as_ref()
-                    .is_some_and(|address| !address.trim().is_empty())
-                {
-                    self.state.lightning_address.registration_phase =
-                        LightningAddressRegistrationPhase::Active;
-                    self.state.lightning_address.registration_status_text = "Active".to_string();
-                }
-                self.payment_annotations = data.payment_annotations;
-                self.zap_receipts = data.zap_receipts;
-            }
-            Err(e) => {
-                self.state.toast = Some(format!("Could not load local app data: {e}"));
-            }
-        }
-    }
-
-    fn hydrate_cached_profile_pictures(&mut self) {
-        let cache_dir = self.cache_dir.clone();
-        let profile_db = self.profile_db.as_ref();
-        hydrate_own_profile_picture(profile_db, &cache_dir, &mut self.state.nostr);
-        for contact in &mut self.state.nostr.contacts {
-            hydrate_contact_picture(profile_db, &cache_dir, contact);
-        }
-        for contact in &mut self.state.send.global_search_results {
-            hydrate_contact_picture(profile_db, &cache_dir, contact);
-        }
-    }
-
-    fn sort_contacts(&mut self) {
-        sort_contacts_by_name_npub(&mut self.state.nostr.contacts);
-    }
-
-    fn save_app_data(&self) {
-        let mut nostr = self.state.nostr.clone();
-        sanitize_persisted_contact_pictures(self.profile_db.as_ref(), &mut nostr.contacts);
-        let data = PersistedAppData {
-            nostr,
-            receive_amount_sat: self.state.receive.amount_sat,
-            receive_memo: self.state.receive.memo.clone(),
-            network: self.state.wallet.network.clone(),
-            servers: ServerConfig::from_wallet(&self.state.wallet),
-            price_currency: PersistedPriceCurrency {
-                currency: self.state.wallet.price_currency.clone(),
-            },
-            lightning_address_ark_address: None,
-            custom_lightning_address: self.state.lightning_address.custom_address.clone(),
-            custom_lightning_address_name: self.state.lightning_address.custom_name.clone(),
-            pending_custom_lightning_address: self.pending_custom_lightning_address(),
-            payment_annotations: self.payment_annotations.clone(),
-            zap_receipts: self.zap_receipts.clone(),
-        };
-        if let Ok(raw) = serde_json::to_string_pretty(&data) {
-            let _ = std::fs::create_dir_all(&self.data_dir);
-            let _ = std::fs::write(&self.app_data_path, raw);
-        }
-    }
-
-    fn pending_custom_lightning_address(&self) -> Option<PendingCustomLightningAddress> {
-        if !matches!(
-            self.state.lightning_address.registration_phase,
-            LightningAddressRegistrationPhase::AwaitingPayment
-        ) {
-            return None;
-        }
-        let registration_address = self
-            .state
-            .lightning_address
-            .registration_address
-            .clone()
-            .filter(|address| !address.trim().is_empty())?;
-        if !lightning_address_matches_name(
-            &registration_address,
-            &self.state.lightning_address.custom_name,
-        ) {
-            return None;
-        }
-        Some(PendingCustomLightningAddress {
-            name: self.state.lightning_address.custom_name.clone(),
-            lightning_address: registration_address,
-            ark_address: self
-                .state
-                .lightning_address
-                .backing_ark_address
-                .clone()
-                .filter(|address| !address.trim().is_empty())?,
-            invoice: self
-                .state
-                .lightning_address
-                .registration_invoice
-                .clone()
-                .filter(|invoice| !invoice.trim().is_empty())?,
-            purchase_id: self
-                .state
-                .lightning_address
-                .registration_purchase_id
-                .clone()
-                .filter(|purchase_id| !purchase_id.trim().is_empty())?,
-            amount_msats: self
-                .state
-                .lightning_address
-                .registration_amount_sat
-                .checked_mul(1_000)?,
-        })
-    }
-}
-
-fn pending_custom_lightning_address_matches_name(pending: &PendingCustomLightningAddress) -> bool {
-    lightning_address_matches_name(&pending.lightning_address, &pending.name)
-}
-
-fn lightning_address_matches_name(address: &str, name: &str) -> bool {
-    address
-        .split_once('@')
-        .map(|(local_part, _)| local_part == name)
-        .unwrap_or(false)
-}
-
-fn hydrate_contact_picture(
-    profile_db: Option<&rusqlite::Connection>,
-    data_dir: &PathBuf,
-    contact: &mut Contact,
-) {
-    if contact.picture.starts_with("file://") {
-        contact.picture.clear();
-    }
-    let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-        return;
-    };
-    let pubkey_hex = pubkey.to_hex();
-    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
-    else {
-        return;
-    };
-    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
-    {
-        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
-            contact.picture = file_url;
-            return;
-        }
-    }
-    if contact.picture.is_empty() {
-        contact.picture = entry.picture_remote_url;
-    }
-}
-
-fn hydrate_own_profile_picture(
-    profile_db: Option<&rusqlite::Connection>,
-    data_dir: &PathBuf,
-    nostr: &mut crate::NostrState,
-) {
-    if nostr.picture_display_url.starts_with("file://") {
-        nostr.picture_display_url.clear();
-    }
-    let Some(npub) = nostr.npub.as_deref() else {
-        return;
-    };
-    let Ok(pubkey) = public_key_from_npub_or_hex(npub) else {
-        return;
-    };
-    let pubkey_hex = pubkey.to_hex();
-    let Some(entry) = profile_db.and_then(|conn| load_profile(conn, &pubkey_hex).ok().flatten())
-    else {
-        return;
-    };
-    if !entry.picture_remote_url.is_empty() && nostr.picture.is_empty() {
-        nostr.picture = entry.picture_remote_url.clone();
-    }
-    if !entry.picture_remote_url.is_empty() && entry.picture_cached_url == entry.picture_remote_url
-    {
-        if let Some(file_url) = profile_picture_file_url(data_dir, &pubkey_hex) {
-            nostr.picture_display_url = file_url;
-            return;
-        }
-    }
-    nostr.picture_display_url = nostr.picture.clone();
-}
-
-fn save_own_profile_picture_remote_url(
-    profile_db: Option<&rusqlite::Connection>,
-    pubkey_hex: &str,
-    nostr: &crate::NostrState,
-) {
-    let Some(conn) = profile_db else {
-        return;
-    };
-    let previous = load_profile(conn, pubkey_hex).ok().flatten();
-    let same_remote = previous
-        .as_ref()
-        .is_some_and(|entry| entry.picture_remote_url == nostr.picture);
-    let metadata_json = metadata_from_state(nostr)
-        .ok()
-        .and_then(|metadata| serde_json::to_string(&metadata).ok())
-        .unwrap_or_else(|| {
-            previous
-                .as_ref()
-                .map(|entry| entry.metadata_json.clone())
-                .unwrap_or_else(|| "{}".to_string())
-        });
-    let entry = ProfileCacheEntry {
-        pubkey: pubkey_hex.to_string(),
-        metadata_json,
-        name: nostr.name.clone(),
-        picture_remote_url: nostr.picture.clone(),
-        picture_cached_url: if same_remote {
-            previous
-                .as_ref()
-                .map(|entry| entry.picture_cached_url.clone())
-                .unwrap_or_default()
-        } else {
-            String::new()
-        },
-        picture_cached_at: if same_remote {
-            previous
-                .as_ref()
-                .map(|entry| entry.picture_cached_at)
-                .unwrap_or_default()
-        } else {
-            0
-        },
-        lightning_address: nostr.lud16.clone(),
-        lnurl: String::new(),
-        event_created_at: previous
-            .as_ref()
-            .map(|entry| entry.event_created_at)
-            .unwrap_or_default(),
-    };
-    let _ = save_profile(conn, &entry);
-}
-
-fn apply_activity_metadata(
-    activity: &mut [ActivityItem],
-    contacts: &[Contact],
-    annotations: &[PaymentAnnotation],
-    zap_receipts: &[ZapReceiptRecord],
-) {
-    for item in activity.iter_mut() {
-        if item.amount_sat < 0 {
-            if let Some(annotation) = annotations
-                .iter()
-                .find(|annotation| annotation_matches_activity(annotation, item))
-            {
-                if let Some(contact) = annotation
-                    .contact_id
-                    .as_ref()
-                    .and_then(|id| contacts.iter().find(|contact| &contact.id == id))
-                    .cloned()
-                {
-                    apply_activity_contact(item, contact);
-                }
-            }
-        }
-    }
-    apply_zap_receipts_to_activity(activity, contacts, zap_receipts);
-}
-
-fn apply_zap_receipts_to_activity(
-    activity: &mut [ActivityItem],
-    contacts: &[Contact],
-    zap_receipts: &[ZapReceiptRecord],
-) {
-    let assignments = zap_receipt_activity_assignments(zap_receipts, activity);
-    for (activity_index, receipt_index) in assignments {
-        let item = &mut activity[activity_index];
-        let receipt = &zap_receipts[receipt_index];
-        if let Some(contact) = contacts
-            .iter()
-            .find(|contact| contact_pubkey_hex(contact).as_deref() == Some(&receipt.sender_pubkey))
-            .cloned()
-        {
-            apply_activity_contact(item, contact);
-        }
-        if item.message_text.is_none() {
-            item.message_text = receipt.comment.clone();
-        }
-        item.method_display = "Zap".to_string();
-        item.method_icon = "bolt.fill".to_string();
-    }
-}
-
-fn zap_receipt_activity_assignments(
-    receipts: &[ZapReceiptRecord],
-    activity: &[ActivityItem],
-) -> Vec<(usize, usize)> {
-    let mut candidates = activity
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| item.amount_sat > 0)
-        .flat_map(|(activity_index, item)| {
-            receipts
-                .iter()
-                .enumerate()
-                .filter_map(move |(receipt_index, receipt)| {
-                    Some((
-                        zap_receipt_match_score(receipt, item)?,
-                        activity_index,
-                        receipt_index,
-                    ))
-                })
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|(score, activity_index, receipt_index)| {
-        (*score, *activity_index, *receipt_index)
-    });
-
-    let mut used_activity = HashSet::new();
-    let mut used_receipts = HashSet::new();
-    let mut assignments = Vec::new();
-    for (_, activity_index, receipt_index) in candidates {
-        if used_activity.contains(&activity_index) || used_receipts.contains(&receipt_index) {
-            continue;
-        }
-        used_activity.insert(activity_index);
-        used_receipts.insert(receipt_index);
-        assignments.push((activity_index, receipt_index));
-    }
-    assignments
-}
-
-#[cfg(test)]
-fn best_zap_receipt_for_activity<'a>(
-    receipts: &'a [ZapReceiptRecord],
-    item: &ActivityItem,
-) -> Option<&'a ZapReceiptRecord> {
-    receipts
-        .iter()
-        .filter_map(|receipt| Some((zap_receipt_match_score(receipt, item)?, receipt)))
-        .min_by_key(|(score, _)| *score)
-        .map(|(_, receipt)| receipt)
-}
-
-fn annotation_matches_activity(annotation: &PaymentAnnotation, item: &ActivityItem) -> bool {
-    if annotation.outbound != (item.amount_sat < 0) {
-        return false;
-    }
-    if let (Some(a), Some(b)) = (&annotation.payment_hash, &item.lightning_payment_hash) {
-        if !a.is_empty() && a == b {
-            return true;
-        }
-    }
-    if let (Some(a), Some(b)) = (&annotation.invoice, &item.lightning_invoice) {
-        if !a.is_empty() && a == b {
-            return true;
-        }
-    }
-    if !annotation.destination.trim().is_empty() {
-        if item
-            .ark_address
-            .as_ref()
-            .is_some_and(|address| address == &annotation.destination)
-        {
-            return true;
-        }
-    }
-    annotation.amount_sat == item.amount_sat
-}
-
-fn zap_receipt_match_score(receipt: &ZapReceiptRecord, item: &ActivityItem) -> Option<(u8, u64)> {
-    if item.amount_sat <= 0 {
-        return None;
-    }
-    if let (Some(a), Some(b)) = (&receipt.payment_hash, &item.lightning_payment_hash) {
-        if !a.is_empty() && a == b {
-            return Some((0, 0));
-        }
-    }
-    if let (Some(a), Some(b)) = (&receipt.invoice, &item.lightning_invoice) {
-        if !a.is_empty() && a == b {
-            return Some((0, 0));
-        }
-    }
-    if !zap_receipt_amount_matches_activity(receipt, item) {
-        return None;
-    }
-    let is_lnurl_zap = receipt
-        .lnurl
-        .as_ref()
-        .is_some_and(|value| !value.is_empty());
-    if item.method_display == "Lightning address" && is_lnurl_zap {
-        return Some((2, u64::MAX.saturating_sub(receipt.created_at)));
-    }
-    None
-}
-
-fn zap_receipt_amount_matches_activity(receipt: &ZapReceiptRecord, item: &ActivityItem) -> bool {
-    receipt.amount_msat.is_some_and(|msat| {
-        let rounded_down = msat / 1_000;
-        let rounded_up = msat.saturating_add(999) / 1_000;
-        let activity_amounts = [
-            item.amount_sat.unsigned_abs(),
-            item.payment_amount_sat.unsigned_abs(),
-        ];
-        activity_amounts
-            .into_iter()
-            .any(|amount| amount == rounded_down || amount == rounded_up)
-    })
-}
-
-fn apply_activity_contact(item: &mut ActivityItem, contact: Contact) {
-    let name = if contact.name.trim().is_empty() {
-        "Unknown".to_string()
-    } else {
-        contact.name.clone()
-    };
-    if item.amount_sat >= 0 {
-        item.display_primary_name = name;
-        item.display_secondary_name = "you".to_string();
-    } else {
-        item.display_primary_name = "You".to_string();
-        item.display_secondary_name = name;
-    }
-    item.counterparty = Some(contact);
-}
-
-fn contact_pubkey_hex(contact: &Contact) -> Option<String> {
-    public_key_from_npub_or_hex(&contact.npub)
-        .ok()
-        .map(|pubkey| pubkey.to_hex())
-}
-
-fn sanitize_persisted_contact_pictures(
-    profile_db: Option<&rusqlite::Connection>,
-    contacts: &mut [Contact],
-) {
-    for contact in contacts {
-        if !contact.picture.starts_with("file://") {
-            continue;
-        }
-        let Ok(pubkey) = public_key_from_npub_or_hex(&contact.npub) else {
-            contact.picture.clear();
-            continue;
-        };
-        contact.picture = profile_db
-            .and_then(|conn| load_profile(conn, &pubkey.to_hex()).ok().flatten())
-            .map(|entry| entry.picture_remote_url)
-            .unwrap_or_default();
-    }
-}
-
-fn load_wallet_metadata_value(
-    data_dir: &PathBuf,
-    network: WalletNetwork,
-    key: &str,
-) -> Option<String> {
-    let db_path = data_dir.join(network.db_file_name());
-    let conn = rusqlite::Connection::open(db_path).ok()?;
-    ensure_wallet_metadata_table(&conn).ok()?;
-    conn.query_row(
-        "SELECT value FROM rebel_wallet_metadata WHERE key = ?1",
-        [key],
-        |row| row.get::<_, String>(0),
-    )
-    .ok()
-    .filter(|value| !value.trim().is_empty())
-}
-
-fn save_wallet_metadata_value(
-    data_dir: &PathBuf,
-    network: WalletNetwork,
-    key: &str,
-    value: &str,
-) -> rusqlite::Result<()> {
-    std::fs::create_dir_all(data_dir).ok();
-    let db_path = data_dir.join(network.db_file_name());
-    let conn = rusqlite::Connection::open(db_path)?;
-    ensure_wallet_metadata_table(&conn)?;
-    conn.execute(
-        "INSERT INTO rebel_wallet_metadata (key, value)
-         VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, value),
-    )?;
-    Ok(())
-}
-
-fn ensure_wallet_metadata_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS rebel_wallet_metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )",
-        [],
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -4002,7 +1889,15 @@ mod tests {
         Alphabet, FromBech32, Keys, SecretKey as NostrSecretKey, SingleLetterTag,
     };
 
-    use crate::ActivityIconKind;
+    use crate::activity::{
+        best_zap_receipt_for_activity, zap_receipt_activity_assignments, zap_receipt_match_score,
+    };
+    use crate::core::custom_address_flow::lightning_address_matches_name;
+    use crate::persistence::ServerConfig;
+    use crate::profile_cache::{load_profile, save_profile, ProfileCacheEntry};
+    use crate::wallet::{open_bark_wallet, WalletOpenMode};
+    use crate::zaps::fetch_received_zap_receipts;
+    use crate::{ActivityIconKind, ActivityItem, WalletNetwork};
 
     use super::*;
 
@@ -4407,6 +2302,14 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn e2e_matches_real_wallet_zap_receipts_to_activity() {
+        macro_rules! e2e_log {
+            ($($arg:tt)*) => {
+                if std::env::var_os("REBEL_WALLET_E2E_LOG").is_some() {
+                    println!($($arg)*);
+                }
+            };
+        }
+
         let expected_sender = NostrPublicKey::from_bech32(
             "nprofile1qqs8r0afe0uyzyx7v9lftyppkzxxj5j0e2ssx0laqc4t6zhzv4a6ynqjgyx99",
         )
@@ -4417,8 +2320,8 @@ mod tests {
         )
         .expect("wrong sender npub")
         .to_hex();
-        println!("expected_sender={expected_sender}");
-        println!("wrong_sender={wrong_sender}");
+        e2e_log!("expected_sender={expected_sender}");
+        e2e_log!("wrong_sender={wrong_sender}");
         let mnemonic = std::env::var("REBEL_WALLET_E2E_MNEMONIC")
             .expect("set REBEL_WALLET_E2E_MNEMONIC for this ignored test");
         let mnemonic = Mnemonic::from_str(&mnemonic).expect("valid mnemonic");
@@ -4434,7 +2337,7 @@ mod tests {
         wallet.sync().await;
 
         let keys = derive_nostr_keys_from_mnemonic(&mnemonic.to_string()).expect("nostr keys");
-        println!(
+        e2e_log!(
             "derived_npub={}",
             keys.public_key().to_bech32().expect("derived npub")
         );
@@ -4454,7 +2357,7 @@ mod tests {
             let reported_receipts = fetch_received_zap_receipts(reported_pubkey)
                 .await
                 .expect("fetch reported zap receipts");
-            println!("reported_pubkey_receipts={}", reported_receipts.len());
+            e2e_log!("reported_pubkey_receipts={}", reported_receipts.len());
             receipts.extend(reported_receipts);
         }
         let client = nostr_client().await.expect("nostr client");
@@ -4483,13 +2386,13 @@ mod tests {
                 .timeout(Duration::from_secs(10))
                 .await
                 .expect("raw zap fetch");
-            println!("{label} events={}", events.len());
+            e2e_log!("{label} events={}", events.len());
             for event in events
                 .into_iter()
                 .filter(|event| event.created_at.as_secs() > 1_780_000_000)
             {
                 let parsed = crate::zaps::zap_receipt_from_event(&event, &reported_pubkey);
-                println!(
+                e2e_log!(
                     "{label} recent id={} created_at={} parsed={}",
                     event.id,
                     event.created_at.as_secs(),
@@ -4510,7 +2413,7 @@ mod tests {
                     .first()
                     .map(|destination| destination.destination.value_string())
             });
-        println!("backing_ark_address={backing_ark_address:?}");
+        e2e_log!("backing_ark_address={backing_ark_address:?}");
         for movement in history.iter().filter(|movement| {
             crate::activity::is_user_visible_movement(movement)
                 && movement.effective_balance.to_sat() > 0
@@ -4518,7 +2421,7 @@ mod tests {
             let movement_hash = movement
                 .lightning_payment_hash()
                 .map(|hash| hash.to_string());
-            println!(
+            e2e_log!(
                 "movement id={} effective_sat={} completed_at={:?} updated_at={} movement_hash={:?} input_vtxos={} output_vtxos={}",
                 movement.id,
                 movement.effective_balance.to_sat(),
@@ -4534,7 +2437,7 @@ mod tests {
                 .chain(movement.input_vtxos.iter())
             {
                 let Ok(vtxo) = wallet.get_full_vtxo(*id).await else {
-                    println!("  vtxo id={id} unavailable");
+                    e2e_log!("  vtxo id={id} unavailable");
                     continue;
                 };
                 let policy_hash = match vtxo.policy() {
@@ -4554,7 +2457,7 @@ mod tests {
                     .filter_map(|element| Preimage::from_slice(&element).ok())
                     .map(|preimage| preimage.compute_payment_hash().to_string())
                     .collect::<Vec<_>>();
-                println!(
+                e2e_log!(
                     "  vtxo id={id} policy_hash={policy_hash:?} witness_hashes={witness_hashes:?}"
                 );
             }
@@ -4576,14 +2479,14 @@ mod tests {
             item.method_display = "Lightning address".to_string();
         }
 
-        println!("receipts={}", receipts.len());
+        e2e_log!("receipts={}", receipts.len());
         for receipt in receipts.iter().filter(|receipt| {
             receipt.created_at > 1_780_000_000
                 || receipt
                     .amount_msat
                     .is_some_and(|amount| amount == 1_000_000 || amount == 1_000)
         }) {
-            println!(
+            e2e_log!(
                 "receipt event={} created_at={} amount_msat={:?} lnurl={} hash={:?} sender={}",
                 receipt.event_id,
                 receipt.created_at,
@@ -4599,7 +2502,7 @@ mod tests {
         for item in activity.iter().filter(|item| item.amount_sat > 0) {
             let receipt = assignments
                 .iter()
-                .find(|(activity_index, _)| &activity[*activity_index].id == &item.id)
+                .find(|(activity_index, _)| activity[*activity_index].id == item.id)
                 .map(|(_, receipt_index)| &receipts[*receipt_index]);
             if receipt.is_some() {
                 matched += 1;
@@ -4610,7 +2513,7 @@ mod tests {
                 .collect::<Vec<_>>();
             candidates.sort_by_key(|(score, _)| *score);
             for (score, receipt) in candidates.iter().take(8) {
-                println!(
+                e2e_log!(
                     "  candidate score={score:?} event={} created_at={} amount_msat={:?} lnurl={} sender={}",
                     receipt.event_id,
                     receipt.created_at,
@@ -4619,7 +2522,7 @@ mod tests {
                     receipt.sender_pubkey
                 );
             }
-            println!(
+            e2e_log!(
                 "activity id={} completed_at_unix={} amount_sat={} payment_amount_sat={} method={} hash={:?} invoice_present={} matched_sender={:?}",
                 item.id,
                 item.completed_at_unix,
@@ -4632,7 +2535,7 @@ mod tests {
             );
         }
 
-        println!("matched_inbound_count={matched}");
+        e2e_log!("matched_inbound_count={matched}");
         let expected_match = assignments.iter().any(|(activity_index, receipt_index)| {
             let item = &activity[*activity_index];
             item.amount_sat > 0

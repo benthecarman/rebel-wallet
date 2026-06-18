@@ -27,6 +27,7 @@
 		8C969DF3CAF763FFE4B79252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EC33CB686ACF317A895B9BB7 /* Assets.xcassets */; };
 		A7A986D21CE49F9EC3ADCB18 /* BackupRestoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEE4097AE328C49061CF79C /* BackupRestoreViews.swift */; };
 		AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */; };
+		B5AAD623F82BE3B1BDB58880 /* DisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0F0724D7DE35C122B119C79 /* DisplayText.swift */; };
 		B757D13B7C830FB1E21C287A /* SendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5043C96A336BFDB3828A80 /* SendView.swift */; };
 		CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */; };
 		D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */; };
@@ -65,6 +66,7 @@
 		D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiveView.swift; sourceTree = "<group>"; };
 		EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileImageLoader.swift; sourceTree = "<group>"; };
 		EC33CB686ACF317A895B9BB7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F0F0724D7DE35C122B119C79 /* DisplayText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayText.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 				182BE8950E50F58DF4E9DFDB /* AppManager.swift */,
 				EC33CB686ACF317A895B9BB7 /* Assets.xcassets */,
 				08790D56E6532CF87DC5EAF5 /* ContentView.swift */,
+				F0F0724D7DE35C122B119C79 /* DisplayText.swift */,
 				7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */,
 				D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */,
 				07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */,
@@ -265,6 +268,7 @@
 				430B05A25E1EBA780E5F7A16 /* ContactDetailView.swift in Sources */,
 				EC041799A677360DB6FB8799 /* ContactsView.swift in Sources */,
 				11A29977382725FC272B253A /* ContentView.swift in Sources */,
+				B5AAD623F82BE3B1BDB58880 /* DisplayText.swift in Sources */,
 				737B461EAB6B2553322AF574 /* Haptics.swift in Sources */,
 				AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */,
 				77560E1840FC1750DD978DFF /* LightningAddressView.swift in Sources */,

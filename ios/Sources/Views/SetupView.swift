@@ -11,7 +11,7 @@ struct SetupView: View {
             VStack(spacing: 8) {
                 Text("Rebel Wallet")
                     .font(.largeTitle.bold())
-                Text("Ark and Lightning on Signet")
+                Text("Ark and Lightning in one wallet")
                     .font(.subheadline)
                     .foregroundStyle(mutedText)
             }

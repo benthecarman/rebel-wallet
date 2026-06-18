@@ -293,9 +293,5 @@ private struct LightningRegistrationInvoicePanel: View {
 }
 
 private func truncateLightningAddress(_ value: String) -> String {
-    let maxLength = 34
-    guard value.count > maxLength else { return value }
-    let prefixCount = 14
-    let suffixCount = maxLength - prefixCount - 3
-    return "\(value.prefix(prefixCount))...\(value.suffix(suffixCount))"
+    truncateMiddle(value, maxLength: 34, prefixCount: 14)
 }

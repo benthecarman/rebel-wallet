@@ -6,6 +6,7 @@ use crate::{
     ActivityItem, AppAction, AppState, NostrMessage, NostrState, PriceCurrency, SendDestinationKind,
 };
 
+#[allow(clippy::large_enum_variant)]
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppUpdate {
     FullState(AppState),
@@ -22,11 +23,13 @@ pub enum HapticFeedback {
     NotificationError,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum CoreMsg {
     Action(AppAction),
     Async(AsyncMsg),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum AsyncMsg {
     WalletReady {
         wallet: Wallet,

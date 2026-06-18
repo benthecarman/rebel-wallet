@@ -7,7 +7,7 @@ pub(crate) struct PersistedAppData {
     pub(crate) nostr: NostrState,
     pub(crate) receive_amount_sat: u64,
     pub(crate) receive_memo: String,
-    #[serde(default = "default_network")]
+    #[serde(default)]
     pub(crate) network: WalletNetwork,
     #[serde(default = "default_server_config")]
     pub(crate) servers: ServerConfig,
@@ -71,9 +71,9 @@ pub(crate) struct PersistedPriceCurrency {
     pub(crate) currency: PriceCurrency,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ServerConfig {
-    #[serde(default = "default_network")]
+    #[serde(default)]
     pub(crate) network: WalletNetwork,
     pub(crate) server_address: String,
     #[serde(skip)]
@@ -102,11 +102,7 @@ impl ServerConfig {
 }
 
 fn default_server_config() -> ServerConfig {
-    ServerConfig::for_network(WalletNetwork::Mainnet)
-}
-
-fn default_network() -> WalletNetwork {
-    WalletNetwork::Mainnet
+    ServerConfig::for_network(WalletNetwork::default())
 }
 
 fn default_price_currency() -> PersistedPriceCurrency {
@@ -177,5 +173,30 @@ mod tests {
         assert!(data.payment_annotations.is_empty());
         assert!(data.zap_receipts.is_empty());
         assert!(!data.nostr.deleted);
+    }
+
+    #[test]
+    fn app_data_defaults_network_and_servers_to_mainnet() {
+        let raw = r#"{
+            "nostr": {
+                "npub": null,
+                "name": "Rebel",
+                "about": "",
+                "picture": "",
+                "lud16": "",
+                "nip05": "",
+                "contacts": []
+            },
+            "receive_amount_sat": 0,
+            "receive_memo": "",
+            "price_currency": "BTC"
+        }"#;
+
+        let data: PersistedAppData = serde_json::from_str(raw).unwrap();
+        let mainnet = WalletNetwork::default();
+
+        assert_eq!(mainnet, WalletNetwork::Mainnet);
+        assert_eq!(data.network, mainnet);
+        assert_eq!(data.servers, ServerConfig::for_network(mainnet));
     }
 }

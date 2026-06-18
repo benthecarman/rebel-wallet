@@ -274,7 +274,7 @@ fn tag_values(event: &Event, kind: &str) -> Vec<String> {
     event
         .tags
         .iter()
-        .filter(|tag| tag.kind().to_string() == kind)
+        .filter(|tag| tag.kind() == kind)
         .filter_map(|tag| tag.content().map(str::to_string))
         .collect()
 }

@@ -222,7 +222,7 @@ async fn parse_json_response<T: for<'de> Deserialize<'de>>(
 }
 
 pub(crate) fn amount_msats_to_sat(amount_msats: u64) -> anyhow::Result<u64> {
-    if amount_msats % 1_000 != 0 {
+    if !amount_msats.is_multiple_of(1_000) {
         bail!("custom address fee must be denominated in whole sats");
     }
     Ok(amount_msats / 1_000)
