@@ -65,14 +65,6 @@ fn profile_picture_download_key(pubkey: &str, remote_url: &str) -> String {
     format!("{pubkey}:{remote_url}")
 }
 
-fn msats_to_display_sats(msats: u64) -> String {
-    if msats.is_multiple_of(1_000) {
-        (msats / 1_000).to_string()
-    } else {
-        format!("{:.3}", msats as f64 / 1_000.0)
-    }
-}
-
 fn send_screen_removed(previous: &[Screen], next: &[Screen]) -> bool {
     previous.iter().any(|screen| matches!(screen, Screen::Send))
         && !next.iter().any(|screen| matches!(screen, Screen::Send))
@@ -371,6 +363,12 @@ impl AppCore {
                 self.save_app_data();
             }
             AppAction::RegisterLightningAddress => self.register_lightning_address(),
+            AppAction::ConfirmLightningAddressRegistrationPayment => {
+                self.confirm_lightning_address_registration_payment()
+            }
+            AppAction::CancelLightningAddressRegistrationPayment => {
+                self.cancel_lightning_address_registration_payment()
+            }
             AppAction::VerifyLightningAddressRegistration => {
                 self.verify_lightning_address_registration()
             }
@@ -702,25 +700,32 @@ impl AppCore {
             AsyncMsg::LightningAddressRegistrationUpdated {
                 name,
                 lightning_address,
-                ark_address,
+                payment_ark_address,
                 invoice,
                 purchase_id,
                 amount_msats,
                 active,
                 paid,
                 paid_from_wallet,
+                requires_confirmation,
+                annotation,
                 warning,
             } => {
+                if let Some(annotation) = annotation {
+                    self.upsert_payment_annotation(annotation);
+                    self.save_app_data();
+                }
                 self.apply_lightning_address_registration_update(
                     name,
                     lightning_address,
-                    ark_address,
+                    payment_ark_address,
                     invoice,
                     purchase_id,
                     amount_msats,
                     active,
                     paid,
                     paid_from_wallet,
+                    requires_confirmation,
                     warning,
                 );
             }
@@ -945,6 +950,9 @@ impl AppCore {
                     } else {
                         "Ready".to_string()
                     };
+                    self.state
+                        .lightning_address
+                        .registration_requires_confirmation = false;
                     self.state.lightning_address.registration_error = Some(message.clone());
                 }
                 if matches!(self.state.setup, SetupState::NeedsSetup) {
@@ -1952,6 +1960,150 @@ mod tests {
     }
 
     #[test]
+    fn loading_active_custom_address_ignores_stale_draft_name() {
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let (tx, _rx) = flume::unbounded();
+        let mut core = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        core.state.lightning_address.custom_address =
+            Some("benthecarman@signet.arkzap.me".to_string());
+        core.state.lightning_address.custom_name = "benthecarman".to_string();
+        core.save_app_data();
+
+        let raw = std::fs::read_to_string(&core.app_data_path).expect("app data");
+        let mut json: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        json["custom_lightning_address_name"] = serde_json::Value::String("carman".to_string());
+        std::fs::write(
+            &core.app_data_path,
+            serde_json::to_string_pretty(&json).expect("json"),
+        )
+        .expect("write app data");
+
+        let (tx, _rx) = flume::unbounded();
+        let mut restored = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        restored.load_app_data();
+
+        assert_eq!(
+            restored.state.lightning_address.custom_address.as_deref(),
+            Some("benthecarman@signet.arkzap.me")
+        );
+        assert_eq!(restored.state.lightning_address.custom_name, "benthecarman");
+        assert_eq!(
+            restored.state.lightning_address.registration_phase,
+            LightningAddressRegistrationPhase::Active
+        );
+        assert!(restored
+            .state
+            .lightning_address
+            .registration_invoice
+            .is_none());
+    }
+
+    #[test]
+    fn canceling_custom_address_payment_discards_attempt_and_restores_active_name() {
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let (tx, _rx) = flume::unbounded();
+        let mut core = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        core.state.lightning_address.custom_address =
+            Some("benthecarman@signet.arkzap.me".to_string());
+        core.state.lightning_address.custom_name = "carman".to_string();
+        core.state.lightning_address.registration_address =
+            Some("carman@signet.arkzap.me".to_string());
+        core.state.lightning_address.backing_ark_address = Some("tark1example".to_string());
+        core.state.lightning_address.registration_invoice = Some("lnbc1invoice".to_string());
+        core.state.lightning_address.registration_purchase_id = Some("42".to_string());
+        core.state.lightning_address.registration_amount_sat = 1_000;
+        core.state
+            .lightning_address
+            .registration_requires_confirmation = true;
+        core.state.lightning_address.registration_phase =
+            LightningAddressRegistrationPhase::AwaitingPayment;
+
+        core.cancel_lightning_address_registration_payment();
+
+        assert_eq!(core.state.lightning_address.custom_name, "benthecarman");
+        assert_eq!(
+            core.state.lightning_address.registration_phase,
+            LightningAddressRegistrationPhase::Active
+        );
+        assert!(core.state.lightning_address.registration_invoice.is_none());
+        assert!(core.pending_custom_lightning_address().is_none());
+
+        let raw = std::fs::read_to_string(&core.app_data_path).expect("app data");
+        let json: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(
+            json["custom_lightning_address_name"].as_str(),
+            Some("benthecarman")
+        );
+        assert!(json["pending_custom_lightning_address"].is_null());
+    }
+
+    #[test]
+    fn custom_address_registration_payment_address_does_not_replace_backing_address() {
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let (tx, _rx) = flume::unbounded();
+        let mut core = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        core.state.lightning_address.backing_ark_address = Some("tark1backing".to_string());
+
+        core.apply_lightning_address_registration_update(
+            "alice".to_string(),
+            "alice@signet.arkzap.me".to_string(),
+            "tark1payment".to_string(),
+            Some("lnbc1invoice".to_string()),
+            Some("42".to_string()),
+            Some(1_000_000),
+            false,
+            false,
+            false,
+            true,
+            None,
+        );
+
+        assert_eq!(
+            core.state.lightning_address.backing_ark_address.as_deref(),
+            Some("tark1backing")
+        );
+        assert_eq!(
+            core.state
+                .lightning_address
+                .registration_payment_ark_address
+                .as_deref(),
+            Some("tark1payment")
+        );
+        let pending = core
+            .pending_custom_lightning_address()
+            .expect("pending registration");
+        assert_eq!(pending.ark_address, "tark1backing");
+        assert_eq!(pending.payment_ark_address.as_deref(), Some("tark1payment"));
+    }
+
+    #[test]
     fn import_nostr_secret_error_toast_does_not_echo_input() {
         let data_dir = tempfile::tempdir().expect("temp data dir");
         let cache_dir = tempfile::tempdir().expect("temp cache dir");
@@ -2593,6 +2745,7 @@ mod tests {
             display_primary_name: "Unknown".to_string(),
             display_verb: "sent".to_string(),
             display_secondary_name: "you".to_string(),
+            label: None,
             message_text: None,
             method_icon: "bolt.fill".to_string(),
             method_display: method_display.to_string(),

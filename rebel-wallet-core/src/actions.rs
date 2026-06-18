@@ -48,6 +48,8 @@ pub enum AppAction {
         name: String,
     },
     RegisterLightningAddress,
+    ConfirmLightningAddressRegistrationPayment,
+    CancelLightningAddressRegistrationPayment,
     VerifyLightningAddressRegistration,
     ClearLightningAddressRegistration,
     SetSendSearchQuery {

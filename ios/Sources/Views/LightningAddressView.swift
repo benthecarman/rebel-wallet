@@ -4,6 +4,7 @@ import UIKit
 struct LightningAddressView: View {
     @Bindable var manager: AppManager
     @Environment(\.walletAccent) private var walletAccent
+    @State private var showingPaymentConfirmation = false
 
     private var lightning: LightningAddressState {
         manager.state.lightningAddress
@@ -62,6 +63,22 @@ struct LightningAddressView: View {
         .navigationTitle("Lightning Address")
         .background(pageBackground)
         .foregroundStyle(primaryText)
+        .onAppear {
+            showingPaymentConfirmation = lightning.registrationRequiresConfirmation
+        }
+        .onChange(of: lightning.registrationRequiresConfirmation) { _, requiresConfirmation in
+            showingPaymentConfirmation = requiresConfirmation
+        }
+        .alert("Pay registration fee?", isPresented: $showingPaymentConfirmation) {
+            Button("Cancel", role: .cancel) {
+                manager.dispatch(.cancelLightningAddressRegistrationPayment)
+            }
+            Button("Pay") {
+                manager.dispatch(.confirmLightningAddressRegistrationPayment)
+            }
+        } message: {
+            Text(registrationConfirmationMessage)
+        }
     }
 
     private var currentAddressSection: some View {
@@ -186,6 +203,11 @@ struct LightningAddressView: View {
         }
         .buttonStyle(PrimaryButtonStyle(color: walletAccent))
         .disabled(!lightning.registrationCanSubmit)
+    }
+
+    private var registrationConfirmationMessage: String {
+        let address = lightning.registrationAddress ?? "\(lightning.customName)@\(domain)"
+        return "Pay \(lightning.registrationAmountDisplay) from your wallet to register \(address)."
     }
 
     private var registrationStatusRow: some View {

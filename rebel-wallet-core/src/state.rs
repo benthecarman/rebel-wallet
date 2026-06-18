@@ -250,10 +250,12 @@ pub struct LightningAddressState {
     pub registration_error: Option<String>,
     pub registration_name_error: Option<String>,
     pub registration_address: Option<String>,
+    pub registration_payment_ark_address: Option<String>,
     pub registration_invoice: Option<String>,
     pub registration_purchase_id: Option<String>,
     pub registration_amount_sat: u64,
     pub registration_amount_display: String,
+    pub registration_requires_confirmation: bool,
     pub registration_can_submit: bool,
     pub registration_can_check_status: bool,
 }
@@ -392,6 +394,7 @@ pub struct ActivityItem {
     pub display_primary_name: String,
     pub display_verb: String,
     pub display_secondary_name: String,
+    pub label: Option<String>,
     pub message_text: Option<String>,
     pub method_icon: String,
     pub method_display: String,
@@ -509,10 +512,12 @@ impl AppState {
                 registration_error: None,
                 registration_name_error: Some("Enter a custom name.".to_string()),
                 registration_address: None,
+                registration_payment_ark_address: None,
                 registration_invoice: None,
                 registration_purchase_id: None,
                 registration_amount_sat: 0,
                 registration_amount_display: format_sats(0),
+                registration_requires_confirmation: false,
                 registration_can_submit: false,
                 registration_can_check_status: false,
             },
@@ -627,7 +632,8 @@ impl AppState {
                 self.lightning_address.registration_phase,
                 LightningAddressRegistrationPhase::Registering
                     | LightningAddressRegistrationPhase::Verifying
-            );
+            )
+            && !self.lightning_address.registration_requires_confirmation;
         self.lightning_address.registration_can_check_status = self
             .lightning_address
             .registration_purchase_id
@@ -1042,6 +1048,7 @@ mod tests {
             display_primary_name: "You".to_string(),
             display_verb: "sent".to_string(),
             display_secondary_name: "Alice".to_string(),
+            label: None,
             message_text: None,
             method_icon: "bolt.fill".to_string(),
             method_display: "Lightning".to_string(),

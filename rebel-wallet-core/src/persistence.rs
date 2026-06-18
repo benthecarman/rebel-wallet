@@ -32,6 +32,8 @@ pub(crate) struct PendingCustomLightningAddress {
     pub(crate) name: String,
     pub(crate) lightning_address: String,
     pub(crate) ark_address: String,
+    #[serde(default)]
+    pub(crate) payment_ark_address: Option<String>,
     pub(crate) invoice: String,
     #[serde(alias = "payment_hash")]
     pub(crate) purchase_id: String,
@@ -41,6 +43,8 @@ pub(crate) struct PendingCustomLightningAddress {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct PaymentAnnotation {
     pub(crate) contact_id: Option<String>,
+    #[serde(default)]
+    pub(crate) label: Option<String>,
     pub(crate) destination: String,
     pub(crate) invoice: Option<String>,
     pub(crate) payment_hash: Option<String>,

@@ -382,6 +382,7 @@ impl AppCore {
         let contact_id = self.state.send.selected_contact_id.clone()?;
         Some(PaymentAnnotation {
             contact_id: Some(contact_id),
+            label: None,
             destination,
             invoice,
             payment_hash: None,

@@ -73,6 +73,10 @@ struct ActivityPreviewSheet: View {
         item.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var cleanedLabel: String {
+        item.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     private var counterpartyDisplay: String {
         if let counterparty = item.counterparty, !counterparty.name.isEmpty {
             return counterparty.name
@@ -113,6 +117,10 @@ struct ActivityPreviewSheet: View {
 
                 VStack(spacing: 0) {
                     ActivityPreviewLine(title: "Counterparty", value: counterpartyDisplay)
+                    if !cleanedLabel.isEmpty {
+                        SettingsDivider()
+                        ActivityPreviewLine(title: "Label", value: cleanedLabel)
+                    }
                     SettingsDivider()
                     ActivityPreviewLine(title: "Method", value: item.methodDisplay)
                     if !cleanedSubtitle.isEmpty {

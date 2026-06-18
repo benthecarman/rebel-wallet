@@ -4,7 +4,9 @@ use std::str::FromStr;
 use anyhow::Context;
 use bip39::Mnemonic;
 
-use super::custom_address_flow::pending_custom_lightning_address_matches_name;
+use super::custom_address_flow::{
+    lightning_address_local_part, pending_custom_lightning_address_matches_name,
+};
 use super::{AppCore, NOSTR_SECRET_KEY, WALLET_SEED_KEY};
 use crate::custom_address::amount_msats_to_sat;
 use crate::persistence::{PersistedAppData, PersistedPriceCurrency, ServerConfig};
@@ -180,15 +182,19 @@ impl AppCore {
                     .custom_lightning_address
                     .filter(|address| !address.trim().is_empty());
                 self.state.lightning_address.custom_name = data.custom_lightning_address_name;
-                if let Some(pending) = data
+                let pending_custom_lightning_address = data
                     .pending_custom_lightning_address
-                    .filter(pending_custom_lightning_address_matches_name)
-                {
+                    .filter(pending_custom_lightning_address_matches_name);
+                if let Some(pending) = pending_custom_lightning_address {
                     self.state.lightning_address.custom_name = pending.name;
                     self.state.lightning_address.backing_ark_address =
                         Some(pending.ark_address.clone());
                     self.state.lightning_address.registration_address =
                         Some(pending.lightning_address);
+                    self.state
+                        .lightning_address
+                        .registration_payment_ark_address =
+                        pending.payment_ark_address.or(Some(pending.ark_address));
                     self.state.lightning_address.registration_invoice = Some(pending.invoice);
                     self.state.lightning_address.registration_purchase_id =
                         Some(pending.purchase_id);
@@ -205,6 +211,7 @@ impl AppCore {
                     .as_ref()
                     .is_some_and(|address| !address.trim().is_empty())
                 {
+                    self.restore_active_custom_lightning_address_name();
                     self.state.lightning_address.registration_phase =
                         LightningAddressRegistrationPhase::Active;
                     self.state.lightning_address.registration_status_text = "Active".to_string();
@@ -237,6 +244,19 @@ impl AppCore {
     pub(super) fn save_app_data(&self) {
         let mut nostr = self.state.nostr.clone();
         sanitize_persisted_contact_pictures(self.profile_db.as_ref(), &mut nostr.contacts);
+        let pending_custom_lightning_address = self.pending_custom_lightning_address();
+        let custom_lightning_address_name = pending_custom_lightning_address
+            .as_ref()
+            .map(|pending| pending.name.clone())
+            .or_else(|| {
+                self.state
+                    .lightning_address
+                    .custom_address
+                    .as_deref()
+                    .and_then(lightning_address_local_part)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| self.state.lightning_address.custom_name.clone());
         let data = PersistedAppData {
             nostr,
             receive_amount_sat: self.state.receive.amount_sat,
@@ -248,8 +268,8 @@ impl AppCore {
             },
             lightning_address_ark_address: None,
             custom_lightning_address: self.state.lightning_address.custom_address.clone(),
-            custom_lightning_address_name: self.state.lightning_address.custom_name.clone(),
-            pending_custom_lightning_address: self.pending_custom_lightning_address(),
+            custom_lightning_address_name,
+            pending_custom_lightning_address,
             payment_annotations: self.payment_annotations.clone(),
             zap_receipts: self.zap_receipts.clone(),
         };

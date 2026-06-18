@@ -70,13 +70,15 @@ pub(crate) enum AsyncMsg {
     LightningAddressRegistrationUpdated {
         name: String,
         lightning_address: String,
-        ark_address: String,
+        payment_ark_address: String,
         invoice: Option<String>,
         purchase_id: Option<String>,
         amount_msats: Option<u64>,
         active: bool,
         paid: bool,
         paid_from_wallet: bool,
+        requires_confirmation: bool,
+        annotation: Option<crate::persistence::PaymentAnnotation>,
         warning: Option<String>,
     },
     SendFeeEstimateDue {

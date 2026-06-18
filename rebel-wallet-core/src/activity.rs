@@ -124,6 +124,7 @@ pub(crate) fn activity_from_movement(
         } else {
             display_counterparty
         },
+        label: None,
         message_text,
         method_icon,
         method_display,
@@ -245,6 +246,13 @@ pub(crate) fn apply_activity_metadata(
                     .cloned()
                 {
                     apply_activity_contact(item, contact);
+                } else if let Some(label) = annotation
+                    .label
+                    .as_deref()
+                    .filter(|label| !label.trim().is_empty())
+                    .filter(|_| annotation_has_specific_activity_match(annotation, item))
+                {
+                    apply_activity_label(item, label);
                 }
             }
         }
@@ -331,6 +339,16 @@ fn annotation_matches_activity(annotation: &PaymentAnnotation, item: &ActivityIt
     if annotation.outbound != (item.amount_sat < 0) {
         return false;
     }
+    if annotation_has_specific_activity_match(annotation, item) {
+        return true;
+    }
+    annotation.amount_sat == item.amount_sat
+}
+
+fn annotation_has_specific_activity_match(
+    annotation: &PaymentAnnotation,
+    item: &ActivityItem,
+) -> bool {
     if let (Some(a), Some(b)) = (&annotation.payment_hash, &item.lightning_payment_hash) {
         if !a.is_empty() && a == b {
             return true;
@@ -349,7 +367,7 @@ fn annotation_matches_activity(annotation: &PaymentAnnotation, item: &ActivityIt
     {
         return true;
     }
-    annotation.amount_sat == item.amount_sat
+    false
 }
 
 pub(crate) fn zap_receipt_match_score(
@@ -410,6 +428,21 @@ fn apply_activity_contact(item: &mut ActivityItem, contact: Contact) {
         item.display_secondary_name = name;
     }
     item.counterparty = Some(contact);
+}
+
+fn apply_activity_label(item: &mut ActivityItem, label: &str) {
+    let label = label.trim();
+    if label.is_empty() {
+        return;
+    }
+    if item.amount_sat >= 0 {
+        item.display_primary_name = label.to_string();
+        item.display_secondary_name = "you".to_string();
+    } else {
+        item.display_primary_name = "You".to_string();
+        item.display_secondary_name = label.to_string();
+    }
+    item.label = Some(label.to_string());
 }
 
 fn contact_pubkey_hex(contact: &Contact) -> Option<String> {
@@ -810,5 +843,48 @@ mod tests {
         assert_eq!(item.method_display, "Lightning address");
         assert_eq!(item.method_icon, "bolt.fill");
         assert_eq!(item.ark_address.as_deref(), Some(ARK_ADDR));
+    }
+
+    #[test]
+    fn applies_outbound_payment_annotation_label() {
+        let ark_address = ArkAddress::from_str(ARK_ADDR).unwrap();
+        let mut movement = Movement::new(
+            MovementId(8),
+            MovementStatus::Successful,
+            &MovementSubsystem {
+                name: "bark.arkoor".to_string(),
+                kind: "send".to_string(),
+            },
+            chrono::Local::now(),
+        );
+        movement.effective_balance = SignedAmount::from_sat(-1_000);
+        movement.sent_to = vec![MovementDestination::ark(
+            ark_address,
+            Amount::from_sat(1_000),
+        )];
+        let mut activity = vec![activity_from_movement(movement, &[], None, None)];
+        let annotations = vec![PaymentAnnotation {
+            contact_id: None,
+            label: Some("Custom Lightning address registration".to_string()),
+            destination: ARK_ADDR.to_string(),
+            invoice: None,
+            payment_hash: None,
+            amount_sat: -1_000,
+            outbound: true,
+            zap: false,
+            created_at: 0,
+        }];
+
+        apply_activity_metadata(&mut activity, &[], &annotations, &[]);
+
+        assert_eq!(activity[0].display_primary_name, "You");
+        assert_eq!(
+            activity[0].display_secondary_name,
+            "Custom Lightning address registration"
+        );
+        assert_eq!(
+            activity[0].label.as_deref(),
+            Some("Custom Lightning address registration")
+        );
     }
 }
