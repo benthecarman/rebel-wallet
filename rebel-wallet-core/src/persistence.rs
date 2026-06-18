@@ -102,11 +102,11 @@ impl ServerConfig {
 }
 
 fn default_server_config() -> ServerConfig {
-    ServerConfig::for_network(WalletNetwork::Signet)
+    ServerConfig::for_network(WalletNetwork::Mainnet)
 }
 
 fn default_network() -> WalletNetwork {
-    WalletNetwork::Signet
+    WalletNetwork::Mainnet
 }
 
 fn default_price_currency() -> PersistedPriceCurrency {
@@ -169,7 +169,7 @@ mod tests {
 
         let data: PersistedAppData = serde_json::from_str(raw).unwrap();
 
-        assert_eq!(data.network, WalletNetwork::Signet);
+        assert_eq!(data.network, WalletNetwork::Mainnet);
         assert_eq!(data.lightning_address_ark_address, None);
         assert_eq!(data.custom_lightning_address, None);
         assert_eq!(data.custom_lightning_address_name, "");

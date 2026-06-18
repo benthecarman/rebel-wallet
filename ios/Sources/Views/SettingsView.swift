@@ -247,7 +247,7 @@ struct CurrencyView: View {
 
 struct NetworkView: View {
     @Bindable var manager: AppManager
-    @State private var selectedNetwork: WalletNetwork = .signet
+    @State private var selectedNetwork: WalletNetwork = .mainnet
 
     private var hasChanges: Bool {
         selectedNetwork != manager.state.wallet.network

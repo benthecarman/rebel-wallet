@@ -429,12 +429,12 @@ impl AppState {
             },
             setup: SetupState::NeedsSetup,
             wallet: WalletState {
-                network: WalletNetwork::Signet,
-                network_name: WalletNetwork::Signet.display_name().to_string(),
-                default_server_address: WalletNetwork::Signet.server_address().to_string(),
-                default_esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
-                server_address: WalletNetwork::Signet.server_address().to_string(),
-                esplora_address: WalletNetwork::Signet.esplora_address().to_string(),
+                network: WalletNetwork::Mainnet,
+                network_name: WalletNetwork::Mainnet.display_name().to_string(),
+                default_server_address: WalletNetwork::Mainnet.server_address().to_string(),
+                default_esplora_address: WalletNetwork::Mainnet.esplora_address().to_string(),
+                server_address: WalletNetwork::Mainnet.server_address().to_string(),
+                esplora_address: WalletNetwork::Mainnet.esplora_address().to_string(),
                 price_currency: PriceCurrency::BTC,
                 price_currency_code: PriceCurrency::BTC.code().to_string(),
                 price_currency_name: PriceCurrency::BTC.display_name().to_string(),
@@ -713,7 +713,7 @@ fn supported_price_currencies() -> Vec<CurrencyOption> {
 }
 
 fn supported_networks() -> Vec<NetworkOption> {
-    [WalletNetwork::Signet, WalletNetwork::Mainnet]
+    [WalletNetwork::Mainnet, WalletNetwork::Signet]
         .into_iter()
         .map(|network| NetworkOption {
             name: network.display_name().to_string(),
