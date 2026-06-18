@@ -1236,11 +1236,12 @@ impl AppCore {
         self.state.receive.phase = ReceivePhase::Creating;
         self.state.busy.creating_invoice = true;
         let amount_sat = self.state.receive.amount_sat;
-        let memo = self.state.receive.memo.clone();
+        let memo = self.state.receive.memo.trim().to_string();
+        let memo = if memo.is_empty() { None } else { Some(memo) };
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             match wallet
-                .bolt11_invoice(Amount::from_sat(amount_sat), Some(memo))
+                .bolt11_invoice(Amount::from_sat(amount_sat), memo)
                 .await
             {
                 Ok(invoice) => {

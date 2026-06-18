@@ -163,7 +163,11 @@ impl AppCore {
                 self.hydrate_cached_profile_pictures();
                 self.sort_contacts();
                 self.state.receive.amount_sat = data.receive_amount_sat;
-                self.state.receive.memo = data.receive_memo;
+                self.state.receive.memo = if data.receive_memo == "Rebel Wallet" {
+                    String::new()
+                } else {
+                    data.receive_memo
+                };
                 self.state.wallet.network = data.network;
                 let server_config = ServerConfig::for_network(self.state.wallet.network);
                 self.state.wallet.server_address = server_config.server_address;

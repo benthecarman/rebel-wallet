@@ -466,7 +466,7 @@ impl AppState {
                 lightning_paid: false,
                 amount_sat: 10_000,
                 amount_display: format_sats(10_000),
-                memo: "Rebel Wallet".to_string(),
+                memo: String::new(),
             },
             send: SendState {
                 destination: String::new(),
@@ -950,6 +950,13 @@ mod tests {
             state.receive.receive_request.as_deref(),
             Some("bitcoin:?amount=0.0005&ark=tark1fdafa&lightning=lnbc1example")
         );
+    }
+
+    #[test]
+    fn receive_memo_starts_empty() {
+        let state = AppState::initial();
+
+        assert_eq!(state.receive.memo, "");
     }
 
     #[test]
