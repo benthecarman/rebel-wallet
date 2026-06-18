@@ -280,6 +280,7 @@ pub struct ReceiveState {
     pub lightning_paid: bool,
     pub amount_sat: u64,
     pub amount_display: String,
+    pub amount_fiat_display: Option<String>,
     pub memo: String,
 }
 
@@ -466,6 +467,7 @@ impl AppState {
                 lightning_paid: false,
                 amount_sat: 10_000,
                 amount_display: format_sats(10_000),
+                amount_fiat_display: None,
                 memo: String::new(),
             },
             send: SendState {
@@ -580,6 +582,11 @@ impl AppState {
         }
 
         self.receive.amount_display = format_sats(self.receive.amount_sat);
+        self.receive.amount_fiat_display = format_non_btc_fiat_sats(
+            self.receive.amount_sat,
+            self.wallet.btc_price,
+            &self.wallet.price_currency,
+        );
         self.receive.lightning_status_display = if self.receive.lightning_paid {
             "Paid".to_string()
         } else {
@@ -1061,6 +1068,27 @@ mod tests {
         assert_eq!(item.amount_display, "50,000 sats");
         assert_eq!(item.amount_fiat_display.as_deref(), Some("$50.00 USD"));
         assert_eq!(item.signed_amount_display, "-50,000 sats");
+    }
+
+    #[test]
+    fn derives_receive_fiat_display_for_non_btc_currency() {
+        let mut state = AppState::initial();
+        state.wallet.price_currency = PriceCurrency::USD;
+        state.wallet.btc_price = Some(100_000.0);
+        state.receive.amount_sat = 50_000;
+
+        state.refresh_derived();
+
+        assert_eq!(state.receive.amount_display, "50,000 sats");
+        assert_eq!(
+            state.receive.amount_fiat_display.as_deref(),
+            Some("$50.00 USD")
+        );
+
+        state.wallet.price_currency = PriceCurrency::BTC;
+        state.refresh_derived();
+
+        assert_eq!(state.receive.amount_fiat_display, None);
     }
 
     #[test]

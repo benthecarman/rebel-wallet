@@ -49,6 +49,7 @@ struct ReceiveView: View {
                         ReceiveAmountEditor(
                             amountText: $amountText,
                             amountFocused: $amountFocused,
+                            fiatDisplay: manager.state.receive.amountFiatDisplay,
                             onAmountChanged: { value in
                                 manager.dispatch(.setReceiveAmount(amountSat: value))
                             }
@@ -137,10 +138,11 @@ struct ReceiveView: View {
 struct ReceiveAmountEditor: View {
     @Binding var amountText: String
     var amountFocused: FocusState<Bool>.Binding
+    let fiatDisplay: String?
     let onAmountChanged: (UInt64) -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 TextField("", text: $amountText)
                 .keyboardType(.numberPad)
@@ -151,8 +153,9 @@ struct ReceiveAmountEditor: View {
                 .frame(minWidth: 90)
                 .onChange(of: amountText) { _, newValue in
                     let filtered = newValue.filter(\.isNumber)
-                    if filtered != newValue {
-                        amountText = filtered
+                    let formatted = formatSatsInput(filtered)
+                    if formatted != newValue {
+                        amountText = formatted
                         return
                     }
                     onAmountChanged(UInt64(filtered) ?? 0)
@@ -168,10 +171,32 @@ struct ReceiveAmountEditor: View {
             .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18)))
 
+            if let fiatDisplay {
+                Text(fiatDisplay)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(mutedText)
+            }
+
             Text("Amount")
                 .font(.caption.bold())
                 .foregroundStyle(mutedText)
         }
+    }
+
+    private func formatSatsInput(_ digits: String) -> String {
+        guard !digits.isEmpty else {
+            return ""
+        }
+
+        var output = ""
+        let reversedDigits = Array(digits.reversed())
+        for (index, character) in reversedDigits.enumerated() {
+            if index > 0 && index.isMultiple(of: 3) {
+                output.append(",")
+            }
+            output.append(character)
+        }
+        return String(output.reversed())
     }
 }
 
