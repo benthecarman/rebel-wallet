@@ -1303,8 +1303,8 @@ impl AppCore {
                     self.request_haptic(HapticFeedback::NotificationError);
                 }
             },
-            Err(e) => {
-                self.state.toast = Some(format!("Invalid Nostr secret key: {e}"));
+            Err(_) => {
+                self.state.toast = Some("Invalid Nostr secret key.".to_string());
                 self.request_haptic(HapticFeedback::NotificationError);
             }
         }
@@ -1948,6 +1948,27 @@ mod tests {
             "bob"
         ));
         assert!(!lightning_address_matches_name("alice", "alice"));
+    }
+
+    #[test]
+    fn import_nostr_secret_error_toast_does_not_echo_input() {
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let cache_dir = tempfile::tempdir().expect("temp cache dir");
+        let (tx, _rx) = flume::unbounded();
+        let mut core = AppCore::new(
+            data_dir.path().to_path_buf(),
+            cache_dir.path().to_path_buf(),
+            Arc::new(TestSecretStore),
+            tx,
+            Runtime::new().expect("tokio runtime"),
+        );
+        let submitted = "nsec1thisshouldnotshowupinatoast";
+
+        core.import_nostr_secret(submitted.to_string());
+
+        let toast = core.state.toast.as_deref().expect("toast");
+        assert_eq!(toast, "Invalid Nostr secret key.");
+        assert!(!toast.contains(submitted));
     }
 
     #[test]
