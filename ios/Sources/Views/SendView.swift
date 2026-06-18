@@ -30,9 +30,10 @@ struct SendView: View {
                         .foregroundStyle(mutedText)
 
                     if destination.isEmpty {
-                        SendSearchPanel(manager: manager)
+                        SendSearchPanel(manager: manager, dismissKeyboard: dismissKeyboard)
                     } else {
                         SendDestinationSummary(destination: destination, kind: manager.state.send.destinationKind) {
+                            dismissKeyboard()
                             manager.dispatch(.resetSendDraft)
                         }
 
@@ -100,6 +101,7 @@ struct SendView: View {
                         }
 
                         Button {
+                            dismissKeyboard()
                             manager.dispatch(.payDestination)
                         } label: {
                             HStack(spacing: 8) {
@@ -164,6 +166,7 @@ struct SendView: View {
                 detail: manager.state.send.lastResult ?? "",
                 confirmText: "Nice"
             ) {
+                dismissKeyboard()
                 returnHomeFromSuccess()
             }
         }
@@ -274,6 +277,7 @@ struct FeeSummaryRow: View {
 
 struct SendSearchPanel: View {
     @Bindable var manager: AppManager
+    let dismissKeyboard: () -> Void
     @State private var requestedProfilePictureIds = Set<String>()
     @State private var pendingVisibleProfilePictureIds = Set<String>()
     @State private var visibleProfilePicturePrefetchTask: Task<Void, Never>?
@@ -311,6 +315,7 @@ struct SendSearchPanel: View {
                     }
                 if manager.state.send.searchQuery.isEmpty {
                     Button {
+                        dismissKeyboard()
                         manager.dispatch(.requestClipboardRead)
                     } label: {
                         Image(systemName: "doc.on.clipboard")
@@ -319,6 +324,7 @@ struct SendSearchPanel: View {
                     .buttonStyle(.plain)
                 } else {
                     Button {
+                        dismissKeyboard()
                         manager.dispatch(.setSendSearchQuery(query: ""))
                     } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -334,6 +340,7 @@ struct SendSearchPanel: View {
 
             HStack(spacing: 10) {
                 Button {
+                    dismissKeyboard()
                     manager.dispatch(.requestQrScan)
                 } label: {
                     Label("Scan", systemImage: "qrcode.viewfinder")
@@ -342,6 +349,7 @@ struct SendSearchPanel: View {
                 .buttonStyle(SecondaryButtonStyle())
 
                 Button {
+                    dismissKeyboard()
                     manager.dispatch(.continueSendSearch)
                 } label: {
                     Label("Continue", systemImage: "arrow.right")
@@ -361,6 +369,7 @@ struct SendSearchPanel: View {
                     } else {
                         ForEach(manager.state.send.searchResults, id: \.id) { contact in
                             Button {
+                                dismissKeyboard()
                                 manager.dispatch(.selectSendContact(contactId: contact.id))
                             } label: {
                                 ContactRow(contact: contact, imageNormalizer: manager.rust)
