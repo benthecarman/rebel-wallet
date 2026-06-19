@@ -58,11 +58,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("Secrets are stored in iOS Keychain. Wallet data uses local sqlite.")
-                    .font(.caption)
-                    .foregroundStyle(mutedText)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 24)
             }
             .padding(16)
         }
