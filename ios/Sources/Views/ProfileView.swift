@@ -59,6 +59,14 @@ struct ProfileSummaryPanel: View {
     @Binding var mode: ProfileMode
     @Environment(\.walletAccent) private var walletAccent
 
+    private var lightningAddress: String {
+        manager.state.nostr.lud16.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var displayLightningAddress: String {
+        truncateMiddle(lightningAddress, maxLength: 34, prefixCount: 14)
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             VStack(spacing: 12) {
@@ -66,10 +74,22 @@ struct ProfileSummaryPanel: View {
                 Text(manager.state.nostr.name.isEmpty ? "Rebel" : manager.state.nostr.name)
                     .font(.largeTitle.bold())
                     .multilineTextAlignment(.center)
-                if !manager.state.nostr.lud16.isEmpty {
-                    Text(manager.state.nostr.lud16)
-                        .font(.subheadline)
-                        .foregroundStyle(rebelGreen)
+                if !lightningAddress.isEmpty {
+                    Button {
+                        UIPasteboard.general.string = lightningAddress
+                        manager.requestHaptic(.impactLight)
+                    } label: {
+                        Text(displayLightningAddress)
+                            .font(.subheadline)
+                            .foregroundStyle(rebelGreen)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Copy Lightning address")
+                    .accessibilityValue(lightningAddress)
                 }
                 if !manager.state.nostr.about.isEmpty {
                     Text(manager.state.nostr.about)
