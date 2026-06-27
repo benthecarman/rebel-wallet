@@ -19,8 +19,19 @@ struct RebelWalletApp: App {
                     easterEgg.stop()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch phase {
+                    case .active:
                         manager.dispatch(.maintainVtxos)
+                        // Re-attempt claiming an in-flight Lightning receive in case
+                        // the payment landed while the app was suspended.
+                        manager.dispatch(.resumeReceiveMonitor)
+                        manager.endReceiveBackgroundTask()
+                    case .background:
+                        // Keep the core running briefly so an in-flight Lightning
+                        // receive can still be claimed while backgrounded.
+                        manager.beginReceiveBackgroundTaskIfNeeded()
+                    default:
+                        break
                     }
                 }
         }

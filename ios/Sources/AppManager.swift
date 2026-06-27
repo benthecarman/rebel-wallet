@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Security
+import UIKit
 
 @MainActor
 @Observable
@@ -8,6 +9,7 @@ final class AppManager: AppReconciler {
     let rust: FfiApp
     var state: AppState
     private var lastRevApplied: UInt64
+    private var receiveBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     init() {
         let fm = FileManager.default
@@ -42,9 +44,41 @@ final class AppManager: AppReconciler {
             if s.rev <= lastRevApplied { return }
             lastRevApplied = s.rev
             state = s
+            // If a Lightning receive completed (e.g. while backgrounded), release the
+            // background-execution assertion now that the core no longer needs to run.
+            if !isAwaitingLightningReceive {
+                endReceiveBackgroundTask()
+            }
         case .haptic(let feedback):
             Haptics.play(feedback)
         }
+    }
+
+    /// True while we are showing a receive request and still waiting for the
+    /// Lightning payment to be claimed. The Rust core must keep polling to supply
+    /// the preimage, so the process needs to stay alive if backgrounded.
+    var isAwaitingLightningReceive: Bool {
+        state.receive.phase == .showingRequest
+            && state.receive.lightningInvoice != nil
+            && !state.receive.lightningPaid
+    }
+
+    /// Request a background-execution assertion so the Rust core keeps polling and
+    /// can claim an in-flight Lightning receive after the app is backgrounded.
+    /// iOS grants a limited window (~30s); we release the assertion as soon as the
+    /// payment is claimed, the app returns to the foreground, or the window expires.
+    func beginReceiveBackgroundTaskIfNeeded() {
+        guard isAwaitingLightningReceive else { return }
+        guard receiveBackgroundTask == .invalid else { return }
+        receiveBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "LightningReceive") { [weak self] in
+            self?.endReceiveBackgroundTask()
+        }
+    }
+
+    func endReceiveBackgroundTask() {
+        guard receiveBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(receiveBackgroundTask)
+        receiveBackgroundTask = .invalid
     }
 
     func dispatch(_ action: AppAction) {

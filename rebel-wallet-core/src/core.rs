@@ -353,6 +353,7 @@ impl AppCore {
             }
             AppAction::EditReceiveRequest => self.state.receive.phase = ReceivePhase::Editing,
             AppAction::BeginReceiveRequest => self.create_receive_request(),
+            AppAction::ResumeReceiveMonitor => self.resume_receive_monitor(),
             AppAction::CreateArkAddress => self.create_ark_address(),
             AppAction::CreateLightningInvoice => self.create_lightning_invoice(),
             AppAction::SetLightningAddressName { name } => {
@@ -1234,6 +1235,33 @@ impl AppCore {
                     "Could not create receive request: {e:#}"
                 ))));
             }
+        });
+    }
+
+    /// Re-attempt an in-flight Lightning receive after the app returns to the
+    /// foreground. iOS suspends the whole process while backgrounded, which can
+    /// stop the original monitor before the payment is claimed. Restarting the
+    /// monitor ensures a payment that arrived while suspended is claimed as soon
+    /// as the user reopens the app. No-op unless we are still showing an unpaid
+    /// Lightning request.
+    fn resume_receive_monitor(&mut self) {
+        if self.state.receive.phase != ReceivePhase::ShowingRequest
+            || self.state.receive.lightning_paid
+        {
+            return;
+        }
+        let Some(payment_hash_text) = self.state.receive.lightning_payment_hash.clone() else {
+            return;
+        };
+        let Some(wallet) = self.wallet.clone() else {
+            return;
+        };
+        let Ok(payment_hash) = PaymentHash::from_str(&payment_hash_text) else {
+            return;
+        };
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            monitor_lightning_receive(wallet, tx, payment_hash).await;
         });
     }
 
