@@ -4,12 +4,16 @@ use std::sync::Arc;
 use anyhow::Context;
 use bark::lock_manager::memory::MemoryLockManager;
 use bark::persist::{sqlite::SqliteClient, BarkPersister};
-use bark::{Config, Wallet};
+use bark::{Config, OpenWalletArgs, Wallet, WalletSeed};
 use bip39::Mnemonic;
 
 use crate::persistence::ServerConfig;
 
 const VTXO_REFRESH_EXPIRY_THRESHOLD_BLOCKS: u32 = 144;
+
+/// Client identifier sent to the Ark server on every RPC (`x-user-agent`).
+/// Format is `<name>/<version>`; the name must be lowercase ASCII.
+const USER_AGENT: &str = concat!("rebel-wallet/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WalletOpenMode {
@@ -31,27 +35,33 @@ pub(crate) async fn open_bark_wallet(
     if matches!(mode, WalletOpenMode::Replace) {
         remove_wallet_database_files(&db_path)?;
     }
-    let db = Arc::new(SqliteClient::open(&db_path)?);
+    let db: Arc<dyn BarkPersister> = Arc::new(SqliteClient::open(&db_path)?);
     let config = Config {
         server_address: server_config.server_address,
         server_access_token: server_config.server_access_token,
         esplora_address: Some(server_config.esplora_address),
         vtxo_refresh_expiry_threshold: VTXO_REFRESH_EXPIRY_THRESHOLD_BLOCKS,
+        user_agent: Some(USER_AGENT.to_string()),
         ..Config::network_default(network)
     };
     let lock_manager = Box::new(MemoryLockManager::new());
-    match mode {
-        WalletOpenMode::Create | WalletOpenMode::Replace => {
-            Wallet::create(mnemonic, network, config, db, lock_manager, false).await
-        }
-        WalletOpenMode::OpenOrCreate | WalletOpenMode::Restore => {
-            if db.read_properties().await?.is_some() {
-                Wallet::open(mnemonic, db, config, lock_manager).await
-            } else {
-                Wallet::create(mnemonic, network, config, db, lock_manager, false).await
-            }
-        }
+    let seed = WalletSeed::new_from_mnemonic(network, mnemonic);
+
+    // Create/Replace force a fresh wallet (Replace already wiped the database
+    // files above); OpenOrCreate/Restore open an existing wallet or create one.
+    if matches!(mode, WalletOpenMode::Create | WalletOpenMode::Replace) {
+        Wallet::create(network, &seed, &config, &*db, &*lock_manager, false).await?;
     }
+
+    let args = OpenWalletArgs {
+        run_daemon: false,
+        persister: Some(db),
+        lock_manager: Some(lock_manager),
+        create_if_not_exists: true,
+        create_without_server: false,
+        ..Default::default()
+    };
+    Wallet::open(network, seed, config, args).await
 }
 
 pub(crate) fn remove_wallet_database_files(db_path: &Path) -> anyhow::Result<()> {

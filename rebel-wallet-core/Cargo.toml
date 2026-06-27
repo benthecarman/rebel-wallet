@@ -9,7 +9,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
-bark = { package = "bark-wallet", git = "https://gitlab.com/benthecarman/bark.git", rev = "276da0603372f8d5704cd2dcfd757af727d3b400", default-features = false, features = ["sqlite-bundled", "native", "tls-webpki-roots", "rand"] }
+bark = { package = "bark-wallet", git = "https://gitlab.com/benthecarman/bark.git", rev = "b14ae5bca19fef94d5d6f9db1f025e3c07db2e8c", default-features = false, features = ["sqlite-bundled", "native", "tls-webpki-roots", "rand"] }
 bech32 = "0.11"
 bip39 = { version = "2", features = ["rand"] }
 bitcoin = "0.32"

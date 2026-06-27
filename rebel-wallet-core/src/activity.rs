@@ -528,7 +528,8 @@ fn activity_method_icon(destination: Option<&BarkPaymentMethod>, inbound: bool) 
     match destination {
         Some(BarkPaymentMethod::Invoice(_))
         | Some(BarkPaymentMethod::Offer(_))
-        | Some(BarkPaymentMethod::LightningAddress(_)) => "bolt.fill",
+        | Some(BarkPaymentMethod::LightningAddress(_))
+        | Some(BarkPaymentMethod::Lnurl(_)) => "bolt.fill",
         Some(BarkPaymentMethod::Ark(_)) => "link",
         Some(BarkPaymentMethod::Bitcoin(_))
         | Some(BarkPaymentMethod::OutputScript(_))

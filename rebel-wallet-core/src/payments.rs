@@ -61,7 +61,8 @@ pub(crate) async fn parse_send_destination(
             BarkPaymentMethod::Ark(_)
             | BarkPaymentMethod::Invoice(_)
             | BarkPaymentMethod::Offer(_)
-            | BarkPaymentMethod::LightningAddress(_) => option
+            | BarkPaymentMethod::LightningAddress(_)
+            | BarkPaymentMethod::Lnurl(_) => option
                 .errors
                 .first()
                 .map(|e| format!("Invalid payment request: {e}")),
@@ -106,6 +107,10 @@ fn send_payment_destination(method: &BarkPaymentMethod) -> Option<SendPaymentDes
         BarkPaymentMethod::LightningAddress(address) => Some(SendPaymentDestination {
             preference: SendPaymentPreference::Lightning,
             destination: address.to_string(),
+        }),
+        BarkPaymentMethod::Lnurl(lnurl) => Some(SendPaymentDestination {
+            preference: SendPaymentPreference::Lightning,
+            destination: lnurl.to_string(),
         }),
         BarkPaymentMethod::Offer(offer) => Some(SendPaymentDestination {
             preference: SendPaymentPreference::Lightning,
