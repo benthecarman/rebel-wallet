@@ -655,6 +655,7 @@ impl AppState {
         self.receive.lightning_status = "idle".to_string();
         self.receive.lightning_paid = false;
         self.receive.amount_sat = 0;
+        self.receive.memo = String::new();
     }
 }
 
@@ -980,6 +981,7 @@ mod tests {
         state.receive.ark_address = Some("tark1fdafa".to_string());
         state.receive.receive_request = Some("tark1fdafa".to_string());
         state.receive.amount_sat = 50_000;
+        state.receive.memo = "coffee".to_string();
 
         state.reset_receive_draft();
 
@@ -988,6 +990,7 @@ mod tests {
         assert_eq!(state.receive.ark_address, None);
         assert_eq!(state.receive.receive_request, None);
         assert_eq!(state.receive.amount_sat, 0);
+        assert_eq!(state.receive.memo, "");
     }
 
     #[test]
