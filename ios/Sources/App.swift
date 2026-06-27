@@ -25,6 +25,10 @@ struct RebelWalletApp: App {
                         // Re-attempt claiming an in-flight Lightning receive in case
                         // the payment landed while the app was suspended.
                         manager.dispatch(.resumeReceiveMonitor)
+                        // Sweep for any Lightning receive whose HTLCs arrived while we
+                        // were away, independent of the receive screen, so it can't get
+                        // stuck in "claimable".
+                        manager.dispatch(.claimPendingLightningReceives)
                         manager.endReceiveBackgroundTask()
                     case .background:
                         // Keep the core running briefly so an in-flight Lightning

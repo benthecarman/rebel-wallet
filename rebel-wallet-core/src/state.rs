@@ -53,6 +53,7 @@ pub struct BusyState {
     pub publishing_nostr: bool,
     pub maintaining_vtxos: bool,
     pub refreshing_contacts: bool,
+    pub claiming_lightning_receives: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]

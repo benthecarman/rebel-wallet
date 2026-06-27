@@ -449,10 +449,11 @@ pub(crate) async fn monitor_lightning_receive(
                 );
             }
             Err(e) => {
-                let _ = tx.send(CoreMsg::Async(AsyncMsg::Error(format!(
-                    "Lightning receive status failed: {e:#}"
-                ))));
-                break;
+                // A transient status-check failure (e.g. a network blip) should
+                // not permanently kill the monitor and strand the payment in
+                // "claimable". Keep polling until the deadline instead of
+                // breaking on the first error.
+                eprintln!("Lightning receive status failed: {e:#}");
             }
         }
 

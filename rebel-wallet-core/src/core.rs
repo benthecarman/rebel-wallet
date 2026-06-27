@@ -354,6 +354,7 @@ impl AppCore {
             AppAction::EditReceiveRequest => self.state.receive.phase = ReceivePhase::Editing,
             AppAction::BeginReceiveRequest => self.create_receive_request(),
             AppAction::ResumeReceiveMonitor => self.resume_receive_monitor(),
+            AppAction::ClaimPendingLightningReceives => self.claim_pending_lightning_receives(),
             AppAction::CreateArkAddress => self.create_ark_address(),
             AppAction::CreateLightningInvoice => self.create_lightning_invoice(),
             AppAction::SetLightningAddressName { name } => {
@@ -608,6 +609,7 @@ impl AppCore {
                 self.ensure_wallet_derived_nostr_key();
                 self.ensure_lightning_address();
                 self.maintain_vtxos();
+                self.claim_pending_lightning_receives();
             }
             AsyncMsg::WalletSynced {
                 balance_sat,
@@ -692,6 +694,25 @@ impl AppCore {
                     self.request_haptic(HapticFeedback::NotificationSuccess);
                 }
                 self.maintain_vtxos();
+            }
+            AsyncMsg::LightningReceivesClaimed { payment_hashes } => {
+                self.state.busy.claiming_lightning_receives = false;
+                let matches_current = self
+                    .state
+                    .receive
+                    .lightning_payment_hash
+                    .as_deref()
+                    .map(|hash| payment_hashes.iter().any(|h| h == hash))
+                    .unwrap_or(false);
+                if matches_current && !self.state.receive.lightning_paid {
+                    self.state.receive.lightning_status = "paid".to_string();
+                    self.state.receive.lightning_paid = true;
+                    self.state.receive.phase = ReceivePhase::Success;
+                    self.request_haptic(HapticFeedback::NotificationSuccess);
+                }
+                if !payment_hashes.is_empty() {
+                    self.maintain_vtxos();
+                }
             }
             AsyncMsg::LightningAddressReady(ark_address) => {
                 self.state.lightning_address.backing_ark_address = Some(ark_address.clone());
@@ -1006,6 +1027,7 @@ impl AppCore {
             AsyncMsg::ArkReceiveConfirmed { .. }
             | AsyncMsg::LightningReceiveStatus { .. }
             | AsyncMsg::LightningReceiveClaimed { .. }
+            | AsyncMsg::LightningReceivesClaimed { .. }
             | AsyncMsg::ZapReceiptsLoaded { .. }
             | AsyncMsg::Seed(_)
             | AsyncMsg::DirectMessagesLoaded(_)
@@ -1262,6 +1284,65 @@ impl AppCore {
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             monitor_lightning_receive(wallet, tx, payment_hash).await;
+        });
+    }
+
+    /// Claim any Lightning receives whose HTLCs have already arrived but were
+    /// never finalized — for example because the app was suspended or closed
+    /// before the receive monitor could reveal the preimage. Unlike the receive
+    /// monitor, this sweep is independent of the receive screen: it runs on
+    /// wallet open and whenever the app returns to the foreground, so a payment
+    /// that landed while we were away no longer gets stuck in "claimable".
+    fn claim_pending_lightning_receives(&mut self) {
+        let Some(wallet) = self.wallet.clone() else {
+            return;
+        };
+        if self.state.busy.claiming_lightning_receives {
+            return;
+        }
+        self.state.busy.claiming_lightning_receives = true;
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let pending = match wallet.pending_lightning_receives().await {
+                Ok(pending) => pending,
+                Err(_) => {
+                    let _ = tx.send(CoreMsg::Async(AsyncMsg::LightningReceivesClaimed {
+                        payment_hashes: vec![],
+                    }));
+                    return;
+                }
+            };
+            let claimable: Vec<_> = pending
+                .into_iter()
+                .filter(|receive| {
+                    receive.preimage_revealed_at.is_none()
+                        && receive.finished_at.is_none()
+                        && !receive.htlc_vtxos.is_empty()
+                })
+                .collect();
+            if claimable.is_empty() {
+                let _ = tx.send(CoreMsg::Async(AsyncMsg::LightningReceivesClaimed {
+                    payment_hashes: vec![],
+                }));
+                return;
+            }
+            let mut claimed = vec![];
+            for receive in claimable {
+                let payment_hash: PaymentHash = receive.invoice.into();
+                if let Ok(Ok(receive)) = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    wallet.try_claim_lightning_receive(payment_hash, false, None),
+                )
+                .await
+                {
+                    if receive.preimage_revealed_at.is_some() || receive.finished_at.is_some() {
+                        claimed.push(payment_hash.to_string());
+                    }
+                }
+            }
+            let _ = tx.send(CoreMsg::Async(AsyncMsg::LightningReceivesClaimed {
+                payment_hashes: claimed,
+            }));
         });
     }
 

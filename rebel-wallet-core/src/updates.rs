@@ -66,6 +66,9 @@ pub(crate) enum AsyncMsg {
     LightningReceiveClaimed {
         payment_hash: String,
     },
+    LightningReceivesClaimed {
+        payment_hashes: Vec<String>,
+    },
     LightningAddressReady(String),
     LightningAddressRegistrationUpdated {
         name: String,

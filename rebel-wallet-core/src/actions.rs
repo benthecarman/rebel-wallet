@@ -43,6 +43,7 @@ pub enum AppAction {
     EditReceiveRequest,
     BeginReceiveRequest,
     ResumeReceiveMonitor,
+    ClaimPendingLightningReceives,
     CreateArkAddress,
     CreateLightningInvoice,
     SetLightningAddressName {
