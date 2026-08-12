@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SetupView: View {
     @Bindable var manager: AppManager
@@ -45,9 +46,24 @@ struct SetupView: View {
                 ProgressView()
             }
             Spacer()
+
+            Button {
+                openTerms()
+            } label: {
+                Text("Terms of Service")
+                    .font(.footnote)
+                    .foregroundStyle(mutedText)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Second Terms of Service")
         }
         .padding(22)
         .foregroundStyle(primaryText)
         .background(pageBackground.ignoresSafeArea())
+    }
+
+    private func openTerms() {
+        guard let url = URL(string: "https://second.tech/terms") else { return }
+        UIApplication.shared.open(url)
     }
 }
