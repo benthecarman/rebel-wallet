@@ -37,6 +37,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::core::{derive_nostr_keys_from_mnemonic, NOSTR_SECRET_KEY, WALLET_SEED_KEY};
+use crate::payments::lightning_receive_progress_is_paid;
 use crate::persistence::{PersistedAppData, ServerConfig};
 use crate::wallet::{open_bark_wallet, WalletOpenMode};
 use crate::{SecretStore, WalletNetwork};
@@ -344,7 +345,7 @@ impl NwcLightningNode for NwcBarkLightning {
                 let hash = receive.payment_hash.to_string();
                 known_hashes
                     .insert(hash)
-                    .then(|| transaction_from_pending_receive(receive))
+                    .then(|| transaction_from_in_progress_receive(receive))
                     .flatten()
             }));
 
@@ -541,8 +542,24 @@ async fn reconcile_then_lookup_transaction(
             Ok(receive @ LightningReceiveState::Settled(_)) => {
                 return Ok(transaction_from_receive_state(&receive));
             }
-            Ok(_) => {}
-            Err(_) => {}
+            Ok(LightningReceiveState::InProgress(receive))
+                if lightning_receive_progress_is_paid(&receive.progress) =>
+            {
+                return Ok(transaction_from_in_progress_receive(&receive));
+            }
+            Ok(LightningReceiveState::InProgress(_)) => {}
+            Err(_) => {
+                // Bark persists action progress before parking or returning a
+                // transient claim error. Re-read the checkpoint so a receive
+                // whose preimage was already revealed is still reported paid.
+                if let Ok(LightningReceiveState::InProgress(receive)) =
+                    wallet.lightning_receive_state(payment_hash).await
+                {
+                    if lightning_receive_progress_is_paid(&receive.progress) {
+                        return Ok(transaction_from_in_progress_receive(&receive));
+                    }
+                }
+            }
         }
 
         let Some(deadline) = settlement_deadline else {
@@ -580,12 +597,29 @@ fn transaction_from_movement(movement: &Movement) -> Option<WalletTransaction> {
     })
 }
 
-fn transaction_from_pending_receive(receive: &LightningReceive) -> Option<WalletTransaction> {
-    Some(WalletTransaction::pending_incoming(
-        PaymentHash::from_hex(&receive.payment_hash.to_string()).ok()?,
-        AmountMsat::from_msat(receive.invoice.amount_milli_satoshis()?),
-        UnixTimestamp::from_secs(receive.invoice.duration_since_epoch().as_secs()),
-    ))
+fn transaction_from_in_progress_receive(receive: &LightningReceive) -> Option<WalletTransaction> {
+    let payment_hash = PaymentHash::from_hex(&receive.payment_hash.to_string()).ok()?;
+    let amount = AmountMsat::from_msat(receive.invoice.amount_milli_satoshis()?);
+    let created_at = UnixTimestamp::from_secs(receive.invoice.duration_since_epoch().as_secs());
+
+    if lightning_receive_progress_is_paid(&receive.progress) {
+        let preimage = PaymentPreimage::from_hex(&receive.payment_preimage.to_string()).ok()?;
+        let observed_settlement_at =
+            UnixTimestamp::from_secs(crate::time::now_unix().max(created_at.as_secs()));
+        Some(WalletTransaction::settled_incoming(
+            payment_hash,
+            preimage,
+            amount,
+            created_at,
+            observed_settlement_at,
+        ))
+    } else {
+        Some(WalletTransaction::pending_incoming(
+            payment_hash,
+            amount,
+            created_at,
+        ))
+    }
 }
 
 fn transaction_from_settled_receive(
@@ -602,7 +636,7 @@ fn transaction_from_settled_receive(
 
 fn transaction_from_receive_state(receive: &LightningReceiveState) -> Option<WalletTransaction> {
     match receive {
-        LightningReceiveState::InProgress(receive) => transaction_from_pending_receive(receive),
+        LightningReceiveState::InProgress(receive) => transaction_from_in_progress_receive(receive),
         LightningReceiveState::Settled(receive) => transaction_from_settled_receive(receive),
     }
 }
