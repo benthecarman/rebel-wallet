@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use anyhow::Context;
 use bark::lock_manager::memory::MemoryLockManager;
 use bark::persist::{sqlite::SqliteClient, BarkPersister};
-use bark::{Config, OpenWalletArgs, Wallet, WalletSeed};
+use bark::{Config, OpenWalletArgs, RecoveryReport, RecoveryStatus, Wallet, WalletSeed};
 use bip39::Mnemonic;
 
 use crate::persistence::ServerConfig;
@@ -41,6 +41,15 @@ struct WalletRecoverySummary {
 }
 
 impl WalletRecoverySummary {
+    fn from_report(report: &RecoveryReport) -> Self {
+        WalletRecoverySummary {
+            recovered_vtxos: report.recovered().len(),
+            recovered_sat: report.recovered().total_amount().to_sat(),
+            accounted_vtxos: report.skipped().len() + report.exited().len(),
+            unresolved_vtxos: report.failed().len() + report.foreign().len(),
+        }
+    }
+
     fn notice(self) -> WalletRecoveryNotice {
         let recovered = format!(
             "recovered {} {} ({})",
@@ -93,11 +102,28 @@ fn pluralize_vtxo(count: usize) -> &'static str {
     }
 }
 
-fn failed_recovery_notice() -> WalletRecoveryNotice {
+fn failed_recovery_notice(error: Option<&anyhow::Error>) -> WalletRecoveryNotice {
+    let reason = match error {
+        Some(e) => format!(" ({e:#})"),
+        None => String::new(),
+    };
     WalletRecoveryNotice {
-        message: "Wallet recovery failed before a report was available. Retry restore; funds may be missing."
-            .to_string(),
+        message: format!(
+            "Wallet recovery failed before a report was available{reason}. Retry restore; funds may be missing."
+        ),
         warning: true,
+    }
+}
+
+/// Turns the outcome bark reports on wallet open into a user-facing notice.
+/// `NotRun` means the wallet already existed, so there is nothing to say.
+fn recovery_status_notice(status: RecoveryStatus) -> Option<WalletRecoveryNotice> {
+    match status {
+        RecoveryStatus::NotRun => None,
+        RecoveryStatus::Failed(e) => Some(failed_recovery_notice(Some(&e))),
+        RecoveryStatus::Completed(report) => {
+            Some(WalletRecoverySummary::from_report(&report).notice())
+        }
     }
 }
 
@@ -134,23 +160,18 @@ pub(crate) async fn open_bark_wallet(
         lock_manager: Some(lock_manager),
         create_if_not_exists: true,
         create_without_server: false,
-        on_recovery_finished: Some(Box::new(move |report| {
-            let summary = WalletRecoverySummary {
-                recovered_vtxos: report.recovered().len(),
-                recovered_sat: report.recovered().total_amount().to_sat(),
-                accounted_vtxos: report.skipped().len() + report.exited().len(),
-                unresolved_vtxos: report.failed().len() + report.foreign().len(),
-            };
-            let _ = recovery_tx.send(summary.notice());
+        on_recovery_finished: Some(Box::new(move |status| {
+            let _ = recovery_tx.send(recovery_status_notice(status));
         })),
         ..Default::default()
     };
     let wallet = Wallet::open(network, seed, config, args).await?;
-    let recovery_notice = recovery_expected.then(|| {
-        recovery_rx
-            .try_recv()
-            .unwrap_or_else(|_| failed_recovery_notice())
-    });
+    // Bark calls the callback exactly once per successful open. If it somehow
+    // did not and we expected a scan, treat that like a failed scan.
+    let recovery_notice = match recovery_rx.try_recv() {
+        Ok(notice) => notice,
+        Err(_) => recovery_expected.then(|| failed_recovery_notice(None)),
+    };
     Ok(OpenedBarkWallet {
         wallet,
         recovery_notice,
@@ -183,9 +204,12 @@ pub(crate) fn remove_wallet_database_files(db_path: &Path) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{bark_config, failed_recovery_notice, WalletRecoverySummary};
+    use super::{
+        bark_config, failed_recovery_notice, recovery_status_notice, WalletRecoverySummary,
+    };
     use crate::persistence::ServerConfig;
     use crate::WalletNetwork;
+    use bark::RecoveryStatus;
 
     #[test]
     fn refresh_threshold_uses_bark_network_defaults() {
@@ -232,9 +256,25 @@ mod tests {
 
     #[test]
     fn missing_recovery_report_is_a_warning() {
-        let notice = failed_recovery_notice();
+        let notice = failed_recovery_notice(None);
 
         assert!(notice.message.contains("funds may be missing"));
         assert!(notice.warning);
+    }
+
+    #[test]
+    fn failed_recovery_status_includes_the_error() {
+        let notice =
+            recovery_status_notice(RecoveryStatus::Failed(anyhow::anyhow!("mailbox down")))
+                .expect("failed scan yields a notice");
+
+        assert!(notice.message.contains("mailbox down"));
+        assert!(notice.message.contains("funds may be missing"));
+        assert!(notice.warning);
+    }
+
+    #[test]
+    fn recovery_not_run_yields_no_notice() {
+        assert_eq!(recovery_status_notice(RecoveryStatus::NotRun), None);
     }
 }

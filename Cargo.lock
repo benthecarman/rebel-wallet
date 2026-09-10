@@ -73,12 +73,12 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "ark-lib"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eece5d8f4664794d75724dae908ae49896e6f0d700ec6d80242307797d57d22f"
+checksum = "431932d6bc5b6ce8f5511e26e83dc9e4f11e7af61d5c49a5583892532e3fa110"
 dependencies = [
  "async-trait",
- "bark-bitcoin-ext 0.6.2",
+ "bark-bitcoin-ext 0.7.0",
  "bitcoin",
  "chrono",
  "getrandom 0.3.4",
@@ -87,7 +87,7 @@ dependencies = [
  "lightning",
  "lightning-invoice",
  "rand 0.9.4",
- "secp256k1 0.32.0-beta.2",
+ "secp256k1 0.33.1",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -216,9 +216,9 @@ dependencies = [
 
 [[package]]
 name = "bark-bitcoin-ext"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d734921778244ef11235261c8b29cd56751bc4b5f0e1e04e7f17aa3129bbfa37"
+checksum = "e9b2ba0cb97ff59e252c8922938c82dbeaad893d61c786cda49771c0ba034aaa"
 dependencies = [
  "bdk_bitcoind_rpc",
  "bdk_wallet",
@@ -233,9 +233,9 @@ dependencies = [
 
 [[package]]
 name = "bark-common"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "021d2d71877dfde1e6061f577ae545ce6f0b24aa28b7ec620c9d665f16332265"
+checksum = "809da5eb2fd6d7b174e19aa58ae7274344e57ea24868cc1c67dc4cf4768d2a2c"
 dependencies = [
  "anyhow",
  "serde",
@@ -244,9 +244,9 @@ dependencies = [
 
 [[package]]
 name = "bark-runtime"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29da95ab404d46e6575278f70f3c320e63374b50b3743cdc5f502092002e5672"
+checksum = "022ef02fdc7d9521fd72a7348c06096f4a4579ece8dec45082876c8752aadba4"
 dependencies = [
  "futures",
  "gloo-timers",
@@ -258,9 +258,9 @@ dependencies = [
 
 [[package]]
 name = "bark-server-rpc"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dada3430b12d671e108c756f41eae62a5d576e3500b7894c22cfc6a14f019c49"
+checksum = "77bca85d451c111d425495ac6b0beb0ad3e2426b404afb2d6b08c6bba375081d"
 dependencies = [
  "ark-lib",
  "bitcoin",
@@ -277,14 +277,14 @@ dependencies = [
 
 [[package]]
 name = "bark-wallet"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2b22dcc719a41885ed167f545860683590335d107c3925e4c3300cf393a9192"
+checksum = "1abf70976e9e9453c12b14f0a03cd7fb361eb51161864d076bd410e41dec6516"
 dependencies = [
  "anyhow",
  "ark-lib",
  "async-trait",
- "bark-bitcoin-ext 0.6.2",
+ "bark-bitcoin-ext 0.7.0",
  "bark-common",
  "bark-runtime",
  "bark-server-rpc",
@@ -2838,12 +2838,12 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.32.0-beta.2"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c5fdc7d6e800869d3fd60ff857c479bf0a83ea7bf44b389e64461e844204994"
+checksum = "d7f404a8dab7a7a5a631e741d8699aa9c8e1d689fc26ccf897c7187565490b69"
 dependencies = [
  "rand 0.9.4",
- "secp256k1-sys 0.12.0",
+ "secp256k1-sys 0.14.1",
  "serde",
 ]
 
@@ -2858,9 +2858,9 @@ dependencies = [
 
 [[package]]
 name = "secp256k1-sys"
-version = "0.12.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d3be00697c88c00fe102af8dc316038cc2062eab8da646e7463f4c0e70ca9fd"
+checksum = "f6b2992d4a3cd244539a7d5d0966aadbe5ca7fb868a5d7e38c29499b9e709bbd"
 dependencies = [
  "cc",
 ]
