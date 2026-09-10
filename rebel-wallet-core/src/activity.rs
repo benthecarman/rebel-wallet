@@ -20,7 +20,7 @@ pub(crate) fn activity_from_movement(
     lightning_address_ark_address: Option<&str>,
 ) -> ActivityItem {
     let amount_sat = activity_amount_sat(&movement);
-    let inbound = amount_sat >= 0;
+    let inbound = activity_is_inbound(&movement);
     let payment_amount_sat = activity_payment_amount_sat(&movement, inbound).unwrap_or(amount_sat);
     let destination = if inbound {
         movement.received_on.first()
@@ -155,7 +155,7 @@ pub(crate) fn activity_from_movement(
 }
 
 fn activity_amount_sat(movement: &Movement) -> i64 {
-    if movement.effective_balance.to_sat() >= 0 {
+    if activity_is_inbound(movement) {
         return movement.effective_balance.to_sat();
     }
 
@@ -171,6 +171,21 @@ fn activity_amount_sat(movement: &Movement) -> i64 {
     i64::try_from(sent_amount_sat)
         .map(|amount| -amount)
         .unwrap_or_else(|_| movement.effective_balance.to_sat())
+}
+
+fn activity_is_inbound(movement: &Movement) -> bool {
+    // Pending and failed sends can have no effective balance change yet.
+    // Their destinations still identify the direction of the attempted payment.
+    if !movement.sent_to.is_empty() && movement.received_on.is_empty() {
+        return false;
+    }
+    if !movement.received_on.is_empty() && movement.sent_to.is_empty() {
+        return true;
+    }
+    if movement.effective_balance.to_sat() == 0 {
+        return movement.intended_balance.to_sat() >= 0;
+    }
+    movement.effective_balance.to_sat() > 0
 }
 
 fn activity_payment_amount_sat(movement: &Movement, inbound: bool) -> Option<i64> {
@@ -816,6 +831,35 @@ mod tests {
             items[0].signed_amount_display,
             state::format_signed_sats(3_500, true)
         );
+    }
+
+    #[test]
+    fn unfinished_and_failed_sends_are_not_zero_sat_receives() {
+        for status in [MovementStatus::Pending, MovementStatus::Failed] {
+            let mut movement = Movement::new(
+                MovementId(4),
+                status.clone(),
+                &MovementSubsystem {
+                    name: "bark.lightning".to_string(),
+                    kind: "send".to_string(),
+                },
+                chrono::Local::now(),
+            );
+            movement.intended_balance = SignedAmount::from_sat(-1);
+            movement.offchain_fee = Amount::from_sat(20);
+            movement.sent_to = vec![MovementDestination::custom(
+                "lnbc1invoice".to_string(),
+                Amount::from_sat(1),
+            )];
+
+            let item = activity_from_movement(movement, &[], None, None);
+
+            assert_eq!(item.icon_kind, ActivityIconKind::Sent);
+            assert_eq!(item.display_primary_name, "You");
+            assert_eq!(item.amount_sat, -1);
+            assert_eq!(item.payment_amount_sat, -1);
+            assert_eq!(item.status, status.to_string());
+        }
     }
 
     #[test]

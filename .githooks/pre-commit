@@ -4,3 +4,4 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 cargo fmt --check
+./tools/verify-ios-project-env --staged --fix

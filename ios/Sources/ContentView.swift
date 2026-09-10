@@ -1,5 +1,5 @@
-import SwiftUI
 import PhotosUI
+import SwiftUI
 import UIKit
 
 struct ContentView: View {
@@ -21,7 +21,7 @@ struct ContentView: View {
         .onChange(of: manager.state.router.screenStack) { _, new in
             navPath = new
         }
-        .onChange(of: navPath) { old, new in
+        .onChange(of: navPath) { _, new in
             guard new != manager.state.router.screenStack else { return }
             manager.dispatch(.updateScreenStack(stack: new))
         }
@@ -39,6 +39,21 @@ struct ContentView: View {
             QRScannerSheet { value in
                 manager.dispatch(.completeQrScan(value: value))
             }
+        }
+        .sheet(item: Binding(
+            get: { manager.state.nwa.request },
+            set: { if $0 == nil, manager.state.nwa.request != nil { manager.dispatch(.cancelNwaRequest) } }
+        )) { request in
+            NwaWalletAuthApprovalView(manager: manager, request: request)
+                .interactiveDismissDisabled()
+        }
+        .sheet(item: Binding(
+            get: { manager.nwc.connectionExport },
+            set: { manager.nwc.connectionExport = $0 }
+        )) { connection in
+            NwcConnectionQRCodeSheet(connection: connection, initiallyCopied: true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .photosPicker(isPresented: Binding(
             get: { manager.state.capabilityRequest?.kind == .photoPick },
@@ -75,6 +90,8 @@ struct ContentView: View {
     @ViewBuilder
     private func screenView(for screen: Screen) -> some View {
         switch screen {
+        case .walletDiagnostics:
+            WalletDiagnosticsView(manager: manager)
         case .setup:
             SetupView(manager: manager)
         case .home:
@@ -85,6 +102,8 @@ struct ContentView: View {
             ReceiveView(manager: manager)
         case .profile:
             ProfileView(manager: manager)
+        case .nwc:
+            NwcConnectionsView(manager: manager)
         case .lightningAddress:
             LightningAddressView(manager: manager)
         case .backup:
@@ -95,8 +114,14 @@ struct ContentView: View {
             NetworkView(manager: manager)
         case .currency:
             CurrencyView(manager: manager)
-        case .contactDetail(let contactId):
+        case let .contactDetail(contactId):
             ContactDetailView(manager: manager, contactId: contactId)
+        case .nwcWakeLogs:
+            NwcWakeLogsView(manager: manager)
+        case .nwcWakeStatus:
+            NwcWakeStatusView(manager: manager)
+        case let .nwcConnectionDetail(connectionId):
+            NwcConnectionDetailView(manager: manager, connectionId: connectionId)
         }
     }
 }

@@ -366,12 +366,33 @@ struct ToastView: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(text)
-                .font(.footnote)
-                .lineLimit(4)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if text.count > 160 {
+                    ScrollView {
+                        Text(text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(height: 160)
+                } else {
+                    Text(text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            .font(.footnote)
+            VStack(spacing: 20) {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Dismiss message")
+                Button {
+                    UIPasteboard.general.string = text
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .accessibilityLabel("Copy full message")
             }
         }
         .padding(12)
@@ -379,6 +400,8 @@ struct ToastView: View {
         .foregroundStyle(.white)
         .padding()
         .task(id: text) {
+            // Long messages need time to scroll, select, and copy.
+            guard text.count <= 160 else { return }
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
             dismiss()

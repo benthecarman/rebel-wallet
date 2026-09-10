@@ -9,74 +9,143 @@
 /* Begin PBXBuildFile section */
 		031CA10D0913601225E060CD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E5E1121C48A2C550F94906 /* ActivityView.swift */; };
 		09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936FB1B08FF781A9F9997609 /* SettingsView.swift */; };
+		1024C56EAAE37CB9BC47A57B /* nwc_mobile_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = F48646D91B757703672D16DA /* nwc_mobile_uniffi.swift */; };
 		10D82D8BEDF6F8B87C9D3393 /* RebelWalletCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */; };
+		1142FA39F4E93B373C47A9AB /* NwaWalletAuthApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8A12273BB7A04F16D710CC /* NwaWalletAuthApprovalView.swift */; };
 		11A29977382725FC272B253A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08790D56E6532CF87DC5EAF5 /* ContentView.swift */; };
+		18DC007A5A51D30A57687770 /* rebel_wallet_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */; };
+		19450B4EB3A474AF0761CD2E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0C4E8C892F802690C2E03D /* NotificationService.swift */; };
+		1CA998C627766237F2232BEB /* NwcMobileApple in Frameworks */ = {isa = PBXBuildFile; productRef = F0484023105D92258A4933F4 /* NwcMobileApple */; };
 		2491CE80085619618553486A /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8285F313C1C4D80E03963B /* QRScanner.swift */; };
+		24F0E2EC7D4661D438CDB1C6 /* NwcWakeInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B331642D861D9C2C3E7455E /* NwcWakeInbox.swift */; };
+		25E210A188760A59A81C19FE /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = ED3F1AA2DED717C2ED0B471C /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		288007FEAC5B508686DAF685 /* ReceiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */; };
 		2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */; };
 		2F71F386BE8E65B77B9C4A44 /* MainWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */; };
 		326333CB48C83D5B4722E8C9 /* ButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */; };
+		330AD19FA193778054DA0C3B /* NwcAppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9381F31E25EB8A47CDE00B8E /* NwcAppManager.swift */; };
 		430B05A25E1EBA780E5F7A16 /* ContactDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82FC9EE794A5E7927FEE7DF8 /* ContactDetailView.swift */; };
 		5BD7FDC594AE8C2772C8DE0B /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 084A69637C40DAFB20690CE9 /* App.swift */; };
+		5F0CDE902BA5F4FF700244BA /* RebelWalletCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */; };
 		67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */; };
 		67FF93F9D8D2C554E9276533 /* AppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 182BE8950E50F58DF4E9DFDB /* AppManager.swift */; };
+		70D30BA2F59014C6B5E1242B /* NwcWakeDebugCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CCE970C3B6681B7BC12B085 /* NwcWakeDebugCard.swift */; };
 		737B461EAB6B2553322AF574 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */; };
 		77560E1840FC1750DD978DFF /* LightningAddressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 503FC468B99283614CA26E34 /* LightningAddressView.swift */; };
 		77918D97F5494E74BC085BC7 /* QRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76402BBB1CEAF24094C36E2 /* QRCodeView.swift */; };
 		7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */; };
+		8A4C8C0A68623535C67CE097 /* nwc_mobile_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = F48646D91B757703672D16DA /* nwc_mobile_uniffi.swift */; };
 		8C969DF3CAF763FFE4B79252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EC33CB686ACF317A895B9BB7 /* Assets.xcassets */; };
+		8FB38D35961F58D80AD870B8 /* WalletDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35A093C9D6C076F63D00D88B /* WalletDiagnosticsView.swift */; };
+		A254CD83F0CFB086C4E1E988 /* NwcWakeInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B331642D861D9C2C3E7455E /* NwcWakeInbox.swift */; };
 		A7A986D21CE49F9EC3ADCB18 /* BackupRestoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEE4097AE328C49061CF79C /* BackupRestoreViews.swift */; };
 		AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */; };
+		AE7885E95B58D6E97883E16B /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0050051F2DE3F2322DF93DF7 /* KeychainSecretStore.swift */; };
 		B5AAD623F82BE3B1BDB58880 /* DisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0F0724D7DE35C122B119C79 /* DisplayText.swift */; };
 		B757D13B7C830FB1E21C287A /* SendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5043C96A336BFDB3828A80 /* SendView.swift */; };
+		B9CCB02C6244FD9FA6DB98EA /* NwaCallbackOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCF4ADAA275B48D3BA1A458 /* NwaCallbackOpener.swift */; };
+		BD582B31BA2D8FB407839679 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0050051F2DE3F2322DF93DF7 /* KeychainSecretStore.swift */; };
+		BFF0C291C0E94B1D126837B5 /* NwcMobileApple in Frameworks */ = {isa = PBXBuildFile; productRef = DBA0DF6522AE70E734C7F52E /* NwcMobileApple */; };
 		CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */; };
 		CED21125310A750295A4780F /* DeviceAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D863AEFB2673876DB1D78CD /* DeviceAuth.swift */; };
 		D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */; };
+		D42630B9434DAC8374280774 /* NwcMobileAliases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C4F07444E020D197C56FB3C /* NwcMobileAliases.swift */; };
 		D4D47575C3B6FFA1C555EF10 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747F6D6E419A7475169ACED6 /* CommonComponents.swift */; };
 		E621BAA395FB93293F83B59E /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF276A85A4339254182EB73 /* SetupView.swift */; };
 		E9395E0EC132A904BCDC7939 /* RebelTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */; };
+		EA14FDB5261179B6A75334DD /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C896475D71C07B62CA72814E /* PushNotifications.swift */; };
 		EC041799A677360DB6FB8799 /* ContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771215578CB9B3F8F64C9139 /* ContactsView.swift */; };
+		F7C403482C2E733CD64D4EF0 /* NwcConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CB043DA11A34DF9BD92812 /* NwcConnectionsView.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		DDC400187F0AF9A2A745F08E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6B590BF25178DC7D824D09CE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = ECB916C2EEA55E04724E6E38;
+			remoteInfo = NotificationService;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7C6B2DB89D01A1E9B8F2A565 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				25E210A188760A59A81C19FE /* NotificationService.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		0050051F2DE3F2322DF93DF7 /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletEasterEgg.swift; sourceTree = "<group>"; };
 		084A69637C40DAFB20690CE9 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		08790D56E6532CF87DC5EAF5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		0B331642D861D9C2C3E7455E /* NwcWakeInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwcWakeInbox.swift; sourceTree = "<group>"; };
 		0BEE4097AE328C49061CF79C /* BackupRestoreViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreViews.swift; sourceTree = "<group>"; };
+		0DCF4ADAA275B48D3BA1A458 /* NwaCallbackOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwaCallbackOpener.swift; sourceTree = "<group>"; };
 		16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSplashView.swift; sourceTree = "<group>"; };
 		182BE8950E50F58DF4E9DFDB /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
+		1CCE970C3B6681B7BC12B085 /* NwcWakeDebugCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwcWakeDebugCard.swift; sourceTree = "<group>"; };
 		1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStyles.swift; sourceTree = "<group>"; };
+		1E8A12273BB7A04F16D710CC /* NwaWalletAuthApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwaWalletAuthApprovalView.swift; sourceTree = "<group>"; };
+		35A093C9D6C076F63D00D88B /* WalletDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletDiagnosticsView.swift; sourceTree = "<group>"; };
 		49D88A349FD70A9153DD2C03 /* App.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		503FC468B99283614CA26E34 /* LightningAddressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightningAddressView.swift; sourceTree = "<group>"; };
+		509EAF54E660C3D06373EA44 /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
+		50CB043DA11A34DF9BD92812 /* NwcConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwcConnectionsView.swift; sourceTree = "<group>"; };
 		5D863AEFB2673876DB1D78CD /* DeviceAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAuth.swift; sourceTree = "<group>"; };
+		60A0551DCC45FC270B470B96 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		6AF276A85A4339254182EB73 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		6C4F07444E020D197C56FB3C /* NwcMobileAliases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwcMobileAliases.swift; sourceTree = "<group>"; };
 		747F6D6E419A7475169ACED6 /* CommonComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonComponents.swift; sourceTree = "<group>"; };
 		771215578CB9B3F8F64C9139 /* ContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsView.swift; sourceTree = "<group>"; };
 		7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		82FC9EE794A5E7927FEE7DF8 /* ContactDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailView.swift; sourceTree = "<group>"; };
+		8B0C4E8C892F802690C2E03D /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		8F8285F313C1C4D80E03963B /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
 		91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = RebelWalletCore.xcframework; path = Frameworks/RebelWalletCore.xcframework; sourceTree = "<group>"; };
 		936FB1B08FF781A9F9997609 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		9381F31E25EB8A47CDE00B8E /* NwcAppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NwcAppManager.swift; sourceTree = "<group>"; };
 		9755A3599BFF7CE9D4C2B1BA /* UIKitPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitPresentation.swift; sourceTree = "<group>"; };
 		B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWalletView.swift; sourceTree = "<group>"; };
 		B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = rebel_wallet_core.swift; sourceTree = "<group>"; };
 		BC5043C96A336BFDB3828A80 /* SendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendView.swift; sourceTree = "<group>"; };
+		C896475D71C07B62CA72814E /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
 		D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RebelTheme.swift; sourceTree = "<group>"; };
 		D3E5E1121C48A2C550F94906 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		D76402BBB1CEAF24094C36E2 /* QRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeView.swift; sourceTree = "<group>"; };
 		D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiveView.swift; sourceTree = "<group>"; };
 		EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileImageLoader.swift; sourceTree = "<group>"; };
 		EC33CB686ACF317A895B9BB7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		ED3F1AA2DED717C2ED0B471C /* NotificationService.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = NotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F0F0724D7DE35C122B119C79 /* DisplayText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayText.swift; sourceTree = "<group>"; };
+		F48646D91B757703672D16DA /* nwc_mobile_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = nwc_mobile_uniffi.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		6DD9DFEAC2CD82FDC7E81AB0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5F0CDE902BA5F4FF700244BA /* RebelWalletCore.xcframework in Frameworks */,
+				BFF0C291C0E94B1D126837B5 /* NwcMobileApple in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BC0DC3536DED64E0E8C9923E /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				10D82D8BEDF6F8B87C9D3393 /* RebelWalletCore.xcframework in Frameworks */,
+				1CA998C627766237F2232BEB /* NwcMobileApple in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -87,6 +156,8 @@
 			isa = PBXGroup;
 			children = (
 				6589618691820EE07F22E58B /* Bindings */,
+				8C60060937C6709C9262FE31 /* NotificationService */,
+				9D2C6B5818429C4B03B3E455 /* Shared */,
 				7F78907537685DA9B94ECD46 /* Sources */,
 				BDD1182E50DC622819F25364 /* Frameworks */,
 				E9C3DB3EC6D7655028A9C0D3 /* Products */,
@@ -104,6 +175,7 @@
 		6589618691820EE07F22E58B /* Bindings */ = {
 			isa = PBXGroup;
 			children = (
+				F48646D91B757703672D16DA /* nwc_mobile_uniffi.swift */,
 				B95DB396C0ACC1FB08D6D500 /* rebel_wallet_core.swift */,
 			);
 			path = Bindings;
@@ -118,6 +190,10 @@
 				08790D56E6532CF87DC5EAF5 /* ContentView.swift */,
 				F0F0724D7DE35C122B119C79 /* DisplayText.swift */,
 				7E9E3BFC2B0F15669B263EA9 /* Haptics.swift */,
+				0DCF4ADAA275B48D3BA1A458 /* NwaCallbackOpener.swift */,
+				9381F31E25EB8A47CDE00B8E /* NwcAppManager.swift */,
+				6C4F07444E020D197C56FB3C /* NwcMobileAliases.swift */,
+				C896475D71C07B62CA72814E /* PushNotifications.swift */,
 				D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */,
 				07DF4B0F56CEA10895EF3067 /* WalletEasterEgg.swift */,
 				9BED51F3FB75136969C70004 /* Capabilities */,
@@ -127,6 +203,16 @@
 				A3FB5A3A73FC5C9493069E5D /* Views */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		8C60060937C6709C9262FE31 /* NotificationService */ = {
+			isa = PBXGroup;
+			children = (
+				60A0551DCC45FC270B470B96 /* Info.plist */,
+				509EAF54E660C3D06373EA44 /* NotificationService.entitlements */,
+				8B0C4E8C892F802690C2E03D /* NotificationService.swift */,
+			);
+			path = NotificationService;
 			sourceTree = "<group>";
 		};
 		8EB165A1A41A6C1DBA2779EF /* Services */ = {
@@ -146,6 +232,15 @@
 			path = Capabilities;
 			sourceTree = "<group>";
 		};
+		9D2C6B5818429C4B03B3E455 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				0050051F2DE3F2322DF93DF7 /* KeychainSecretStore.swift */,
+				0B331642D861D9C2C3E7455E /* NwcWakeInbox.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A3FB5A3A73FC5C9493069E5D /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -156,11 +251,15 @@
 				16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */,
 				503FC468B99283614CA26E34 /* LightningAddressView.swift */,
 				B4B27DDADBA14C23A4E2298B /* MainWalletView.swift */,
+				1E8A12273BB7A04F16D710CC /* NwaWalletAuthApprovalView.swift */,
+				50CB043DA11A34DF9BD92812 /* NwcConnectionsView.swift */,
+				1CCE970C3B6681B7BC12B085 /* NwcWakeDebugCard.swift */,
 				6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */,
 				D898E612217B1C89FA7CA6B2 /* ReceiveView.swift */,
 				BC5043C96A336BFDB3828A80 /* SendView.swift */,
 				936FB1B08FF781A9F9997609 /* SettingsView.swift */,
 				6AF276A85A4339254182EB73 /* SetupView.swift */,
+				35A093C9D6C076F63D00D88B /* WalletDiagnosticsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -177,6 +276,7 @@
 			isa = PBXGroup;
 			children = (
 				49D88A349FD70A9153DD2C03 /* App.app */,
+				ED3F1AA2DED717C2ED0B471C /* NotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -201,17 +301,39 @@
 				B77F0AF073564580D75A2CF1 /* Sources */,
 				37BFF6A8CB5CC7FA21AD3FA3 /* Resources */,
 				BC0DC3536DED64E0E8C9923E /* Frameworks */,
+				7C6B2DB89D01A1E9B8F2A565 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4AF6D56A028A47ED9724248D /* PBXTargetDependency */,
+			);
+			name = App;
+			packageProductDependencies = (
+				F0484023105D92258A4933F4 /* NwcMobileApple */,
+			);
+			productName = App;
+			productReference = 49D88A349FD70A9153DD2C03 /* App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		ECB916C2EEA55E04724E6E38 /* NotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6707CD602AF3D8B3AE7A959D /* Build configuration list for PBXNativeTarget "NotificationService" */;
+			buildPhases = (
+				665BFF2C96462D4FFC391BD5 /* Sources */,
+				6DD9DFEAC2CD82FDC7E81AB0 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = App;
+			name = NotificationService;
 			packageProductDependencies = (
+				DBA0DF6522AE70E734C7F52E /* NwcMobileApple */,
 			);
-			productName = App;
-			productReference = 49D88A349FD70A9153DD2C03 /* App.app */;
-			productType = "com.apple.product-type.application";
+			productName = NotificationService;
+			productReference = ED3F1AA2DED717C2ED0B471C /* NotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -223,7 +345,12 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					93E9E330FC2CE7458D9C925F = {
-						DevelopmentTeam = 6JWFWV65BL;
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					ECB916C2EEA55E04724E6E38 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -236,12 +363,16 @@
 			);
 			mainGroup = 4102E3E068508DD683953C7D;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				BEA342C042E103E2D0C5969F /* XCRemoteSwiftPackageReference "nwc-mobile" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E9C3DB3EC6D7655028A9C0D3 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				93E9E330FC2CE7458D9C925F /* App */,
+				ECB916C2EEA55E04724E6E38 /* NotificationService */,
 			);
 		};
 /* End PBXProject section */
@@ -258,6 +389,18 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		665BFF2C96462D4FFC391BD5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AE7885E95B58D6E97883E16B /* KeychainSecretStore.swift in Sources */,
+				19450B4EB3A474AF0761CD2E /* NotificationService.swift in Sources */,
+				A254CD83F0CFB086C4E1E988 /* NwcWakeInbox.swift in Sources */,
+				1024C56EAAE37CB9BC47A57B /* nwc_mobile_uniffi.swift in Sources */,
+				18DC007A5A51D30A57687770 /* rebel_wallet_core.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B77F0AF073564580D75A2CF1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -274,11 +417,20 @@
 				CED21125310A750295A4780F /* DeviceAuth.swift in Sources */,
 				B5AAD623F82BE3B1BDB58880 /* DisplayText.swift in Sources */,
 				737B461EAB6B2553322AF574 /* Haptics.swift in Sources */,
+				BD582B31BA2D8FB407839679 /* KeychainSecretStore.swift in Sources */,
 				AC5F9605CCFD3CE1158502B0 /* LaunchSplashView.swift in Sources */,
 				77560E1840FC1750DD978DFF /* LightningAddressView.swift in Sources */,
 				2F71F386BE8E65B77B9C4A44 /* MainWalletView.swift in Sources */,
+				B9CCB02C6244FD9FA6DB98EA /* NwaCallbackOpener.swift in Sources */,
+				1142FA39F4E93B373C47A9AB /* NwaWalletAuthApprovalView.swift in Sources */,
+				330AD19FA193778054DA0C3B /* NwcAppManager.swift in Sources */,
+				F7C403482C2E733CD64D4EF0 /* NwcConnectionsView.swift in Sources */,
+				D42630B9434DAC8374280774 /* NwcMobileAliases.swift in Sources */,
+				70D30BA2F59014C6B5E1242B /* NwcWakeDebugCard.swift in Sources */,
+				24F0E2EC7D4661D438CDB1C6 /* NwcWakeInbox.swift in Sources */,
 				67A132F02B1DCFCF92F79629 /* ProfileImageLoader.swift in Sources */,
 				D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */,
+				EA14FDB5261179B6A75334DD /* PushNotifications.swift in Sources */,
 				77918D97F5494E74BC085BC7 /* QRCodeView.swift in Sources */,
 				2491CE80085619618553486A /* QRScanner.swift in Sources */,
 				E9395E0EC132A904BCDC7939 /* RebelTheme.swift in Sources */,
@@ -287,18 +439,29 @@
 				09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */,
 				E621BAA395FB93293F83B59E /* SetupView.swift in Sources */,
 				CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */,
+				8FB38D35961F58D80AD870B8 /* WalletDiagnosticsView.swift in Sources */,
 				2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */,
+				8A4C8C0A68623535C67CE097 /* nwc_mobile_uniffi.swift in Sources */,
 				7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		4AF6D56A028A47ED9724248D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = ECB916C2EEA55E04724E6E38 /* NotificationService */;
+			targetProxy = DDC400187F0AF9A2A745F08E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
 		4A0C935808978B5A7673E412 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -349,10 +512,11 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 6JWFWV65BL;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -363,10 +527,16 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_PREPROCESS = YES;
+				INFOPLIST_PREPROCESSOR_DEFINITIONS = "IOS_ALLOWS_LOCAL_NETWORKING=0";
+				IOS_APP_GROUP_ID = group.com.rebelwallet.app;
+				IOS_APS_ENVIRONMENT = development;
+				IOS_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)com.rebelwallet.app";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				NWC_WAKE_SERVER_URL = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.rebelwallet.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -376,10 +546,51 @@
 			};
 			name = Release;
 		};
+		743428175B81DAF72DE18D97 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = NotificationService/NotificationService.entitlements;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Frameworks\"",
+				);
+				INFOPLIST_FILE = NotificationService/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.rebelwallet.app.NotificationService;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		92FA7E3706106CC724638995 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = NotificationService/NotificationService.entitlements;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Frameworks\"",
+				);
+				INFOPLIST_FILE = NotificationService/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.rebelwallet.app.NotificationService;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		EB1CC3A930E09FEBECF9195D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -428,10 +639,11 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 6JWFWV65BL;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -448,10 +660,16 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_PREPROCESS = YES;
+				INFOPLIST_PREPROCESSOR_DEFINITIONS = "IOS_ALLOWS_LOCAL_NETWORKING=1";
+				IOS_APP_GROUP_ID = group.com.rebelwallet.app;
+				IOS_APS_ENVIRONMENT = development;
+				IOS_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)com.rebelwallet.app";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
+				NWC_WAKE_SERVER_URL = "";
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.rebelwallet.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -465,6 +683,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		6707CD602AF3D8B3AE7A959D /* Build configuration list for PBXNativeTarget "NotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				743428175B81DAF72DE18D97 /* Debug */,
+				92FA7E3706106CC724638995 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		B3FD05C59F197F398A0B04AB /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -484,6 +711,30 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BEA342C042E103E2D0C5969F /* XCRemoteSwiftPackageReference "nwc-mobile" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ntheile/nwc-mobile";
+			requirement = {
+				kind = revision;
+				revision = 61f1f7ce445ea45b3447aff6763993c7baeb51ce;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DBA0DF6522AE70E734C7F52E /* NwcMobileApple */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BEA342C042E103E2D0C5969F /* XCRemoteSwiftPackageReference "nwc-mobile" */;
+			productName = NwcMobileApple;
+		};
+		F0484023105D92258A4933F4 /* NwcMobileApple */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BEA342C042E103E2D0C5969F /* XCRemoteSwiftPackageReference "nwc-mobile" */;
+			productName = NwcMobileApple;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6B590BF25178DC7D824D09CE /* Project object */;
 }

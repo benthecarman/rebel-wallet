@@ -1,4 +1,7 @@
-use crate::{HapticFeedback, MainTab, PriceCurrency, ReceiveMethod, Screen, WalletNetwork};
+use crate::{
+    HapticFeedback, MainTab, NwcBudgetInterval, NwcPermission, NwcWakeRequest, PriceCurrency,
+    ReceiveMethod, Screen, WalletNetwork,
+};
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppAction {
@@ -13,6 +16,8 @@ pub enum AppAction {
     DeleteWallet,
     ShowSeed,
     SyncWallet,
+    ReloadWalletDiagnostics,
+    ForceRefreshWalletVtxos,
     MaintainVtxos,
     RefreshPrice,
     SetPriceCurrency {
@@ -20,6 +25,8 @@ pub enum AppAction {
     },
     SelectNetwork {
         network: WalletNetwork,
+        server_address: Option<String>,
+        esplora_address: Option<String>,
     },
     SelectTab {
         tab: MainTab,
@@ -100,6 +107,45 @@ pub enum AppAction {
         image_base64: Option<String>,
     },
     CancelCapabilityRequest,
+    SetPushNotificationRegistration {
+        apns_device_token: Option<String>,
+        registration_status: String,
+        wake_server_url: Option<String>,
+        app_id: String,
+        environment: String,
+        install_id: String,
+    },
+    OpenNwaRequest {
+        uri: String,
+    },
+    ApproveNwaRequest {
+        relay: String,
+        budget_sat: u64,
+        budget_interval: NwcBudgetInterval,
+        permissions: Vec<NwcPermission>,
+    },
+    RetryNwaCallback,
+    CancelNwaRequest,
+    CompleteNwaCallbackOpen {
+        opened: bool,
+    },
+    ProcessNwcWakeRequests {
+        requests: Vec<NwcWakeRequest>,
+    },
+    CreateNwcConnection {
+        name: String,
+        relay: String,
+        budget_sat: u64,
+        budget_interval: NwcBudgetInterval,
+        permissions: Vec<NwcPermission>,
+    },
+    RequestNwcConnectionExport {
+        id: String,
+        copy_to_clipboard: bool,
+    },
+    DeleteNwcConnection {
+        id: String,
+    },
     GenerateNostrKey,
     ImportNostrSecret {
         nsec_or_hex: String,

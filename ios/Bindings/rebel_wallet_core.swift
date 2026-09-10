@@ -711,6 +711,149 @@ public func FfiConverterTypeFfiApp_lower(_ value: FfiApp) -> UInt64 {
 
 
 
+
+
+/**
+ * Rebel-specific wallet bootstrap around the shared native wake contract.
+ */
+public protocol NwcExtensionEngineProtocol: AnyObject, Sendable {
+    
+    func executeWake(request: MobileWakeEnvelope, executionMilliseconds: UInt64, cancellation: MobileCancellation) async  -> NwcExtensionWakeExecution
+    
+}
+/**
+ * Rebel-specific wallet bootstrap around the shared native wake contract.
+ */
+open class NwcExtensionEngine: NwcExtensionEngineProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_rebel_wallet_core_fn_clone_nwcextensionengine(self.handle, $0) }
+    }
+public convenience init(dataDir: String, secretStore: SecretStore, wakeServerUrl: String?, installId: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_rebel_wallet_core_fn_constructor_nwcextensionengine_new(
+        FfiConverterString.lower(dataDir),
+        FfiConverterCallbackInterfaceSecretStore_lower(secretStore),
+        FfiConverterOptionString.lower(wakeServerUrl),
+        FfiConverterString.lower(installId),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_rebel_wallet_core_fn_free_nwcextensionengine(handle, $0) }
+    }
+
+    
+
+    
+open func executeWake(request: MobileWakeEnvelope, executionMilliseconds: UInt64, cancellation: MobileCancellation)async  -> NwcExtensionWakeExecution  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_rebel_wallet_core_fn_method_nwcextensionengine_execute_wake(
+                    self.uniffiCloneHandle(),
+                    FfiConverterTypeMobileWakeEnvelope_lower(request),FfiConverterUInt64.lower(executionMilliseconds),FfiConverterTypeMobileCancellation_lower(cancellation)
+                )
+            },
+            pollFunc: ffi_rebel_wallet_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_rebel_wallet_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_rebel_wallet_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeNwcExtensionWakeExecution_lift,
+            errorHandler: nil
+            
+        )
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNwcExtensionEngine: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = NwcExtensionEngine
+
+    public static func lift(_ handle: UInt64) throws -> NwcExtensionEngine {
+        return NwcExtensionEngine(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: NwcExtensionEngine) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NwcExtensionEngine {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: NwcExtensionEngine, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNwcExtensionEngine_lift(_ handle: UInt64) throws -> NwcExtensionEngine {
+    return try FfiConverterTypeNwcExtensionEngine.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNwcExtensionEngine_lower(_ value: NwcExtensionEngine) -> UInt64 {
+    return FfiConverterTypeNwcExtensionEngine.lower(value)
+}
+
+
+
+
 public struct ActivityItem: Equatable, Hashable {
     public var id: String
     public var title: String
@@ -858,6 +1001,10 @@ public func FfiConverterTypeActivityItem_lower(_ value: ActivityItem) -> RustBuf
 
 
 public struct AppState: Equatable, Hashable {
+    public var walletDiagnostics: String
+    public var walletDiagnosticsLoading: Bool
+    public var walletRefreshRunning: Bool
+    public var walletRefreshStatus: String
     public var rev: UInt64
     public var showLaunchSplash: Bool
     public var router: Router
@@ -876,10 +1023,17 @@ public struct AppState: Equatable, Hashable {
     public var toast: String?
     public var busy: BusyState
     public var capabilityRequest: CapabilityRequest?
+    public var pushNotifications: PushNotificationState
+    public var nwa: MobileNwaSessionState
+    public var nwc: NwcState
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, showLaunchSplash: Bool, router: Router, setup: SetupState, wallet: WalletState, supportedNetworks: [NetworkOption], supportedPriceCurrencies: [CurrencyOption], receive: ReceiveState, send: SendState, lightningAddress: LightningAddressState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, revealedNostrSecret: String?, toast: String?, busy: BusyState, capabilityRequest: CapabilityRequest?) {
+    public init(walletDiagnostics: String, walletDiagnosticsLoading: Bool, walletRefreshRunning: Bool, walletRefreshStatus: String, rev: UInt64, showLaunchSplash: Bool, router: Router, setup: SetupState, wallet: WalletState, supportedNetworks: [NetworkOption], supportedPriceCurrencies: [CurrencyOption], receive: ReceiveState, send: SendState, lightningAddress: LightningAddressState, nostr: NostrState, directMessages: [NostrMessage], activity: [ActivityItem], recoveryPhrase: String?, revealedNostrSecret: String?, toast: String?, busy: BusyState, capabilityRequest: CapabilityRequest?, pushNotifications: PushNotificationState, nwa: MobileNwaSessionState, nwc: NwcState) {
+        self.walletDiagnostics = walletDiagnostics
+        self.walletDiagnosticsLoading = walletDiagnosticsLoading
+        self.walletRefreshRunning = walletRefreshRunning
+        self.walletRefreshStatus = walletRefreshStatus
         self.rev = rev
         self.showLaunchSplash = showLaunchSplash
         self.router = router
@@ -898,6 +1052,9 @@ public struct AppState: Equatable, Hashable {
         self.toast = toast
         self.busy = busy
         self.capabilityRequest = capabilityRequest
+        self.pushNotifications = pushNotifications
+        self.nwa = nwa
+        self.nwc = nwc
     }
 
     
@@ -916,6 +1073,10 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppState {
         return
             try AppState(
+                walletDiagnostics: FfiConverterString.read(from: &buf), 
+                walletDiagnosticsLoading: FfiConverterBool.read(from: &buf), 
+                walletRefreshRunning: FfiConverterBool.read(from: &buf), 
+                walletRefreshStatus: FfiConverterString.read(from: &buf), 
                 rev: FfiConverterUInt64.read(from: &buf), 
                 showLaunchSplash: FfiConverterBool.read(from: &buf), 
                 router: FfiConverterTypeRouter.read(from: &buf), 
@@ -933,11 +1094,18 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
                 revealedNostrSecret: FfiConverterOptionString.read(from: &buf), 
                 toast: FfiConverterOptionString.read(from: &buf), 
                 busy: FfiConverterTypeBusyState.read(from: &buf), 
-                capabilityRequest: FfiConverterOptionTypeCapabilityRequest.read(from: &buf)
+                capabilityRequest: FfiConverterOptionTypeCapabilityRequest.read(from: &buf), 
+                pushNotifications: FfiConverterTypePushNotificationState.read(from: &buf), 
+                nwa: FfiConverterTypeMobileNwaSessionState.read(from: &buf), 
+                nwc: FfiConverterTypeNwcState.read(from: &buf)
         )
     }
 
     public static func write(_ value: AppState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.walletDiagnostics, into: &buf)
+        FfiConverterBool.write(value.walletDiagnosticsLoading, into: &buf)
+        FfiConverterBool.write(value.walletRefreshRunning, into: &buf)
+        FfiConverterString.write(value.walletRefreshStatus, into: &buf)
         FfiConverterUInt64.write(value.rev, into: &buf)
         FfiConverterBool.write(value.showLaunchSplash, into: &buf)
         FfiConverterTypeRouter.write(value.router, into: &buf)
@@ -956,6 +1124,9 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.toast, into: &buf)
         FfiConverterTypeBusyState.write(value.busy, into: &buf)
         FfiConverterOptionTypeCapabilityRequest.write(value.capabilityRequest, into: &buf)
+        FfiConverterTypePushNotificationState.write(value.pushNotifications, into: &buf)
+        FfiConverterTypeMobileNwaSessionState.write(value.nwa, into: &buf)
+        FfiConverterTypeNwcState.write(value.nwc, into: &buf)
     }
 }
 
@@ -1591,6 +1762,126 @@ public func FfiConverterTypeNostrState_lower(_ value: NostrState) -> RustBuffer 
 }
 
 
+public struct NwcState: Equatable, Hashable {
+    public var connections: [MobileConnectionView]
+    public var defaultRelay: String
+    public var pendingWakeRequests: [MobileWakeEnvelope]
+    public var processedWakeRequests: [MobileProcessedWakeRequest]
+    public var lastWakeStatus: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(connections: [MobileConnectionView], defaultRelay: String, pendingWakeRequests: [MobileWakeEnvelope], processedWakeRequests: [MobileProcessedWakeRequest], lastWakeStatus: String) {
+        self.connections = connections
+        self.defaultRelay = defaultRelay
+        self.pendingWakeRequests = pendingWakeRequests
+        self.processedWakeRequests = processedWakeRequests
+        self.lastWakeStatus = lastWakeStatus
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension NwcState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNwcState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NwcState {
+        return
+            try NwcState(
+                connections: FfiConverterSequenceTypeMobileConnectionView.read(from: &buf), 
+                defaultRelay: FfiConverterString.read(from: &buf), 
+                pendingWakeRequests: FfiConverterSequenceTypeMobileWakeEnvelope.read(from: &buf), 
+                processedWakeRequests: FfiConverterSequenceTypeMobileProcessedWakeRequest.read(from: &buf), 
+                lastWakeStatus: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NwcState, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeMobileConnectionView.write(value.connections, into: &buf)
+        FfiConverterString.write(value.defaultRelay, into: &buf)
+        FfiConverterSequenceTypeMobileWakeEnvelope.write(value.pendingWakeRequests, into: &buf)
+        FfiConverterSequenceTypeMobileProcessedWakeRequest.write(value.processedWakeRequests, into: &buf)
+        FfiConverterString.write(value.lastWakeStatus, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNwcState_lift(_ buf: RustBuffer) throws -> NwcState {
+    return try FfiConverterTypeNwcState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNwcState_lower(_ value: NwcState) -> RustBuffer {
+    return FfiConverterTypeNwcState.lower(value)
+}
+
+
+public struct PushNotificationState: Equatable, Hashable {
+    public var apnsDeviceToken: String?
+    public var registrationStatus: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(apnsDeviceToken: String?, registrationStatus: String) {
+        self.apnsDeviceToken = apnsDeviceToken
+        self.registrationStatus = registrationStatus
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PushNotificationState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePushNotificationState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PushNotificationState {
+        return
+            try PushNotificationState(
+                apnsDeviceToken: FfiConverterOptionString.read(from: &buf), 
+                registrationStatus: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PushNotificationState, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.apnsDeviceToken, into: &buf)
+        FfiConverterString.write(value.registrationStatus, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePushNotificationState_lift(_ buf: RustBuffer) throws -> PushNotificationState {
+    return try FfiConverterTypePushNotificationState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePushNotificationState_lower(_ value: PushNotificationState) -> RustBuffer {
+    return FfiConverterTypePushNotificationState.lower(value)
+}
+
+
 public struct ReceiveState: Equatable, Hashable {
     public var method: ReceiveMethod
     public var phase: ReceivePhase
@@ -1932,7 +2223,7 @@ public struct WalletState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, stuckReceiveSat: UInt64, stuckReceiveDisplay: String, stuckReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?,
+    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, stuckReceiveSat: UInt64, stuckReceiveDisplay: String, stuckReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, 
         /**
          * Funds committed to a round funding transaction and temporarily
          * unavailable. Queued delegated refreshes are deliberately excluded.
@@ -1998,16 +2289,16 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
                 pendingReceiveSat: FfiConverterUInt64.read(from: &buf), 
                 pendingReceiveDisplay: FfiConverterString.read(from: &buf), 
                 pendingReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf), 
-                stuckReceiveSat: FfiConverterUInt64.read(from: &buf),
-                stuckReceiveDisplay: FfiConverterString.read(from: &buf),
-                stuckReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf),
+                stuckReceiveSat: FfiConverterUInt64.read(from: &buf), 
+                stuckReceiveDisplay: FfiConverterString.read(from: &buf), 
+                stuckReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf), 
                 pendingSendSat: FfiConverterUInt64.read(from: &buf), 
                 pendingSendDisplay: FfiConverterString.read(from: &buf), 
                 pendingSendFiatDisplay: FfiConverterOptionString.read(from: &buf), 
                 pendingRefreshSat: FfiConverterUInt64.read(from: &buf), 
                 pendingRefreshDisplay: FfiConverterString.read(from: &buf), 
                 pendingRefreshFiatDisplay: FfiConverterOptionString.read(from: &buf), 
-                syncError: FfiConverterOptionString.read(from: &buf),
+                syncError: FfiConverterOptionString.read(from: &buf), 
                 lastSync: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -2139,11 +2430,13 @@ public enum AppAction: Equatable, Hashable {
     case deleteWallet
     case showSeed
     case syncWallet
+    case reloadWalletDiagnostics
+    case forceRefreshWalletVtxos
     case maintainVtxos
     case refreshPrice
     case setPriceCurrency(currency: PriceCurrency
     )
-    case selectNetwork(network: WalletNetwork
+    case selectNetwork(network: WalletNetwork, serverAddress: String?, esploraAddress: String?
     )
     case selectTab(tab: MainTab
     )
@@ -2203,6 +2496,24 @@ public enum AppAction: Equatable, Hashable {
     case completePhotoPick(imageBase64: String?
     )
     case cancelCapabilityRequest
+    case setPushNotificationRegistration(apnsDeviceToken: String?, registrationStatus: String, wakeServerUrl: String?, appId: String, environment: String, installId: String
+    )
+    case openNwaRequest(uri: String
+    )
+    case approveNwaRequest(relay: String, budgetSat: UInt64, budgetInterval: MobileBudgetInterval, permissions: [MobileNwcMethod]
+    )
+    case retryNwaCallback
+    case cancelNwaRequest
+    case completeNwaCallbackOpen(opened: Bool
+    )
+    case processNwcWakeRequests(requests: [MobileWakeEnvelope]
+    )
+    case createNwcConnection(name: String, relay: String, budgetSat: UInt64, budgetInterval: MobileBudgetInterval, permissions: [MobileNwcMethod]
+    )
+    case requestNwcConnectionExport(id: String, copyToClipboard: Bool
+    )
+    case deleteNwcConnection(id: String
+    )
     case generateNostrKey
     case importNostrSecret(nsecOrHex: String
     )
@@ -2276,174 +2587,206 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         
         case 7: return .syncWallet
         
-        case 8: return .maintainVtxos
+        case 8: return .reloadWalletDiagnostics
         
-        case 9: return .refreshPrice
+        case 9: return .forceRefreshWalletVtxos
         
-        case 10: return .setPriceCurrency(currency: try FfiConverterTypePriceCurrency.read(from: &buf)
+        case 10: return .maintainVtxos
+        
+        case 11: return .refreshPrice
+        
+        case 12: return .setPriceCurrency(currency: try FfiConverterTypePriceCurrency.read(from: &buf)
         )
         
-        case 11: return .selectNetwork(network: try FfiConverterTypeWalletNetwork.read(from: &buf)
+        case 13: return .selectNetwork(network: try FfiConverterTypeWalletNetwork.read(from: &buf), serverAddress: try FfiConverterOptionString.read(from: &buf), esploraAddress: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 12: return .selectTab(tab: try FfiConverterTypeMainTab.read(from: &buf)
+        case 14: return .selectTab(tab: try FfiConverterTypeMainTab.read(from: &buf)
         )
         
-        case 13: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
+        case 15: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
         )
         
-        case 14: return .popScreen
+        case 16: return .popScreen
         
-        case 15: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
+        case 17: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
         )
         
-        case 16: return .selectReceiveMethod(method: try FfiConverterTypeReceiveMethod.read(from: &buf)
+        case 18: return .selectReceiveMethod(method: try FfiConverterTypeReceiveMethod.read(from: &buf)
         )
         
-        case 17: return .setReceiveAmount(amountSat: try FfiConverterUInt64.read(from: &buf)
+        case 19: return .setReceiveAmount(amountSat: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 18: return .setReceiveMemo(memo: try FfiConverterString.read(from: &buf)
+        case 20: return .setReceiveMemo(memo: try FfiConverterString.read(from: &buf)
         )
         
-        case 19: return .editReceiveRequest
+        case 21: return .editReceiveRequest
         
-        case 20: return .beginReceiveRequest
+        case 22: return .beginReceiveRequest
         
-        case 21: return .resumeReceiveMonitor
+        case 23: return .resumeReceiveMonitor
         
-        case 22: return .claimPendingLightningReceives
+        case 24: return .claimPendingLightningReceives
         
-        case 23: return .createArkAddress
+        case 25: return .createArkAddress
         
-        case 24: return .createLightningInvoice
+        case 26: return .createLightningInvoice
         
-        case 25: return .setLightningAddressName(name: try FfiConverterString.read(from: &buf)
+        case 27: return .setLightningAddressName(name: try FfiConverterString.read(from: &buf)
         )
         
-        case 26: return .registerLightningAddress
+        case 28: return .registerLightningAddress
         
-        case 27: return .confirmLightningAddressRegistrationPayment
+        case 29: return .confirmLightningAddressRegistrationPayment
         
-        case 28: return .cancelLightningAddressRegistrationPayment
+        case 30: return .cancelLightningAddressRegistrationPayment
         
-        case 29: return .verifyLightningAddressRegistration
+        case 31: return .verifyLightningAddressRegistration
         
-        case 30: return .clearLightningAddressRegistration
+        case 32: return .clearLightningAddressRegistration
         
-        case 31: return .setSendSearchQuery(query: try FfiConverterString.read(from: &buf)
+        case 33: return .setSendSearchQuery(query: try FfiConverterString.read(from: &buf)
         )
         
-        case 32: return .continueSendSearch
+        case 34: return .continueSendSearch
         
-        case 33: return .selectSendContact(contactId: try FfiConverterString.read(from: &buf)
+        case 35: return .selectSendContact(contactId: try FfiConverterString.read(from: &buf)
         )
         
-        case 34: return .prefetchProfilePictures(contactIds: try FfiConverterSequenceString.read(from: &buf)
+        case 36: return .prefetchProfilePictures(contactIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 35: return .setSendDestination(destination: try FfiConverterString.read(from: &buf)
+        case 37: return .setSendDestination(destination: try FfiConverterString.read(from: &buf)
         )
         
-        case 36: return .setSendAmount(amountSat: try FfiConverterUInt64.read(from: &buf)
+        case 38: return .setSendAmount(amountSat: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 37: return .setSendMemo(memo: try FfiConverterString.read(from: &buf)
+        case 39: return .setSendMemo(memo: try FfiConverterString.read(from: &buf)
         )
         
-        case 38: return .setSendZapEnabled(enabled: try FfiConverterBool.read(from: &buf)
+        case 40: return .setSendZapEnabled(enabled: try FfiConverterBool.read(from: &buf)
         )
         
-        case 39: return .payDestination
+        case 41: return .payDestination
         
-        case 40: return .payLightningInvoice(invoice: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterOptionUInt64.read(from: &buf)
+        case 42: return .payLightningInvoice(invoice: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
-        case 41: return .payArkAddress(address: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterUInt64.read(from: &buf)
+        case 43: return .payArkAddress(address: try FfiConverterString.read(from: &buf), amountSat: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 42: return .dismissPaymentSuccess
+        case 44: return .dismissPaymentSuccess
         
-        case 43: return .resetSendDraft
+        case 45: return .resetSendDraft
         
-        case 44: return .requestQrScan
+        case 46: return .requestQrScan
         
-        case 45: return .requestClipboardRead
+        case 47: return .requestClipboardRead
         
-        case 46: return .requestPhotoPick
+        case 48: return .requestPhotoPick
         
-        case 47: return .completeQrScan(value: try FfiConverterOptionString.read(from: &buf)
+        case 49: return .completeQrScan(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 48: return .completeClipboardRead(value: try FfiConverterOptionString.read(from: &buf)
+        case 50: return .completeClipboardRead(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 49: return .completePhotoPick(imageBase64: try FfiConverterOptionString.read(from: &buf)
+        case 51: return .completePhotoPick(imageBase64: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 50: return .cancelCapabilityRequest
+        case 52: return .cancelCapabilityRequest
         
-        case 51: return .generateNostrKey
-        
-        case 52: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
+        case 53: return .setPushNotificationRegistration(apnsDeviceToken: try FfiConverterOptionString.read(from: &buf), registrationStatus: try FfiConverterString.read(from: &buf), wakeServerUrl: try FfiConverterOptionString.read(from: &buf), appId: try FfiConverterString.read(from: &buf), environment: try FfiConverterString.read(from: &buf), installId: try FfiConverterString.read(from: &buf)
         )
         
-        case 53: return .exportNostrSecret
-        
-        case 54: return .clearNostrKey
-        
-        case 55: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
+        case 54: return .openNwaRequest(uri: try FfiConverterString.read(from: &buf)
         )
         
-        case 56: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
+        case 55: return .approveNwaRequest(relay: try FfiConverterString.read(from: &buf), budgetSat: try FfiConverterUInt64.read(from: &buf), budgetInterval: try FfiConverterTypeMobileBudgetInterval.read(from: &buf), permissions: try FfiConverterSequenceTypeMobileNwcMethod.read(from: &buf)
         )
         
-        case 57: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 56: return .retryNwaCallback
+        
+        case 57: return .cancelNwaRequest
+        
+        case 58: return .completeNwaCallbackOpen(opened: try FfiConverterBool.read(from: &buf)
         )
         
-        case 58: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        case 59: return .processNwcWakeRequests(requests: try FfiConverterSequenceTypeMobileWakeEnvelope.read(from: &buf)
         )
         
-        case 59: return .followContact(contactId: try FfiConverterString.read(from: &buf)
+        case 60: return .createNwcConnection(name: try FfiConverterString.read(from: &buf), relay: try FfiConverterString.read(from: &buf), budgetSat: try FfiConverterUInt64.read(from: &buf), budgetInterval: try FfiConverterTypeMobileBudgetInterval.read(from: &buf), permissions: try FfiConverterSequenceTypeMobileNwcMethod.read(from: &buf)
         )
         
-        case 60: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
+        case 61: return .requestNwcConnectionExport(id: try FfiConverterString.read(from: &buf), copyToClipboard: try FfiConverterBool.read(from: &buf)
         )
         
-        case 61: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
+        case 62: return .deleteNwcConnection(id: try FfiConverterString.read(from: &buf)
         )
         
-        case 62: return .publishNostrProfile
+        case 63: return .generateNostrKey
         
-        case 63: return .refreshNostrProfile
-        
-        case 64: return .deleteNostrProfile
-        
-        case 65: return .publishContactList
-        
-        case 66: return .refreshContactList
-        
-        case 67: return .clearNostrProfileCache
-        
-        case 68: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
+        case 64: return .importNostrSecret(nsecOrHex: try FfiConverterString.read(from: &buf)
         )
         
-        case 69: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        case 65: return .exportNostrSecret
+        
+        case 66: return .clearNostrKey
+        
+        case 67: return .editNostrProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf), lud16: try FfiConverterString.read(from: &buf), nip05: try FfiConverterString.read(from: &buf)
         )
         
-        case 70: return .clearToast
-        
-        case 71: return .clearRecoveryPhrase
-        
-        case 72: return .clearRevealedNostrSecret
-        
-        case 73: return .requestHaptic(feedback: try FfiConverterTypeHapticFeedback.read(from: &buf)
+        case 68: return .uploadNostrProfilePicture(imageBase64: try FfiConverterString.read(from: &buf)
         )
         
-        case 74: return .foregrounded
-
-        case 75: return .backgrounded
-
+        case 69: return .addContact(npub: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 70: return .editContact(contactId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf), lightningAddress: try FfiConverterString.read(from: &buf), lnurl: try FfiConverterString.read(from: &buf), picture: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 71: return .followContact(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 72: return .unfollowContact(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 73: return .deleteContact(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 74: return .publishNostrProfile
+        
+        case 75: return .refreshNostrProfile
+        
+        case 76: return .deleteNostrProfile
+        
+        case 77: return .publishContactList
+        
+        case 78: return .refreshContactList
+        
+        case 79: return .clearNostrProfileCache
+        
+        case 80: return .loadDirectMessages(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 81: return .sendDirectMessage(contactId: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 82: return .clearToast
+        
+        case 83: return .clearRecoveryPhrase
+        
+        case 84: return .clearRevealedNostrSecret
+        
+        case 85: return .requestHaptic(feedback: try FfiConverterTypeHapticFeedback.read(from: &buf)
+        )
+        
+        case 86: return .foregrounded
+        
+        case 87: return .backgrounded
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -2482,220 +2825,291 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         
         
-        case .maintainVtxos:
+        case .reloadWalletDiagnostics:
             writeInt(&buf, Int32(8))
         
         
-        case .refreshPrice:
+        case .forceRefreshWalletVtxos:
             writeInt(&buf, Int32(9))
         
         
-        case let .setPriceCurrency(currency):
+        case .maintainVtxos:
             writeInt(&buf, Int32(10))
+        
+        
+        case .refreshPrice:
+            writeInt(&buf, Int32(11))
+        
+        
+        case let .setPriceCurrency(currency):
+            writeInt(&buf, Int32(12))
             FfiConverterTypePriceCurrency.write(currency, into: &buf)
             
         
-        case let .selectNetwork(network):
-            writeInt(&buf, Int32(11))
+        case let .selectNetwork(network,serverAddress,esploraAddress):
+            writeInt(&buf, Int32(13))
             FfiConverterTypeWalletNetwork.write(network, into: &buf)
+            FfiConverterOptionString.write(serverAddress, into: &buf)
+            FfiConverterOptionString.write(esploraAddress, into: &buf)
             
         
         case let .selectTab(tab):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(14))
             FfiConverterTypeMainTab.write(tab, into: &buf)
             
         
         case let .pushScreen(screen):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(15))
             FfiConverterTypeScreen.write(screen, into: &buf)
             
         
         case .popScreen:
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(16))
         
         
         case let .updateScreenStack(stack):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(17))
             FfiConverterSequenceTypeScreen.write(stack, into: &buf)
             
         
         case let .selectReceiveMethod(method):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(18))
             FfiConverterTypeReceiveMethod.write(method, into: &buf)
             
         
         case let .setReceiveAmount(amountSat):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(19))
             FfiConverterUInt64.write(amountSat, into: &buf)
             
         
         case let .setReceiveMemo(memo):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(20))
             FfiConverterString.write(memo, into: &buf)
             
         
         case .editReceiveRequest:
-            writeInt(&buf, Int32(19))
-        
-        
-        case .beginReceiveRequest:
-            writeInt(&buf, Int32(20))
-        
-        
-        case .resumeReceiveMonitor:
             writeInt(&buf, Int32(21))
         
         
-        case .claimPendingLightningReceives:
+        case .beginReceiveRequest:
             writeInt(&buf, Int32(22))
         
         
-        case .createArkAddress:
+        case .resumeReceiveMonitor:
             writeInt(&buf, Int32(23))
         
         
-        case .createLightningInvoice:
+        case .claimPendingLightningReceives:
             writeInt(&buf, Int32(24))
         
         
-        case let .setLightningAddressName(name):
+        case .createArkAddress:
             writeInt(&buf, Int32(25))
+        
+        
+        case .createLightningInvoice:
+            writeInt(&buf, Int32(26))
+        
+        
+        case let .setLightningAddressName(name):
+            writeInt(&buf, Int32(27))
             FfiConverterString.write(name, into: &buf)
             
         
         case .registerLightningAddress:
-            writeInt(&buf, Int32(26))
-        
-        
-        case .confirmLightningAddressRegistrationPayment:
-            writeInt(&buf, Int32(27))
-        
-        
-        case .cancelLightningAddressRegistrationPayment:
             writeInt(&buf, Int32(28))
         
         
-        case .verifyLightningAddressRegistration:
+        case .confirmLightningAddressRegistrationPayment:
             writeInt(&buf, Int32(29))
         
         
-        case .clearLightningAddressRegistration:
+        case .cancelLightningAddressRegistrationPayment:
             writeInt(&buf, Int32(30))
         
         
-        case let .setSendSearchQuery(query):
+        case .verifyLightningAddressRegistration:
             writeInt(&buf, Int32(31))
+        
+        
+        case .clearLightningAddressRegistration:
+            writeInt(&buf, Int32(32))
+        
+        
+        case let .setSendSearchQuery(query):
+            writeInt(&buf, Int32(33))
             FfiConverterString.write(query, into: &buf)
             
         
         case .continueSendSearch:
-            writeInt(&buf, Int32(32))
+            writeInt(&buf, Int32(34))
         
         
         case let .selectSendContact(contactId):
-            writeInt(&buf, Int32(33))
+            writeInt(&buf, Int32(35))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .prefetchProfilePictures(contactIds):
-            writeInt(&buf, Int32(34))
+            writeInt(&buf, Int32(36))
             FfiConverterSequenceString.write(contactIds, into: &buf)
             
         
         case let .setSendDestination(destination):
-            writeInt(&buf, Int32(35))
+            writeInt(&buf, Int32(37))
             FfiConverterString.write(destination, into: &buf)
             
         
         case let .setSendAmount(amountSat):
-            writeInt(&buf, Int32(36))
+            writeInt(&buf, Int32(38))
             FfiConverterUInt64.write(amountSat, into: &buf)
             
         
         case let .setSendMemo(memo):
-            writeInt(&buf, Int32(37))
+            writeInt(&buf, Int32(39))
             FfiConverterString.write(memo, into: &buf)
             
         
         case let .setSendZapEnabled(enabled):
-            writeInt(&buf, Int32(38))
+            writeInt(&buf, Int32(40))
             FfiConverterBool.write(enabled, into: &buf)
             
         
         case .payDestination:
-            writeInt(&buf, Int32(39))
+            writeInt(&buf, Int32(41))
         
         
         case let .payLightningInvoice(invoice,amountSat):
-            writeInt(&buf, Int32(40))
+            writeInt(&buf, Int32(42))
             FfiConverterString.write(invoice, into: &buf)
             FfiConverterOptionUInt64.write(amountSat, into: &buf)
             
         
         case let .payArkAddress(address,amountSat):
-            writeInt(&buf, Int32(41))
+            writeInt(&buf, Int32(43))
             FfiConverterString.write(address, into: &buf)
             FfiConverterUInt64.write(amountSat, into: &buf)
             
         
         case .dismissPaymentSuccess:
-            writeInt(&buf, Int32(42))
-        
-        
-        case .resetSendDraft:
-            writeInt(&buf, Int32(43))
-        
-        
-        case .requestQrScan:
             writeInt(&buf, Int32(44))
         
         
-        case .requestClipboardRead:
+        case .resetSendDraft:
             writeInt(&buf, Int32(45))
         
         
-        case .requestPhotoPick:
+        case .requestQrScan:
             writeInt(&buf, Int32(46))
         
         
-        case let .completeQrScan(value):
+        case .requestClipboardRead:
             writeInt(&buf, Int32(47))
+        
+        
+        case .requestPhotoPick:
+            writeInt(&buf, Int32(48))
+        
+        
+        case let .completeQrScan(value):
+            writeInt(&buf, Int32(49))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .completeClipboardRead(value):
-            writeInt(&buf, Int32(48))
+            writeInt(&buf, Int32(50))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .completePhotoPick(imageBase64):
-            writeInt(&buf, Int32(49))
+            writeInt(&buf, Int32(51))
             FfiConverterOptionString.write(imageBase64, into: &buf)
             
         
         case .cancelCapabilityRequest:
-            writeInt(&buf, Int32(50))
+            writeInt(&buf, Int32(52))
         
+        
+        case let .setPushNotificationRegistration(apnsDeviceToken,registrationStatus,wakeServerUrl,appId,environment,installId):
+            writeInt(&buf, Int32(53))
+            FfiConverterOptionString.write(apnsDeviceToken, into: &buf)
+            FfiConverterString.write(registrationStatus, into: &buf)
+            FfiConverterOptionString.write(wakeServerUrl, into: &buf)
+            FfiConverterString.write(appId, into: &buf)
+            FfiConverterString.write(environment, into: &buf)
+            FfiConverterString.write(installId, into: &buf)
+            
+        
+        case let .openNwaRequest(uri):
+            writeInt(&buf, Int32(54))
+            FfiConverterString.write(uri, into: &buf)
+            
+        
+        case let .approveNwaRequest(relay,budgetSat,budgetInterval,permissions):
+            writeInt(&buf, Int32(55))
+            FfiConverterString.write(relay, into: &buf)
+            FfiConverterUInt64.write(budgetSat, into: &buf)
+            FfiConverterTypeMobileBudgetInterval.write(budgetInterval, into: &buf)
+            FfiConverterSequenceTypeMobileNwcMethod.write(permissions, into: &buf)
+            
+        
+        case .retryNwaCallback:
+            writeInt(&buf, Int32(56))
+        
+        
+        case .cancelNwaRequest:
+            writeInt(&buf, Int32(57))
+        
+        
+        case let .completeNwaCallbackOpen(opened):
+            writeInt(&buf, Int32(58))
+            FfiConverterBool.write(opened, into: &buf)
+            
+        
+        case let .processNwcWakeRequests(requests):
+            writeInt(&buf, Int32(59))
+            FfiConverterSequenceTypeMobileWakeEnvelope.write(requests, into: &buf)
+            
+        
+        case let .createNwcConnection(name,relay,budgetSat,budgetInterval,permissions):
+            writeInt(&buf, Int32(60))
+            FfiConverterString.write(name, into: &buf)
+            FfiConverterString.write(relay, into: &buf)
+            FfiConverterUInt64.write(budgetSat, into: &buf)
+            FfiConverterTypeMobileBudgetInterval.write(budgetInterval, into: &buf)
+            FfiConverterSequenceTypeMobileNwcMethod.write(permissions, into: &buf)
+            
+        
+        case let .requestNwcConnectionExport(id,copyToClipboard):
+            writeInt(&buf, Int32(61))
+            FfiConverterString.write(id, into: &buf)
+            FfiConverterBool.write(copyToClipboard, into: &buf)
+            
+        
+        case let .deleteNwcConnection(id):
+            writeInt(&buf, Int32(62))
+            FfiConverterString.write(id, into: &buf)
+            
         
         case .generateNostrKey:
-            writeInt(&buf, Int32(51))
+            writeInt(&buf, Int32(63))
         
         
         case let .importNostrSecret(nsecOrHex):
-            writeInt(&buf, Int32(52))
+            writeInt(&buf, Int32(64))
             FfiConverterString.write(nsecOrHex, into: &buf)
             
         
         case .exportNostrSecret:
-            writeInt(&buf, Int32(53))
+            writeInt(&buf, Int32(65))
         
         
         case .clearNostrKey:
-            writeInt(&buf, Int32(54))
+            writeInt(&buf, Int32(66))
         
         
         case let .editNostrProfile(name,about,picture,lud16,nip05):
-            writeInt(&buf, Int32(55))
+            writeInt(&buf, Int32(67))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(about, into: &buf)
             FfiConverterString.write(picture, into: &buf)
@@ -2704,12 +3118,12 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .uploadNostrProfilePicture(imageBase64):
-            writeInt(&buf, Int32(56))
+            writeInt(&buf, Int32(68))
             FfiConverterString.write(imageBase64, into: &buf)
             
         
         case let .addContact(npub,name,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(57))
+            writeInt(&buf, Int32(69))
             FfiConverterString.write(npub, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(lightningAddress, into: &buf)
@@ -2718,7 +3132,7 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .editContact(contactId,name,npub,lightningAddress,lnurl,picture):
-            writeInt(&buf, Int32(58))
+            writeInt(&buf, Int32(70))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(npub, into: &buf)
@@ -2728,79 +3142,79 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             
         
         case let .followContact(contactId):
-            writeInt(&buf, Int32(59))
+            writeInt(&buf, Int32(71))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .unfollowContact(contactId):
-            writeInt(&buf, Int32(60))
+            writeInt(&buf, Int32(72))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .deleteContact(contactId):
-            writeInt(&buf, Int32(61))
+            writeInt(&buf, Int32(73))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case .publishNostrProfile:
-            writeInt(&buf, Int32(62))
+            writeInt(&buf, Int32(74))
         
         
         case .refreshNostrProfile:
-            writeInt(&buf, Int32(63))
+            writeInt(&buf, Int32(75))
         
         
         case .deleteNostrProfile:
-            writeInt(&buf, Int32(64))
+            writeInt(&buf, Int32(76))
         
         
         case .publishContactList:
-            writeInt(&buf, Int32(65))
+            writeInt(&buf, Int32(77))
         
         
         case .refreshContactList:
-            writeInt(&buf, Int32(66))
+            writeInt(&buf, Int32(78))
         
         
         case .clearNostrProfileCache:
-            writeInt(&buf, Int32(67))
+            writeInt(&buf, Int32(79))
         
         
         case let .loadDirectMessages(contactId):
-            writeInt(&buf, Int32(68))
+            writeInt(&buf, Int32(80))
             FfiConverterString.write(contactId, into: &buf)
             
         
         case let .sendDirectMessage(contactId,message):
-            writeInt(&buf, Int32(69))
+            writeInt(&buf, Int32(81))
             FfiConverterString.write(contactId, into: &buf)
             FfiConverterString.write(message, into: &buf)
             
         
         case .clearToast:
-            writeInt(&buf, Int32(70))
+            writeInt(&buf, Int32(82))
         
         
         case .clearRecoveryPhrase:
-            writeInt(&buf, Int32(71))
+            writeInt(&buf, Int32(83))
         
         
         case .clearRevealedNostrSecret:
-            writeInt(&buf, Int32(72))
+            writeInt(&buf, Int32(84))
         
         
         case let .requestHaptic(feedback):
-            writeInt(&buf, Int32(73))
+            writeInt(&buf, Int32(85))
             FfiConverterTypeHapticFeedback.write(feedback, into: &buf)
             
-
+        
         case .foregrounded:
-            writeInt(&buf, Int32(74))
-
-
+            writeInt(&buf, Int32(86))
+        
+        
         case .backgrounded:
-            writeInt(&buf, Int32(75))
-
+            writeInt(&buf, Int32(87))
+        
         }
     }
 }
@@ -2830,6 +3244,10 @@ public enum AppUpdate: Equatable, Hashable {
     )
     case haptic(HapticFeedback
     )
+    case openUrl(rev: UInt64, url: String
+    )
+    case nwcConnectionExportReady(rev: UInt64, connectionId: String, name: String, uri: String, copyToClipboard: Bool, presentQr: Bool
+    )
 
 
 
@@ -2857,6 +3275,12 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case 2: return .haptic(try FfiConverterTypeHapticFeedback.read(from: &buf)
         )
         
+        case 3: return .openUrl(rev: try FfiConverterUInt64.read(from: &buf), url: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .nwcConnectionExportReady(rev: try FfiConverterUInt64.read(from: &buf), connectionId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), uri: try FfiConverterString.read(from: &buf), copyToClipboard: try FfiConverterBool.read(from: &buf), presentQr: try FfiConverterBool.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -2873,6 +3297,22 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case let .haptic(v1):
             writeInt(&buf, Int32(2))
             FfiConverterTypeHapticFeedback.write(v1, into: &buf)
+            
+        
+        case let .openUrl(rev,url):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt64.write(rev, into: &buf)
+            FfiConverterString.write(url, into: &buf)
+            
+        
+        case let .nwcConnectionExportReady(rev,connectionId,name,uri,copyToClipboard,presentQr):
+            writeInt(&buf, Int32(4))
+            FfiConverterUInt64.write(rev, into: &buf)
+            FfiConverterString.write(connectionId, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            FfiConverterString.write(uri, into: &buf)
+            FfiConverterBool.write(copyToClipboard, into: &buf)
+            FfiConverterBool.write(presentQr, into: &buf)
             
         }
     }
@@ -3466,17 +3906,23 @@ public func FfiConverterTypeReceivePhase_lower(_ value: ReceivePhase) -> RustBuf
 
 public enum Screen: Equatable, Hashable {
     
+    case walletDiagnostics
     case setup
     case home
     case send
     case receive
     case profile
+    case nwc
     case lightningAddress
     case backup
     case restore
     case network
     case currency
     case contactDetail(contactId: String
+    )
+    case nwcWakeLogs
+    case nwcWakeStatus
+    case nwcConnectionDetail(connectionId: String
     )
 
 
@@ -3499,27 +3945,38 @@ public struct FfiConverterTypeScreen: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .setup
+        case 1: return .walletDiagnostics
         
-        case 2: return .home
+        case 2: return .setup
         
-        case 3: return .send
+        case 3: return .home
         
-        case 4: return .receive
+        case 4: return .send
         
-        case 5: return .profile
+        case 5: return .receive
         
-        case 6: return .lightningAddress
+        case 6: return .profile
         
-        case 7: return .backup
+        case 7: return .nwc
         
-        case 8: return .restore
+        case 8: return .lightningAddress
         
-        case 9: return .network
+        case 9: return .backup
         
-        case 10: return .currency
+        case 10: return .restore
         
-        case 11: return .contactDetail(contactId: try FfiConverterString.read(from: &buf)
+        case 11: return .network
+        
+        case 12: return .currency
+        
+        case 13: return .contactDetail(contactId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 14: return .nwcWakeLogs
+        
+        case 15: return .nwcWakeStatus
+        
+        case 16: return .nwcConnectionDetail(connectionId: try FfiConverterString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3530,49 +3987,70 @@ public struct FfiConverterTypeScreen: FfiConverterRustBuffer {
         switch value {
         
         
-        case .setup:
+        case .walletDiagnostics:
             writeInt(&buf, Int32(1))
         
         
-        case .home:
+        case .setup:
             writeInt(&buf, Int32(2))
         
         
-        case .send:
+        case .home:
             writeInt(&buf, Int32(3))
         
         
-        case .receive:
+        case .send:
             writeInt(&buf, Int32(4))
         
         
-        case .profile:
+        case .receive:
             writeInt(&buf, Int32(5))
         
         
-        case .lightningAddress:
+        case .profile:
             writeInt(&buf, Int32(6))
         
         
-        case .backup:
+        case .nwc:
             writeInt(&buf, Int32(7))
         
         
-        case .restore:
+        case .lightningAddress:
             writeInt(&buf, Int32(8))
         
         
-        case .network:
+        case .backup:
             writeInt(&buf, Int32(9))
         
         
-        case .currency:
+        case .restore:
             writeInt(&buf, Int32(10))
         
         
-        case let .contactDetail(contactId):
+        case .network:
             writeInt(&buf, Int32(11))
+        
+        
+        case .currency:
+            writeInt(&buf, Int32(12))
+        
+        
+        case let .contactDetail(contactId):
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(contactId, into: &buf)
+            
+        
+        case .nwcWakeLogs:
+            writeInt(&buf, Int32(14))
+        
+        
+        case .nwcWakeStatus:
+            writeInt(&buf, Int32(15))
+        
+        
+        case let .nwcConnectionDetail(connectionId):
+            writeInt(&buf, Int32(16))
+            FfiConverterString.write(connectionId, into: &buf)
             
         }
     }
@@ -3840,6 +4318,7 @@ public enum WalletNetwork: Equatable, Hashable {
     
     case mainnet
     case signet
+    case regtest
 
 
 
@@ -3865,6 +4344,8 @@ public struct FfiConverterTypeWalletNetwork: FfiConverterRustBuffer {
         
         case 2: return .signet
         
+        case 3: return .regtest
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -3879,6 +4360,10 @@ public struct FfiConverterTypeWalletNetwork: FfiConverterRustBuffer {
         
         case .signet:
             writeInt(&buf, Int32(2))
+        
+        
+        case .regtest:
+            writeInt(&buf, Int32(3))
         
         }
     }
@@ -4388,6 +4873,81 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeMobileConnectionView: FfiConverterRustBuffer {
+    typealias SwiftType = [MobileConnectionView]
+
+    public static func write(_ value: [MobileConnectionView], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeMobileConnectionView.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [MobileConnectionView] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [MobileConnectionView]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeMobileConnectionView.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeMobileProcessedWakeRequest: FfiConverterRustBuffer {
+    typealias SwiftType = [MobileProcessedWakeRequest]
+
+    public static func write(_ value: [MobileProcessedWakeRequest], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeMobileProcessedWakeRequest.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [MobileProcessedWakeRequest] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [MobileProcessedWakeRequest]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeMobileProcessedWakeRequest.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeMobileWakeEnvelope: FfiConverterRustBuffer {
+    typealias SwiftType = [MobileWakeEnvelope]
+
+    public static func write(_ value: [MobileWakeEnvelope], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeMobileWakeEnvelope.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [MobileWakeEnvelope] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [MobileWakeEnvelope]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeMobileWakeEnvelope.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeActivityItem: FfiConverterRustBuffer {
     typealias SwiftType = [ActivityItem]
 
@@ -4513,6 +5073,31 @@ fileprivate struct FfiConverterSequenceTypeNostrMessage: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeMobileNwcMethod: FfiConverterRustBuffer {
+    typealias SwiftType = [MobileNwcMethod]
+
+    public static func write(_ value: [MobileNwcMethod], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeMobileNwcMethod.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [MobileNwcMethod] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [MobileNwcMethod]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeMobileNwcMethod.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeScreen: FfiConverterRustBuffer {
     typealias SwiftType = [Screen]
 
@@ -4534,6 +5119,61 @@ fileprivate struct FfiConverterSequenceTypeScreen: FfiConverterRustBuffer {
         return seq
     }
 }
+private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
+private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
+
+fileprivate let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
+
+fileprivate func uniffiRustCallAsync<F, T>(
+    rustFutureFunc: () -> UInt64,
+    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> (),
+    completeFunc: (UInt64, UnsafeMutablePointer<RustCallStatus>) -> F,
+    freeFunc: (UInt64) -> (),
+    liftFunc: (F) throws -> T,
+    errorHandler: ((RustBuffer) throws -> Swift.Error)?
+) async throws -> T {
+    // Make sure to call the ensure init function since future creation doesn't have a
+    // RustCallStatus param, so doesn't use makeRustCall()
+    uniffiEnsureRebelWalletCoreInitialized()
+    let rustFuture = rustFutureFunc()
+    defer {
+        freeFunc(rustFuture)
+    }
+    var pollResult: Int8;
+    repeat {
+        pollResult = await withUnsafeContinuation {
+            pollFunc(
+                rustFuture,
+                { handle, pollResult in
+                    uniffiFutureContinuationCallback(handle: handle, pollResult: pollResult)
+                },
+                uniffiContinuationHandleMap.insert(obj: $0)
+            )
+        }
+    } while pollResult != UNIFFI_RUST_FUTURE_POLL_READY
+
+    return try liftFunc(makeRustCall(
+        { completeFunc(rustFuture, $0) },
+        errorHandler: errorHandler
+    ))
+}
+
+// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+// lift the return value or error and resume the suspended function.
+fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
+    if let continuation = try? uniffiContinuationHandleMap.remove(handle: handle) {
+        continuation.resume(returning: pollResult)
+    } else {
+        print("uniffiFutureContinuationCallback invalid handle")
+    }
+}
+public func nwcRelayInputIsValid(value: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_rebel_wallet_core_fn_func_nwc_relay_input_is_valid(
+        FfiConverterString.lower(value),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -4550,6 +5190,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_rebel_wallet_core_checksum_func_nwc_relay_input_is_valid() != 42975) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_dispatch() != 784) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4562,7 +5205,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_rebel_wallet_core_checksum_method_ffiapp_state() != 28404) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_rebel_wallet_core_checksum_method_nwcextensionengine_execute_wake() != 64274) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_rebel_wallet_core_checksum_constructor_ffiapp_new() != 37354) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_rebel_wallet_core_checksum_constructor_nwcextensionengine_new() != 8957) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rebel_wallet_core_checksum_method_appreconciler_reconcile() != 39018) {
@@ -4580,6 +5229,7 @@ private let initializationResult: InitializationResult = {
 
     uniffiCallbackInitAppReconciler()
     uniffiCallbackInitSecretStore()
+    uniffiEnsureNwcMobileUniffiInitialized()
     return InitializationResult.ok
 }()
 

@@ -1,3 +1,10 @@
+module nwc_mobile_uniffiFFI {
+    header "nwc_mobile_uniffiFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}
 module rebel_wallet_coreFFI {
     header "rebel_wallet_coreFFI.h"
     export *

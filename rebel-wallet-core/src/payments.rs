@@ -517,6 +517,15 @@ fn receive_status(receive: &LightningReceiveState) -> (&'static str, bool) {
     }
 }
 
+/// Revealing the receive preimage makes the Lightning payment irreversible,
+/// even while Bark still has local Ark claim or delivery work to finish.
+pub(crate) const fn lightning_receive_progress_is_paid(progress: &ReceiveProgress) -> bool {
+    matches!(
+        progress,
+        ReceiveProgress::PreimageRevealed(_) | ReceiveProgress::Delivering(_)
+    )
+}
+
 fn send_receive_status_if_changed(
     tx: &Sender<CoreMsg>,
     payment_hash: &str,
@@ -582,12 +591,14 @@ fn send_ark_receive_confirmed(tx: &Sender<CoreMsg>, address: &str, amount_sat: u
 
 #[cfg(test)]
 mod tests {
+    use bark::actions::lightning::receive::{Htlcs, Progress as ReceiveProgress};
+    use bark::movement::MovementId;
     use bark::movement::PaymentMethod as BarkPaymentMethod;
     use bark::payment_request::{AvailablePaymentMethod, PaymentMethodParsingError};
 
     use super::{
-        decimal_btc_to_sat, embedded_send_amount_sat, is_valid_lightning_address, lnurl_pay_url,
-        preferred_send_option,
+        decimal_btc_to_sat, embedded_send_amount_sat, is_valid_lightning_address,
+        lightning_receive_progress_is_paid, lnurl_pay_url, preferred_send_option,
     };
 
     const ARK_ADDRESS: &str = "tark1pwh9vsmezqqpharv69q4z8m6x364d5m5prnmcalcalq9pdmzw0y7mpveck4pcfhezqypczkrrj3lkx5ue4qrf4jc7ztpt9htdttmh2judhqnu7aue8p0y9mq47jn9z";
@@ -600,6 +611,24 @@ mod tests {
             method,
             errors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn preimage_revelation_is_a_terminal_lightning_payment() {
+        assert!(!lightning_receive_progress_is_paid(
+            &ReceiveProgress::AwaitingPayment
+        ));
+
+        let htlcs = Htlcs {
+            vtxo_ids: Vec::new(),
+            movement_id: MovementId(1),
+        };
+        assert!(!lightning_receive_progress_is_paid(
+            &ReceiveProgress::HtlcsReady(htlcs.clone())
+        ));
+        assert!(lightning_receive_progress_is_paid(
+            &ReceiveProgress::PreimageRevealed(htlcs)
+        ));
     }
 
     fn payment_method(type_str: &str, value: &str) -> BarkPaymentMethod {

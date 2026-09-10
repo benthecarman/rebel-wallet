@@ -16,6 +16,7 @@ const USER_AGENT: &str = concat!("rebel-wallet/", env!("CARGO_PKG_VERSION"));
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WalletOpenMode {
     Create,
+    OpenExisting,
     OpenOrCreate,
     Restore,
     Replace,
@@ -158,7 +159,7 @@ pub(crate) async fn open_bark_wallet(
         run_daemon: false,
         persister: Some(db),
         lock_manager: Some(lock_manager),
-        create_if_not_exists: true,
+        create_if_not_exists: !matches!(mode, WalletOpenMode::OpenExisting),
         create_without_server: false,
         on_recovery_finished: Some(Box::new(move |status| {
             let _ = recovery_tx.send(recovery_status_notice(status));

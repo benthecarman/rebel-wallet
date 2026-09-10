@@ -1,0 +1,3 @@
+# UniFFI owns formatting in generated bindings and headers.
+ios/Bindings/** -whitespace
+ios/Frameworks/**/*.h -whitespace

@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Verify the committed Xcode project was generated from the shared .env.sample
+# defaults, not a developer's ignored .env or .env.local signing overrides.
+
+cd "$(git rev-parse --show-toplevel)"
+
+usage() {
+  cat >&2 <<EOF
+Usage: tools/verify-ios-project-env [--staged] [--fix]
+
+Checks that ios/App.xcodeproj/project.pbxproj matches the checked-in .env.sample
+defaults. Use --staged from git hooks so the commit snapshot is validated.
+Use --fix to regenerate the Xcode project from .env.sample when it does not match.
+EOF
+}
+
+staged=false
+fix=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --staged)
+      staged=true
+      ;;
+    --fix)
+      fix=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+read_file() {
+  local path="$1"
+  if [ "$staged" = true ]; then
+    git show ":$path"
+  else
+    cat "$path"
+  fi
+}
+
+env_contents="$(read_file ".env.sample")"
+project_contents="$(read_file "ios/App.xcodeproj/project.pbxproj")"
+suppress_errors=false
+
+env_value() {
+  local key="$1"
+  printf '%s\n' "$env_contents" | awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }'
+}
+
+require_env_value() {
+  local key="$1"
+  local value
+  value="$(env_value "$key")"
+  if [ -z "$value" ] && ! grep -Eq "^${key}=" <<<"$env_contents"; then
+    echo "verify-ios-project-env: missing $key in .env.sample" >&2
+    exit 1
+  fi
+  printf '%s' "$value"
+}
+
+print_mismatch() {
+  local needle="$1"
+  local message="$2"
+
+  cat >&2 <<EOF
+verify-ios-project-env: $message
+
+Expected to find this checked-in value in ios/App.xcodeproj/project.pbxproj:
+  $needle
+
+The checked-in Xcode project should be generated from .env.sample only, not
+local .env or .env.local overrides.
+Regenerate the committed project defaults with:
+
+  set -a
+  source .env.sample
+  set +a
+  cd ios
+  xcodegen generate
+  cd ..
+
+For local device testing, you can still run just ios-xcodeproj or
+just run-ios-phone; those commands may use .env and .env.local, but do not
+commit that generated project state.
+EOF
+}
+
+require_project_value() {
+  local needle="$1"
+  local message="$2"
+
+  if ! grep -Fq "$needle" <<<"$project_contents"; then
+    if [ "$suppress_errors" != true ]; then
+      print_mismatch "$needle" "$message"
+    fi
+    return 1
+  fi
+}
+
+regenerate_project_from_env() {
+  echo "verify-ios-project-env: regenerating ios/App.xcodeproj from .env.sample defaults" >&2
+  (
+    cd ios
+    IOS_BUNDLE_ID="$ios_bundle_id" \
+      IOS_DEVELOPMENT_TEAM="$ios_development_team" \
+      IOS_CODE_SIGN_STYLE="$ios_code_sign_style" \
+      IOS_APS_ENVIRONMENT="$ios_aps_environment" \
+      IOS_APP_GROUP_ID="$ios_app_group_id" \
+      NWC_WAKE_SERVER_URL="$nwc_wake_server_url" \
+      xcodegen generate
+  )
+
+  if [ "$staged" = true ]; then
+    git add ios/App.xcodeproj/project.pbxproj
+  fi
+}
+
+reload_project_contents() {
+  project_contents="$(read_file "ios/App.xcodeproj/project.pbxproj")"
+}
+
+validate_project() {
+  local ok=true
+  local development_team_setting="DEVELOPMENT_TEAM = ${ios_development_team};"
+  if [ -z "$ios_development_team" ]; then
+    development_team_setting='DEVELOPMENT_TEAM = "";'
+  fi
+
+  require_project_value "PRODUCT_BUNDLE_IDENTIFIER = ${ios_bundle_id};" "bundle id does not match .env.sample" || ok=false
+  require_project_value "PRODUCT_BUNDLE_IDENTIFIER = ${ios_bundle_id}.NotificationService;" "notification service bundle id does not match .env.sample" || ok=false
+  require_project_value "$development_team_setting" "development team does not match .env.sample" || ok=false
+  require_project_value "CODE_SIGN_STYLE = ${ios_code_sign_style};" "code sign style does not match .env.sample" || ok=false
+  require_project_value "IOS_APS_ENVIRONMENT = ${ios_aps_environment};" "APS environment does not match .env.sample" || ok=false
+  require_project_value "IOS_APP_GROUP_ID = ${ios_app_group_id};" "app group does not match .env.sample" || ok=false
+  require_project_value "NWC_WAKE_SERVER_URL = \"${nwc_wake_server_url}\";" "wake server URL does not match .env.sample" || ok=false
+
+  [ "$ok" = true ]
+}
+
+ios_bundle_id="$(require_env_value IOS_BUNDLE_ID)"
+ios_development_team="$(require_env_value IOS_DEVELOPMENT_TEAM)"
+ios_code_sign_style="$(require_env_value IOS_CODE_SIGN_STYLE)"
+ios_aps_environment="$(require_env_value IOS_APS_ENVIRONMENT)"
+ios_app_group_id="$(require_env_value IOS_APP_GROUP_ID)"
+nwc_wake_server_url="$(require_env_value NWC_WAKE_SERVER_URL)"
+
+suppress_errors="$fix"
+if validate_project; then
+  exit 0
+fi
+suppress_errors=false
+
+if [ "$fix" != true ]; then
+  exit 1
+fi
+
+regenerate_project_from_env
+reload_project_contents
+validate_project

@@ -5,7 +5,7 @@ LIB_NAME := "rebel_wallet_core"
 XCF_NAME := "RebelWalletCore"
 ICED_PACKAGE := "rebel-wallet-core_desktop_iced"
 DYLIB_EXT := if os() == "macos" { "dylib" } else { "so" }
-IOS_BUNDLE_ID := "com.rebelwallet.app"
+DEFAULT_IOS_BUNDLE_ID := "com.rebelwallet.app"
 
 default:
   @just --list
@@ -18,7 +18,7 @@ install-hooks:
 
 # Build Rust core for the host (needed for uniffi-bindgen).
 rust-build-host:
-  ./tools/cargo-with-xcode build -p {{CORE_CRATE}} --release
+  ./tools/cargo-with-xcode build --locked -p {{CORE_CRATE}} --release
 
 bindings:
   rmp bindings all
@@ -31,9 +31,15 @@ run-ios:
 ios-devices:
   xcrun devicectl list devices
 
-run-ios-phone bundle_id=IOS_BUNDLE_ID: ios-rust ios-xcframework ios-xcodeproj
+run-ios-phone $bundle_id="": ios-rust ios-xcframework ios-xcodeproj
   #!/usr/bin/env bash
   set -euo pipefail
+  set -a
+  [ ! -f .env.sample ] || source .env.sample
+  [ ! -f .env ] || source .env
+  [ ! -f .env.local ] || source .env.local
+  set +a
+  BUNDLE_ID="${bundle_id:-${IOS_BUNDLE_ID:-{{DEFAULT_IOS_BUNDLE_ID}}}}"
   DEVICE_ID="$(xcrun devicectl list devices \
     | grep -E 'connected|available \(paired\)' \
     | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-Fa-f-]{36}$/) { print $i; exit } }')"
@@ -49,14 +55,14 @@ run-ios-phone bundle_id=IOS_BUNDLE_ID: ios-rust ios-xcframework ios-xcodeproj
     -project ios/App.xcodeproj -scheme App \
     -destination "generic/platform=iOS" \
     -configuration Debug \
-    -derivedDataPath "$DERIVED_DATA" \
-    PRODUCT_BUNDLE_IDENTIFIER="{{bundle_id}}"
+    -allowProvisioningUpdates \
+    -derivedDataPath "$DERIVED_DATA"
   APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/App.app"
   xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
-  xcrun devicectl device process launch --device "$DEVICE_ID" "{{bundle_id}}"
+  xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"
 
 ios-gen-swift: rust-build-host
-  cargo run -p uniffi-bindgen -- generate \
+  cargo run --locked -p uniffi-bindgen -- generate \
     --library target/release/lib{{LIB_NAME}}.{{DYLIB_EXT}} \
     --language swift \
     --out-dir ios/Bindings \
@@ -78,28 +84,37 @@ ios-rust:
       DEVELOPER_DIR="$DEV_DIR" SDKROOT="$SDK" CC="$TOOLCHAIN_BIN/clang" \
       IPHONEOS_DEPLOYMENT_TARGET=17.0 \
       RUSTFLAGS="-C linker=$TOOLCHAIN_BIN/clang -C link-arg=$VFLAG -C link-arg=-isysroot -C link-arg=$SDK" \
-      cargo build -p {{CORE_CRATE}} --lib --target "$TARGET" --release
+      cargo build --locked -p {{CORE_CRATE}} --lib --target "$TARGET" --release --features regtest,nwc-diagnostics
   done
 
 # Package static libs into an xcframework.
-ios-xcframework:
+ios-xcframework: ios-gen-swift ios-rust
   #!/usr/bin/env bash
   set -e
   rm -rf ios/Frameworks/{{XCF_NAME}}.xcframework staging
   mkdir -p staging/headers
   cp ios/Bindings/{{LIB_NAME}}FFI.h staging/headers/
-  cp ios/Bindings/{{LIB_NAME}}FFI.modulemap staging/headers/module.modulemap
+  cp ios/Bindings/nwc_mobile_uniffiFFI.h staging/headers/
+  cp ios/Bindings/nwc_mobile_uniffiFFI.modulemap staging/headers/module.modulemap
+  sed '1s/^/\n/' ios/Bindings/{{LIB_NAME}}FFI.modulemap >> staging/headers/module.modulemap
   ./tools/xcode-run xcodebuild -create-xcframework \
     -library target/aarch64-apple-ios/release/lib{{LIB_NAME}}.a -headers staging/headers \
     -library target/aarch64-apple-ios-sim/release/lib{{LIB_NAME}}.a -headers staging/headers \
     -output ios/Frameworks/{{XCF_NAME}}.xcframework
   rm -rf staging
 
-ios-xcodeproj:
+ios-xcodeproj: ios-xcframework
+  #!/usr/bin/env bash
+  set -euo pipefail
+  set -a
+  [ ! -f .env.sample ] || source .env.sample
+  [ ! -f .env ] || source .env
+  [ ! -f .env.local ] || source .env.local
+  set +a
   cd ios && xcodegen generate
 
 # Build the iOS app for simulator.
-ios-build:
+ios-build: ios-xcodeproj
   ./tools/xcode-run xcodebuild build \
     -project ios/App.xcodeproj -scheme App \
     -destination "generic/platform=iOS Simulator" \

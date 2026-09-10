@@ -638,6 +638,7 @@ impl AppCore {
             } else {
                 "Custom Lightning address registered.".to_string()
             });
+            self.with_nwc(|nwc, context| nwc.refresh_connection_uris(context));
             self.request_haptic(HapticFeedback::NotificationSuccess);
         } else {
             self.state.lightning_address.registration_phase =

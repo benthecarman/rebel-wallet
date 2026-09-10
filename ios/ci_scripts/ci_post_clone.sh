@@ -53,6 +53,15 @@ export PROTOC="$(command -v protoc)"
 
 retry rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
+# Regenerate both the Rebel and external nwc-mobile UniFFI components from the
+# exact Cargo.lock revisions instead of checking dependency bindings into Rebel.
+retry cargo build --locked -p "$CORE_CRATE" --release
+retry cargo run --locked -p uniffi-bindgen -- generate \
+  --library "target/release/lib${LIB_NAME}.dylib" \
+  --language swift \
+  --out-dir ios/Bindings \
+  --config rebel-wallet-core/uniffi.toml
+
 DEV_DIR="$(xcode-select -p)"
 TOOLCHAIN_BIN="$DEV_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"
 IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
@@ -75,7 +84,7 @@ build_rust_lib() {
     CFLAGS="$min_flag -isysroot $sdk" \
     CXXFLAGS="$min_flag -isysroot $sdk" \
     RUSTFLAGS="-C linker=$TOOLCHAIN_BIN/clang -C link-arg=$min_flag -C link-arg=-isysroot -C link-arg=$sdk" \
-    cargo build -p "$CORE_CRATE" --lib --target "$target" --release
+    cargo build --locked -p "$CORE_CRATE" --lib --target "$target" --release
 }
 
 retry build_rust_lib "aarch64-apple-ios" "$IOS_SDK" "-miphoneos-version-min=$IOS_MIN_VERSION"
@@ -84,7 +93,9 @@ retry build_rust_lib "aarch64-apple-ios-sim" "$SIM_SDK" "-mios-simulator-version
 rm -rf "ios/Frameworks/$XCF_NAME.xcframework" staging
 mkdir -p staging/headers
 cp "ios/Bindings/${LIB_NAME}FFI.h" staging/headers/
-cp "ios/Bindings/${LIB_NAME}FFI.modulemap" staging/headers/module.modulemap
+cp ios/Bindings/nwc_mobile_uniffiFFI.h staging/headers/
+cp ios/Bindings/nwc_mobile_uniffiFFI.modulemap staging/headers/module.modulemap
+sed '1s/^/\n/' "ios/Bindings/${LIB_NAME}FFI.modulemap" >> staging/headers/module.modulemap
 
 xcodebuild -create-xcframework \
   -library "target/aarch64-apple-ios/release/lib${LIB_NAME}.a" -headers staging/headers \

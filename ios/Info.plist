@@ -18,6 +18,18 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Rebel Wallet Nostr Wallet Auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nostr+walletauth</string>
+				<string>nostr+walletauth+rebelwallet</string>
+			</array>
+		</dict>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>
@@ -30,6 +42,25 @@
 	<string>Rebel Wallet uses the camera to scan payment QR codes.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Rebel Wallet uses Face ID to confirm it is you before revealing wallet secrets.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Rebel Wallet connects to locally hosted Regtest ASP and Esplora servers.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+#if IOS_ALLOWS_LOCAL_NETWORKING
+		<true/>
+#else
+		<false/>
+#endif
+	</dict>
+	<key>RebelWalletAppGroupIdentifier</key>
+	<string>$(IOS_APP_GROUP_ID)</string>
+	<key>RebelWalletApnsEnvironment</key>
+	<string>$(IOS_APS_ENVIRONMENT)</string>
+	<key>RebelWalletNwcWakeServerURL</key>
+	<string>$(NWC_WAKE_SERVER_URL)</string>
+	<key>RebelWalletKeychainAccessGroup</key>
+	<string>$(IOS_KEYCHAIN_ACCESS_GROUP)</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
