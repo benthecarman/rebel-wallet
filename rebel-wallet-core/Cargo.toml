@@ -12,6 +12,8 @@ nwc-diagnostics = ["nwc-mobile/diagnostics"]
 
 [dependencies]
 anyhow = "1"
+ark-lib = "=0.7.0"
+bark-server-rpc = { version = "=0.7.0", default-features = false, features = ["tonic-native", "tls-webpki-roots"] }
 base64 = "0.22"
 bark = { package = "bark-wallet", version = "0.7.0", default-features = false, features = ["sqlite-bundled", "native", "tls-webpki-roots", "rand"] }
 bech32 = "0.11"

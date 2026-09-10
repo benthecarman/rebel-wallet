@@ -56,6 +56,12 @@ struct SettingsView: View {
                     }
                 }
 
+                SettingsCard(title: "Diagnostics") {
+                    SettingsRow(title: "Wallet Diagnostics", caption: "VTXOs and refresh history") {
+                        manager.dispatch(.pushScreen(screen: .walletDiagnostics))
+                    }
+                }
+
                 SettingsCard(title: "Danger Zone") {
                     SettingsRow(
                         title: "Delete Wallet",

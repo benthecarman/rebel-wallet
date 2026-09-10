@@ -2607,6 +2607,8 @@ name = "rebel-wallet-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-lib",
+ "bark-server-rpc",
  "bark-wallet",
  "base64 0.22.1",
  "bech32",

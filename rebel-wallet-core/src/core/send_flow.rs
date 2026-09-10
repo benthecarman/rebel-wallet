@@ -87,7 +87,9 @@ async fn checked_bitcoin_address(
 
 impl AppCore {
     fn payment_already_sending(&self) -> bool {
-        self.state.busy.sending_payment || self.state.send.phase == SendPhase::Sending
+        self.state.busy.sending_payment
+            || self.state.send.phase == SendPhase::Sending
+            || self.state.wallet_refresh_running
     }
 
     pub(super) fn pay_destination(&mut self) {
@@ -461,6 +463,7 @@ impl AppCore {
             amount_sat.map(|amount| -(amount as i64)).unwrap_or(0),
             false,
         );
+        let db_path = self.data_dir.join(self.state.wallet.network.db_file_name());
         self.rt.spawn(async move {
             let user_amount = amount_sat.filter(|a| *a > 0).map(Amount::from_sat);
             let parsed = Bolt11Invoice::from_str(&invoice);
@@ -470,10 +473,14 @@ impl AppCore {
                         annotation.payment_hash = Some(invoice.payment_hash().to_string());
                         annotation
                     });
-                    match wallet
-                        .pay_lightning_invoice(invoice, user_amount, true)
-                        .await
-                    {
+                    let payment = async {
+                        crate::wallet_reconciliation::reconcile(&wallet, &db_path).await?;
+                        wallet
+                            .pay_lightning_invoice(invoice, user_amount, true)
+                            .await
+                    }
+                    .await;
+                    match payment {
                         Ok(_) => AsyncMsg::Paid {
                             result: "Lightning invoice paid.".to_string(),
                             annotation,

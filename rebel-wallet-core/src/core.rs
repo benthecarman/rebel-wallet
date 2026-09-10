@@ -60,6 +60,7 @@ use crate::{
 mod custom_address_flow;
 mod profile_prefetch;
 mod send_flow;
+mod wallet_diagnostics;
 mod wallet_lifecycle;
 mod wallet_work;
 
@@ -455,6 +456,8 @@ impl AppCore {
                 }
             }
             AppAction::SyncWallet => self.request_wallet_work(WalletWorkRequest::user_sync()),
+            AppAction::ReloadWalletDiagnostics => self.load_wallet_diagnostics(),
+            AppAction::ForceRefreshWalletVtxos => self.force_refresh_wallet_vtxos(),
             AppAction::MaintainVtxos => {
                 self.request_maintenance(WalletWorkRequest::lifecycle(WalletWorkKind::Maintain))
             }
@@ -469,6 +472,9 @@ impl AppCore {
             } => self.select_network(network, server_address, esplora_address),
             AppAction::SelectTab { tab } => self.state.router.selected_tab = tab,
             AppAction::PushScreen { screen } => {
+                if screen == Screen::WalletDiagnostics {
+                    self.load_wallet_diagnostics();
+                }
                 if screen == Screen::Receive {
                     self.state.reset_receive_draft();
                 }
@@ -831,6 +837,10 @@ impl AppCore {
         }
         self.clear_busy_for_async(&msg);
         match msg {
+            AsyncMsg::WalletDiagnosticsLoaded { report, .. } => {
+                self.state.wallet_diagnostics = report;
+                self.state.wallet_diagnostics_loading = false;
+            }
             AsyncMsg::WalletReady {
                 generation: _,
                 wallet,
@@ -1312,6 +1322,7 @@ impl AppCore {
                 self.state.busy.opening_wallet = false;
             }
             AsyncMsg::WalletOpenFailed { .. }
+            | AsyncMsg::WalletDiagnosticsLoaded { .. }
             | AsyncMsg::WalletWorkFinished { .. }
             | AsyncMsg::WalletRefreshPollDue { .. } => {}
             AsyncMsg::ArkAddress(_)
@@ -1521,18 +1532,43 @@ impl AppCore {
         let lightning_address = self.state.lightning_address.clone();
         let payment_annotations = self.payment_annotations.clone();
         let zap_receipts = self.zap_receipts.clone();
+        let db_path = self.data_dir.join(self.state.wallet.network.db_file_name());
         self.rt.spawn(async move {
             let work = async {
                 match token.kind {
-                    WalletWorkKind::Load => {}
+                    WalletWorkKind::Load => {
+                        crate::wallet_reconciliation::reconcile(&wallet, &db_path).await?;
+                    }
                     WalletWorkKind::Sync => {
                         wallet.sync().await;
+                        crate::wallet_reconciliation::reconcile(&wallet, &db_path).await?;
                         wallet
                             .progress_pending_rounds(None)
                             .await
                             .context("pending round reconciliation failed")?;
                     }
-                    WalletWorkKind::Maintain => wallet.maintenance_delegated().await?,
+                    WalletWorkKind::Maintain => {
+                        wallet.sync().await;
+                        crate::wallet_reconciliation::reconcile(&wallet, &db_path).await?;
+                        wallet.progress_pending_rounds(None).await?;
+                        wallet.maybe_schedule_maintenance_refresh_delegated().await?;
+                    }
+                    WalletWorkKind::ForceRefresh => {
+                        crate::wallet_reconciliation::reconcile(&wallet, &db_path).await?;
+                        wallet.progress_pending_rounds(None).await
+                            .context("pending round reconciliation failed")?;
+                        let pending = wallet.pending_round_input_vtxos().await?;
+                        let vtxos: Vec<_> = wallet.spendable_vtxos().await?.into_iter()
+                            .filter(|vtxo| !pending.iter().any(|input| input.vtxo.id() == vtxo.vtxo.id()))
+                            .collect();
+                        anyhow::ensure!(!vtxos.is_empty(), "No locally spendable VTXOs outside pending rounds available to refresh.");
+                        let eligible_sat: u64 = vtxos.iter().map(|v| v.vtxo.amount().to_sat()).sum();
+                        anyhow::ensure!(eligible_sat >= ark::vtxo::VTXO_DUST_SAT,
+                            "Only {eligible_sat} sats are eligible outside pending rounds; a refresh requires at least {} sats before fees. No refresh submitted", ark::vtxo::VTXO_DUST_SAT);
+                        wallet.refresh_vtxos_delegated(vtxos).await
+                            .context("VTXO refresh request failed")?
+                            .context("No refresh was submitted")?;
+                    }
                 }
 
                 wallet_synced_msg(
@@ -1553,6 +1589,7 @@ impl AppCore {
                         WalletWorkKind::Load => "load",
                         WalletWorkKind::Sync => "sync",
                         WalletWorkKind::Maintain => "maintenance",
+                        WalletWorkKind::ForceRefresh => "refresh request (it may already have been submitted; reload diagnostics before retrying)",
                     },
                     WALLET_WORK_TIMEOUT.as_secs(),
                 )),
@@ -1575,6 +1612,20 @@ impl AppCore {
             return;
         };
         self.refresh_wallet_busy_state();
+
+        if token.kind == WalletWorkKind::ForceRefresh {
+            self.state.wallet_refresh_running = false;
+            self.state.wallet_refresh_status = match &result {
+                Ok(_) => "Refresh submitted, not yet confirmed complete. Keep the app open and reload local records to check REFRESH HISTORY.".to_string(),
+                Err(message) => format!("Refresh did not finish successfully: {message}. Check REFRESH HISTORY before retrying; a request may already have been submitted."),
+            };
+            if let Ok(snapshot) = result {
+                self.apply_wallet_snapshot(snapshot);
+            }
+            // Explicit refreshes are never retried automatically.
+            self.load_wallet_diagnostics();
+            return;
+        }
 
         match result {
             Ok(snapshot) => {
@@ -1607,6 +1658,7 @@ impl AppCore {
                     WalletWorkKind::Maintain => {
                         "Wallet maintenance failed. It will retry automatically.".to_string()
                     }
+                    WalletWorkKind::ForceRefresh => unreachable!("handled above"),
                 });
                 if token.report_errors {
                     self.state.toast = Some(match token.kind {
@@ -1615,6 +1667,7 @@ impl AppCore {
                         WalletWorkKind::Maintain => {
                             format!("Wallet maintenance failed: {message}")
                         }
+                        WalletWorkKind::ForceRefresh => unreachable!("handled above"),
                     });
                     self.request_haptic(HapticFeedback::NotificationError);
                 }
@@ -1665,6 +1718,7 @@ impl AppCore {
     fn is_stale_wallet_async(&self, msg: &AsyncMsg) -> bool {
         let generation = match msg {
             AsyncMsg::WalletReady { generation, .. }
+            | AsyncMsg::WalletDiagnosticsLoaded { generation, .. }
             | AsyncMsg::WalletOpenFailed { generation, .. }
             | AsyncMsg::WalletWorkFinished { generation, .. }
             | AsyncMsg::WalletRefreshPollDue { generation, .. }
@@ -1738,6 +1792,10 @@ impl AppCore {
     pub(super) fn invalidate_wallet_session(&mut self) -> u64 {
         self.wallet_generation = self.wallet_generation.wrapping_add(1).max(1);
         self.wallet = None;
+        self.state.wallet_diagnostics.clear();
+        self.state.wallet_diagnostics_loading = false;
+        self.state.wallet_refresh_running = false;
+        self.state.wallet_refresh_status.clear();
         self.wallet_work.reset();
         self.last_maintenance_completed_at = None;
         self.wallet_retry_kind = None;

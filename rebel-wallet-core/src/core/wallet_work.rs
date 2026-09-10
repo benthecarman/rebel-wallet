@@ -8,6 +8,7 @@ pub(super) enum WalletWorkKind {
     Load,
     Sync,
     Maintain,
+    ForceRefresh,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,7 +76,11 @@ impl WalletWorkCoordinator {
         request: WalletWorkRequest,
     ) -> Option<WalletWorkToken> {
         if let Some(in_flight) = self.in_flight.as_mut() {
-            if !request.ensure_after_current && in_flight.kind >= request.kind {
+            if !request.ensure_after_current
+                && in_flight.kind >= request.kind
+                && (in_flight.kind != WalletWorkKind::ForceRefresh
+                    || request.kind == WalletWorkKind::ForceRefresh)
+            {
                 in_flight.report_errors |= request.report_errors;
             } else {
                 self.defer(request);
@@ -153,6 +158,26 @@ pub(super) fn refresh_poll_delay(attempt: u8) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{refresh_poll_delay, WalletWorkCoordinator, WalletWorkKind, WalletWorkRequest};
+
+    #[test]
+    fn explicit_refresh_does_not_swallow_maintenance_or_duplicate_itself() {
+        let mut coordinator = WalletWorkCoordinator::default();
+        let request = WalletWorkRequest {
+            kind: WalletWorkKind::ForceRefresh,
+            report_errors: true,
+            ensure_after_current: false,
+        };
+        let refresh = coordinator.request(1, request).unwrap();
+        assert!(coordinator.request(1, request).is_none());
+        assert!(coordinator.queued().is_none());
+        coordinator.request(1, WalletWorkRequest::lifecycle(WalletWorkKind::Maintain));
+        assert_eq!(coordinator.in_flight(), Some(refresh));
+        coordinator.finish(1, refresh.id);
+        assert_eq!(
+            coordinator.start_queued(1).unwrap().kind,
+            WalletWorkKind::Maintain
+        );
+    }
 
     #[test]
     fn maintenance_supersedes_queued_sync() {

@@ -25,6 +25,7 @@ mod state;
 mod time;
 mod updates;
 mod wallet;
+mod wallet_reconciliation;
 mod zaps;
 
 pub use actions::AppAction;

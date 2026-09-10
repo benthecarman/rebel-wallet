@@ -16,6 +16,8 @@ pub enum AppAction {
     DeleteWallet,
     ShowSeed,
     SyncWallet,
+    ReloadWalletDiagnostics,
+    ForceRefreshWalletVtxos,
     MaintainVtxos,
     RefreshPrice,
     SetPriceCurrency {

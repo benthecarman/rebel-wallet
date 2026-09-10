@@ -90,6 +90,8 @@ struct ContentView: View {
     @ViewBuilder
     private func screenView(for screen: Screen) -> some View {
         switch screen {
+        case .walletDiagnostics:
+            WalletDiagnosticsView(manager: manager)
         case .setup:
             SetupView(manager: manager)
         case .home:

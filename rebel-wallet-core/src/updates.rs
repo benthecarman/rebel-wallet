@@ -96,6 +96,10 @@ pub(crate) struct WalletSnapshot {
 
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum AsyncMsg {
+    WalletDiagnosticsLoaded {
+        generation: u64,
+        report: String,
+    },
     WalletReady {
         generation: u64,
         wallet: Wallet,

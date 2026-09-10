@@ -12,6 +12,10 @@ pub(crate) use send::sort_contacts_by_name_npub;
 
 #[derive(uniffi::Record, Clone)]
 pub struct AppState {
+    pub wallet_diagnostics: String,
+    pub wallet_diagnostics_loading: bool,
+    pub wallet_refresh_running: bool,
+    pub wallet_refresh_status: String,
     pub rev: u64,
     pub show_launch_splash: bool,
     pub router: Router,
@@ -108,6 +112,7 @@ pub enum MainTab {
 
 #[derive(uniffi::Enum, Clone, Debug, PartialEq)]
 pub enum Screen {
+    WalletDiagnostics,
     Setup,
     Home,
     Send,
@@ -496,6 +501,10 @@ impl AppState {
         let network = WalletNetwork::default();
         Self {
             rev: 0,
+            wallet_diagnostics: String::new(),
+            wallet_diagnostics_loading: false,
+            wallet_refresh_running: false,
+            wallet_refresh_status: String::new(),
             show_launch_splash: true,
             router: Router {
                 default_screen: Screen::Setup,
