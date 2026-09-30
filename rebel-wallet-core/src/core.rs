@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -13,7 +14,7 @@ use bark::ark::{Vtxo, VtxoPolicy};
 use bark::lightning_invoice::Bolt11Invoice;
 use bark::movement::{Movement, PaymentMethod as BarkPaymentMethod};
 use bark::persist::models::RoundStateId;
-use bark::round::RoundStatus;
+use bark::round::{RoundFlowKind, RoundStatus};
 use bark::Wallet;
 use bip39::Mnemonic;
 use bitcoin::{
@@ -107,6 +108,70 @@ fn committed_round_balance(
         }
     }
     Some(committed_sat)
+}
+
+/// Bark's delegated maintenance without the redundant resubmission.
+///
+/// Bark keeps the inputs of a queued delegated refresh spendable until the
+/// server issues the round, so its refresh selection keeps picking them and
+/// every maintenance run would submit a fresh participation. The server drops
+/// the earlier one, which then fails locally on the next sync. Skip the
+/// scheduling step while a queued delegated participation already covers
+/// every VTXO that is due.
+async fn maintain_delegated(wallet: &Wallet) -> anyhow::Result<()> {
+    wallet.sync().await;
+    let rounds = wallet
+        .progress_pending_rounds(None)
+        .await
+        .context("pending round reconciliation failed");
+    let refresh = async {
+        if delegated_refresh_already_queued(wallet).await? {
+            return Ok(());
+        }
+        wallet
+            .maybe_schedule_maintenance_refresh_delegated()
+            .await
+            .map(|_| ())
+    }
+    .await
+    .context("delegated refresh failed");
+    match (rounds, refresh) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(rounds), Err(refresh)) => Err(rounds.context(format!("{refresh:#}"))),
+    }
+}
+
+async fn delegated_refresh_already_queued(wallet: &Wallet) -> anyhow::Result<bool> {
+    let due = wallet.get_vtxos_to_refresh().await?;
+    if due.is_empty() {
+        return Ok(true);
+    }
+    let queued = wallet
+        .pending_round_states()
+        .await?
+        .iter()
+        .filter(|round| round.state().flow_kind() == RoundFlowKind::DelegatedPending)
+        .flat_map(|round| {
+            round
+                .state()
+                .participation()
+                .inputs
+                .iter()
+                .map(|vtxo| vtxo.id())
+        })
+        .collect::<HashSet<_>>();
+    Ok(refresh_covered_by_queued(
+        due.iter().map(|vtxo| vtxo.id()),
+        &queued,
+    ))
+}
+
+fn refresh_covered_by_queued<T: Eq + Hash>(
+    due: impl IntoIterator<Item = T>,
+    queued: &HashSet<T>,
+) -> bool {
+    due.into_iter().all(|id| queued.contains(&id))
 }
 
 async fn committed_pending_round_balance(wallet: &Wallet) -> anyhow::Result<Option<u64>> {
@@ -1345,7 +1410,7 @@ impl AppCore {
                             .await
                             .context("pending round reconciliation failed")?;
                     }
-                    WalletWorkKind::Maintain => wallet.maintenance_delegated().await?,
+                    WalletWorkKind::Maintain => maintain_delegated(&wallet).await?,
                 }
 
                 wallet_synced_msg(
@@ -2478,6 +2543,16 @@ mod tests {
     use crate::{ActivityIconKind, ActivityItem, WalletNetwork};
 
     use super::*;
+
+    #[test]
+    fn queued_delegated_refresh_covers_due_vtxos() {
+        let queued = HashSet::from([1, 2, 3]);
+
+        assert!(refresh_covered_by_queued([1, 3], &queued));
+        assert!(refresh_covered_by_queued(Vec::<i32>::new(), &queued));
+        assert!(!refresh_covered_by_queued([2, 4], &queued));
+        assert!(!refresh_covered_by_queued([5], &HashSet::new()));
+    }
 
     #[test]
     fn derives_nostr_key_from_wallet_seed_path() {
