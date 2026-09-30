@@ -39,7 +39,9 @@ struct RebelWalletApp: App {
                         manager.endReceiveBackgroundTask()
                     case .background:
                         manager.dispatch(.backgrounded)
-                        BackgroundMaintenance.schedule()
+                        BackgroundMaintenance.schedule(
+                            nextRefreshDueBlocks: manager.state.wallet.nextRefreshDueBlocks
+                        )
                         // Keep the core running briefly so an in-flight Lightning
                         // receive can still be claimed while backgrounded.
                         manager.beginReceiveBackgroundTaskIfNeeded()

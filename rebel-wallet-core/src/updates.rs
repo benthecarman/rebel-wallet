@@ -43,6 +43,8 @@ pub(crate) struct WalletSnapshot {
     /// Includes queued delegated rounds whose inputs are still spendable. This
     /// drives reconciliation polling but is intentionally not rendered as busy.
     pub(crate) has_pending_rounds: bool,
+    /// Blocks until the next VTXO becomes due for refresh, if Bark could tell.
+    pub(crate) next_refresh_due_blocks: Option<u32>,
     pub(crate) activity: Vec<ActivityItem>,
 }
 

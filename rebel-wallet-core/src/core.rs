@@ -174,6 +174,17 @@ fn refresh_covered_by_queued<T: Eq + Hash>(
     due.into_iter().all(|id| queued.contains(&id))
 }
 
+/// Blocks until the earliest spendable VTXO reaches Bark's refresh threshold.
+/// Zero when a refresh is already due. Lets the app time background wakes.
+async fn next_refresh_due_blocks(wallet: &Wallet) -> Option<u32> {
+    let due_height = wallet
+        .get_next_required_refresh_blockheight()
+        .await
+        .ok()??;
+    let tip = wallet.chain().tip().await.ok()?;
+    Some(due_height.saturating_sub(tip))
+}
+
 async fn committed_pending_round_balance(wallet: &Wallet) -> anyhow::Result<Option<u64>> {
     let pending = wallet.pending_round_states().await?;
     if pending.is_empty() {
@@ -245,6 +256,7 @@ async fn wallet_synced_msg(
     }
     let mut activity = coalesce_activity_items(activity);
     apply_activity_metadata(&mut activity, contacts, payment_annotations, zap_receipts);
+    let next_refresh_due_blocks = next_refresh_due_blocks(wallet).await;
     Ok(WalletSnapshot {
         balance_sat: balance.spendable.to_sat(),
         pending_receive_sat,
@@ -252,6 +264,7 @@ async fn wallet_synced_msg(
         pending_send_sat: balance.pending_lightning_send.to_sat(),
         pending_refresh_sat,
         has_pending_rounds: balance.pending_in_round.to_sat() > 0,
+        next_refresh_due_blocks,
         activity,
     })
 }
@@ -465,6 +478,7 @@ impl AppCore {
                 self.state.wallet.stuck_receive_sat = 0;
                 self.state.wallet.pending_send_sat = 0;
                 self.state.wallet.pending_refresh_sat = 0;
+                self.state.wallet.next_refresh_due_blocks = None;
                 self.has_pending_rounds = false;
                 self.open_wallet(
                     Zeroizing::new(mnemonic.trim().to_string()),
@@ -1509,6 +1523,7 @@ impl AppCore {
             self.state.wallet.pending_refresh_sat = pending_refresh_sat;
         }
         self.has_pending_rounds = snapshot.has_pending_rounds;
+        self.state.wallet.next_refresh_due_blocks = snapshot.next_refresh_due_blocks;
         self.state.wallet.last_sync = Some(now_label());
         self.state.activity = snapshot.activity;
         self.prefetch_activity_profile_pictures();
@@ -1617,6 +1632,7 @@ impl AppCore {
         self.last_maintenance_completed_at = None;
         self.wallet_retry_kind = None;
         self.has_pending_rounds = false;
+        self.state.wallet.next_refresh_due_blocks = None;
         self.state.wallet.sync_error = None;
         self.cancel_refresh_poll(true);
         self.refresh_wallet_busy_state();

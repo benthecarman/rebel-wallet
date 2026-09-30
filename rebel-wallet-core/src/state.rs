@@ -238,6 +238,9 @@ pub struct WalletState {
     pub pending_refresh_sat: u64,
     pub pending_refresh_display: String,
     pub pending_refresh_fiat_display: Option<String>,
+    /// Blocks until the earliest spendable VTXO enters the refresh window.
+    /// Zero when a refresh is already due, `None` when unknown or nothing is held.
+    pub next_refresh_due_blocks: Option<u32>,
     pub sync_error: Option<String>,
     pub last_sync: Option<String>,
 }
@@ -497,6 +500,7 @@ impl AppState {
                 pending_refresh_sat: 0,
                 pending_refresh_display: format_sats(0),
                 pending_refresh_fiat_display: None,
+                next_refresh_due_blocks: None,
                 sync_error: None,
                 last_sync: None,
             },

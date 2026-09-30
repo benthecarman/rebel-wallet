@@ -425,6 +425,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -1927,16 +1943,25 @@ public struct WalletState: Equatable, Hashable {
     public var pendingRefreshSat: UInt64
     public var pendingRefreshDisplay: String
     public var pendingRefreshFiatDisplay: String?
+    /**
+     * Blocks until the earliest spendable VTXO enters the refresh window.
+     * Zero when a refresh is already due, `None` when unknown or nothing is held.
+     */
+    public var nextRefreshDueBlocks: UInt32?
     public var syncError: String?
     public var lastSync: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, stuckReceiveSat: UInt64, stuckReceiveDisplay: String, stuckReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?,
+    public init(network: WalletNetwork, networkName: String, defaultServerAddress: String, defaultEsploraAddress: String, serverAddress: String, esploraAddress: String, priceCurrency: PriceCurrency, priceCurrencyCode: String, priceCurrencyName: String, btcPrice: Double?, balanceSat: UInt64, balanceDisplay: String, balanceFiatDisplay: String?, pendingReceiveSat: UInt64, pendingReceiveDisplay: String, pendingReceiveFiatDisplay: String?, stuckReceiveSat: UInt64, stuckReceiveDisplay: String, stuckReceiveFiatDisplay: String?, pendingSendSat: UInt64, pendingSendDisplay: String, pendingSendFiatDisplay: String?, 
         /**
          * Funds committed to a round funding transaction and temporarily
          * unavailable. Queued delegated refreshes are deliberately excluded.
-         */pendingRefreshSat: UInt64, pendingRefreshDisplay: String, pendingRefreshFiatDisplay: String?, syncError: String?, lastSync: String?) {
+         */pendingRefreshSat: UInt64, pendingRefreshDisplay: String, pendingRefreshFiatDisplay: String?, 
+        /**
+         * Blocks until the earliest spendable VTXO enters the refresh window.
+         * Zero when a refresh is already due, `None` when unknown or nothing is held.
+         */nextRefreshDueBlocks: UInt32?, syncError: String?, lastSync: String?) {
         self.network = network
         self.networkName = networkName
         self.defaultServerAddress = defaultServerAddress
@@ -1962,6 +1987,7 @@ public struct WalletState: Equatable, Hashable {
         self.pendingRefreshSat = pendingRefreshSat
         self.pendingRefreshDisplay = pendingRefreshDisplay
         self.pendingRefreshFiatDisplay = pendingRefreshFiatDisplay
+        self.nextRefreshDueBlocks = nextRefreshDueBlocks
         self.syncError = syncError
         self.lastSync = lastSync
     }
@@ -1998,16 +2024,17 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
                 pendingReceiveSat: FfiConverterUInt64.read(from: &buf), 
                 pendingReceiveDisplay: FfiConverterString.read(from: &buf), 
                 pendingReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf), 
-                stuckReceiveSat: FfiConverterUInt64.read(from: &buf),
-                stuckReceiveDisplay: FfiConverterString.read(from: &buf),
-                stuckReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf),
+                stuckReceiveSat: FfiConverterUInt64.read(from: &buf), 
+                stuckReceiveDisplay: FfiConverterString.read(from: &buf), 
+                stuckReceiveFiatDisplay: FfiConverterOptionString.read(from: &buf), 
                 pendingSendSat: FfiConverterUInt64.read(from: &buf), 
                 pendingSendDisplay: FfiConverterString.read(from: &buf), 
                 pendingSendFiatDisplay: FfiConverterOptionString.read(from: &buf), 
                 pendingRefreshSat: FfiConverterUInt64.read(from: &buf), 
                 pendingRefreshDisplay: FfiConverterString.read(from: &buf), 
                 pendingRefreshFiatDisplay: FfiConverterOptionString.read(from: &buf), 
-                syncError: FfiConverterOptionString.read(from: &buf),
+                nextRefreshDueBlocks: FfiConverterOptionUInt32.read(from: &buf), 
+                syncError: FfiConverterOptionString.read(from: &buf), 
                 lastSync: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -2038,6 +2065,7 @@ public struct FfiConverterTypeWalletState: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.pendingRefreshSat, into: &buf)
         FfiConverterString.write(value.pendingRefreshDisplay, into: &buf)
         FfiConverterOptionString.write(value.pendingRefreshFiatDisplay, into: &buf)
+        FfiConverterOptionUInt32.write(value.nextRefreshDueBlocks, into: &buf)
         FfiConverterOptionString.write(value.syncError, into: &buf)
         FfiConverterOptionString.write(value.lastSync, into: &buf)
     }
@@ -2441,9 +2469,9 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         )
         
         case 74: return .foregrounded
-
+        
         case 75: return .backgrounded
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -2793,14 +2821,14 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             writeInt(&buf, Int32(73))
             FfiConverterTypeHapticFeedback.write(feedback, into: &buf)
             
-
+        
         case .foregrounded:
             writeInt(&buf, Int32(74))
-
-
+        
+        
         case .backgrounded:
             writeInt(&buf, Int32(75))
-
+        
         }
     }
 }
@@ -4214,6 +4242,30 @@ public func FfiConverterCallbackInterfaceSecretStore_lift(_ handle: UInt64) thro
 #endif
 public func FfiConverterCallbackInterfaceSecretStore_lower(_ v: SecretStore) -> UInt64 {
     return FfiConverterCallbackInterfaceSecretStore.lower(v)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
 }
 
 #if swift(>=5.8)
