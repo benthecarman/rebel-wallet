@@ -2,9 +2,15 @@ import SwiftUI
 
 @main
 struct RebelWalletApp: App {
-    @State private var manager = AppManager()
+    @State private var manager: AppManager
     @State private var easterEgg = WalletEasterEgg()
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let manager = AppManager()
+        _manager = State(initialValue: manager)
+        BackgroundMaintenance.register(manager: manager)
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -33,6 +39,7 @@ struct RebelWalletApp: App {
                         manager.endReceiveBackgroundTask()
                     case .background:
                         manager.dispatch(.backgrounded)
+                        BackgroundMaintenance.schedule()
                         // Keep the core running briefly so an in-flight Lightning
                         // receive can still be claimed while backgrounded.
                         manager.beginReceiveBackgroundTaskIfNeeded()

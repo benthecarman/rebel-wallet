@@ -33,6 +33,7 @@
 		CED21125310A750295A4780F /* DeviceAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D863AEFB2673876DB1D78CD /* DeviceAuth.swift */; };
 		D096C657DFB51D8FC3F689AE /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6865C8CFB78CE40B67FA1DB2 /* ProfileView.swift */; };
 		D4D47575C3B6FFA1C555EF10 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747F6D6E419A7475169ACED6 /* CommonComponents.swift */; };
+		DE1ECBEC29EE88420479F1BC /* BackgroundMaintenance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42857685ED9D243CE23F079E /* BackgroundMaintenance.swift */; };
 		E621BAA395FB93293F83B59E /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF276A85A4339254182EB73 /* SetupView.swift */; };
 		E9395E0EC132A904BCDC7939 /* RebelTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00AD3E0EC1FCD4F0CF40360 /* RebelTheme.swift */; };
 		EC041799A677360DB6FB8799 /* ContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771215578CB9B3F8F64C9139 /* ContactsView.swift */; };
@@ -46,6 +47,7 @@
 		16D83FFD70D94BAE3A8ACC73 /* LaunchSplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSplashView.swift; sourceTree = "<group>"; };
 		182BE8950E50F58DF4E9DFDB /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
 		1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStyles.swift; sourceTree = "<group>"; };
+		42857685ED9D243CE23F079E /* BackgroundMaintenance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundMaintenance.swift; sourceTree = "<group>"; };
 		49D88A349FD70A9153DD2C03 /* App.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		503FC468B99283614CA26E34 /* LightningAddressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightningAddressView.swift; sourceTree = "<group>"; };
 		5D863AEFB2673876DB1D78CD /* DeviceAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAuth.swift; sourceTree = "<group>"; };
@@ -132,6 +134,7 @@
 		8EB165A1A41A6C1DBA2779EF /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				42857685ED9D243CE23F079E /* BackgroundMaintenance.swift */,
 				5D863AEFB2673876DB1D78CD /* DeviceAuth.swift */,
 				EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */,
 			);
@@ -265,6 +268,7 @@
 				031CA10D0913601225E060CD /* ActivityView.swift in Sources */,
 				5BD7FDC594AE8C2772C8DE0B /* App.swift in Sources */,
 				67FF93F9D8D2C554E9276533 /* AppManager.swift in Sources */,
+				DE1ECBEC29EE88420479F1BC /* BackgroundMaintenance.swift in Sources */,
 				A7A986D21CE49F9EC3ADCB18 /* BackupRestoreViews.swift in Sources */,
 				326333CB48C83D5B4722E8C9 /* ButtonStyles.swift in Sources */,
 				D4D47575C3B6FFA1C555EF10 /* CommonComponents.swift in Sources */,

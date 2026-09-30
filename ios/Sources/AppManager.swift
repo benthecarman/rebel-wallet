@@ -108,6 +108,34 @@ final class AppManager: AppReconciler {
         await waitForWalletSync(startingRev: startingRev)
     }
 
+    /// Runs one round of wallet maintenance for a background app refresh.
+    ///
+    /// Returns true once maintenance finished without a sync error. The Rust core
+    /// requests maintenance itself when the wallet opens, so on a cold background
+    /// launch this mostly waits; on a warm one it asks for a fresh run.
+    func runBackgroundMaintenance() async -> Bool {
+        let deadline = Date().addingTimeInterval(25)
+
+        while state.busy.bootstrapping || state.busy.openingWallet {
+            guard !Task.isCancelled, Date() < deadline else { return false }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard state.setup == .ready else { return false }
+
+        dispatch(.maintainVtxos)
+
+        var observedMaintenance = false
+        while !Task.isCancelled, Date() < deadline {
+            if state.busy.maintainingVtxos {
+                observedMaintenance = true
+            } else if observedMaintenance {
+                return state.wallet.syncError == nil
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return false
+    }
+
     private func waitForWalletSync(startingRev: UInt64? = nil) async {
         let timeout = Date().addingTimeInterval(100)
         var observedSync = state.busy.syncingWallet
