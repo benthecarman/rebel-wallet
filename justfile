@@ -36,7 +36,7 @@ run-ios-phone bundle_id=IOS_BUNDLE_ID: ios-rust ios-xcframework ios-xcodeproj
   set -euo pipefail
   DEVICE_ID="$(xcrun devicectl list devices \
     | grep -E 'connected|available \(paired\)' \
-    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-Fa-f-]{36}$/) { print $i; exit } }')"
+    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^([0-9A-Fa-f-]{36}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16})$/) { print $i; exit } }')"
   if [ -z "$DEVICE_ID" ]; then
     echo "No connected or paired iOS device found." >&2
     echo "Visible devices:" >&2
