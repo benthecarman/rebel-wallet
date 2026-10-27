@@ -182,7 +182,7 @@ async fn next_refresh_due_blocks(wallet: &Wallet) -> Option<u32> {
         .await
         .ok()??;
     let tip = wallet.chain().tip().await.ok()?;
-    Some(due_height.saturating_sub(tip))
+    Some(due_height.checked_blocks_since(tip).unwrap_or(0))
 }
 
 async fn committed_pending_round_balance(wallet: &Wallet) -> anyhow::Result<Option<u64>> {
@@ -258,7 +258,9 @@ async fn wallet_synced_msg(
     apply_activity_metadata(&mut activity, contacts, payment_annotations, zap_receipts);
     let next_refresh_due_blocks = next_refresh_due_blocks(wallet).await;
     Ok(WalletSnapshot {
-        balance_sat: balance.spendable.to_sat(),
+        // Bark keeps VTXOs awaiting a refresh out of `spendable`; maintenance
+        // refreshes them, so count them rather than have sats vanish meanwhile.
+        balance_sat: (balance.spendable + balance.needs_refresh).to_sat(),
         pending_receive_sat,
         stuck_receive_sat,
         pending_send_sat: balance.pending_lightning_send.to_sat(),

@@ -216,8 +216,8 @@ mod tests {
         let mainnet = bark_config(ServerConfig::for_network(WalletNetwork::Mainnet));
         let signet = bark_config(ServerConfig::for_network(WalletNetwork::Signet));
 
-        assert_eq!(mainnet.vtxo_refresh_expiry_threshold, 144);
-        assert_eq!(signet.vtxo_refresh_expiry_threshold, 12);
+        assert_eq!(mainnet.vtxo_refresh_expiry_threshold, 144.into());
+        assert_eq!(signet.vtxo_refresh_expiry_threshold, 12.into());
     }
 
     #[test]
