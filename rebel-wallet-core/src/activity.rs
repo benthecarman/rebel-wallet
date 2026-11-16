@@ -20,7 +20,9 @@ pub(crate) fn activity_from_movement(
     lightning_address_ark_address: Option<&str>,
 ) -> ActivityItem {
     let amount_sat = activity_amount_sat(&movement);
-    let inbound = amount_sat >= 0;
+    // A send that nets to zero (e.g. its HTLCs were revoked) is still a send.
+    let inbound = amount_sat > 0
+        || (amount_sat == 0 && (movement.sent_to.is_empty() || !movement.received_on.is_empty()));
     let payment_amount_sat = activity_payment_amount_sat(&movement, inbound).unwrap_or(amount_sat);
     let destination = if inbound {
         movement.received_on.first()
@@ -200,7 +202,19 @@ fn ark_address_matches(movement_address: Option<&str>, registered_address: Optio
 }
 
 pub(crate) fn is_user_visible_movement(movement: &Movement) -> bool {
-    !is_round_refresh_movement(movement)
+    !is_round_refresh_movement(movement) && !is_abandoned_movement(movement)
+}
+
+/// A failed or canceled movement that left the balance untouched, such as an
+/// expired Lightning invoice or a send whose HTLCs were revoked back to us.
+/// These are noise in the activity list; a failed movement that did move funds
+/// stays visible so the loss is not hidden.
+fn is_abandoned_movement(movement: &Movement) -> bool {
+    matches!(
+        movement.status,
+        MovementStatus::Failed | MovementStatus::Canceled
+    ) && movement.effective_balance.to_sat() == 0
+        && movement.offchain_fee.to_sat() == 0
 }
 
 pub(crate) fn visible_activity_movements(history: Vec<Movement>) -> Vec<Movement> {
@@ -783,6 +797,40 @@ mod tests {
     }
 
     #[test]
+    fn hides_failed_and_canceled_movements_without_balance_change() {
+        let lightning_receive = MovementSubsystem {
+            name: "bark.lightning_receive".to_string(),
+            kind: "receive".to_string(),
+        };
+        for status in [MovementStatus::Failed, MovementStatus::Canceled] {
+            let movement = Movement::new(
+                MovementId(1),
+                status,
+                &lightning_receive,
+                chrono::Local::now(),
+            );
+            assert!(!is_user_visible_movement(&movement));
+        }
+
+        let pending = Movement::new(
+            MovementId(2),
+            MovementStatus::Pending,
+            &lightning_receive,
+            chrono::Local::now(),
+        );
+        assert!(is_user_visible_movement(&pending));
+
+        let mut lossy_failure = Movement::new(
+            MovementId(3),
+            MovementStatus::Failed,
+            &lightning_receive,
+            chrono::Local::now(),
+        );
+        lossy_failure.effective_balance = bitcoin::SignedAmount::from_sat(-500);
+        assert!(is_user_visible_movement(&lossy_failure));
+    }
+
+    #[test]
     fn dedupes_duplicate_ark_receive_movements_by_output_vtxos() {
         let now = chrono::Local::now();
         let first = ark_receive_movement(4, 1_000, &[1, 2], now);
@@ -843,6 +891,28 @@ mod tests {
         assert_eq!(item.signed_amount_display, "-55 sats");
         assert_eq!(item.subtitle, "20 sats fee");
         assert_eq!(item.message_text.as_deref(), Some("20 sats fee"));
+    }
+
+    #[test]
+    fn zero_net_send_is_not_shown_as_received() {
+        let mut movement = Movement::new(
+            MovementId(5),
+            MovementStatus::Pending,
+            &MovementSubsystem {
+                name: "bark.lightning".to_string(),
+                kind: "send".to_string(),
+            },
+            chrono::Local::now(),
+        );
+        movement.sent_to = vec![MovementDestination::custom(
+            "lnbc1invoice".to_string(),
+            Amount::from_sat(55),
+        )];
+
+        let item = activity_from_movement(movement, &[], None, None);
+
+        assert_eq!(item.icon_kind, ActivityIconKind::Sent);
+        assert_eq!(item.display_primary_name, "You");
     }
 
     #[test]
