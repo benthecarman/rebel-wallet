@@ -2,8 +2,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::Context;
-use bark::ark::lightning::{Offer, OfferAmount};
+use bark::actions::lightning::pay::LightningSendState;
+use bark::ark::lightning::{Offer, OfferAmount, PaymentHash};
 use bark::lightning_invoice::Bolt11Invoice;
+use bark::Wallet;
 use bitcoin::{Address as BitcoinAddress, Amount};
 use nostr_sdk::prelude::PublicKey as NostrPublicKey;
 
@@ -466,6 +468,7 @@ impl AppCore {
             let parsed = Bolt11Invoice::from_str(&invoice);
             let msg = match parsed {
                 Ok(invoice) => {
+                    let payment_hash = PaymentHash::from(*invoice.payment_hash());
                     let annotation = annotation.map(|mut annotation| {
                         annotation.payment_hash = Some(invoice.payment_hash().to_string());
                         annotation
@@ -474,10 +477,18 @@ impl AppCore {
                         .pay_lightning_invoice(invoice, user_amount, true)
                         .await
                     {
-                        Ok(_) => AsyncMsg::Paid {
-                            result: "Lightning invoice paid.".to_string(),
-                            annotation,
-                        },
+                        Ok(_) => {
+                            confirmed_lightning_payment(
+                                &wallet,
+                                payment_hash,
+                                "Lightning payment",
+                                AsyncMsg::Paid {
+                                    result: "Lightning invoice paid.".to_string(),
+                                    annotation,
+                                },
+                            )
+                            .await
+                        }
                         Err(e) => AsyncMsg::Error(format!("Lightning payment failed: {e:#}")),
                     }
                 }
@@ -525,14 +536,23 @@ impl AppCore {
         );
         self.rt.spawn(async move {
             let msg = match wallet.pay_lightning_offer(offer, user_amount, true).await {
-                Ok(invoice) => AsyncMsg::Paid {
-                    result: "Lightning offer paid.".to_string(),
-                    annotation: annotation.map(|mut annotation| {
-                        annotation.invoice = Some(invoice.to_string());
-                        annotation.payment_hash = Some(invoice.payment_hash().to_string());
-                        annotation
-                    }),
-                },
+                Ok(invoice) => {
+                    let paid = AsyncMsg::Paid {
+                        result: "Lightning offer paid.".to_string(),
+                        annotation: annotation.map(|mut annotation| {
+                            annotation.invoice = Some(invoice.to_string());
+                            annotation.payment_hash = Some(invoice.payment_hash().to_string());
+                            annotation
+                        }),
+                    };
+                    confirmed_lightning_payment(
+                        &wallet,
+                        invoice.payment_hash(),
+                        "Lightning offer payment",
+                        paid,
+                    )
+                    .await
+                }
                 Err(e) => AsyncMsg::Error(format!("Lightning offer payment failed: {e:#}")),
             };
             let _ = tx.send(CoreMsg::Async(msg));
@@ -570,6 +590,7 @@ impl AppCore {
                         Some(requested_msat) => match invoice.amount_milli_satoshis() {
                             Some(invoice_msat) if invoice_msat == requested_msat => {
                                 let invoice_text = invoice.to_string();
+                                let hash = PaymentHash::from(*invoice.payment_hash());
                                 let payment_hash = invoice.payment_hash().to_string();
                                 match wallet
                                     .pay_lightning_invoice(
@@ -579,14 +600,23 @@ impl AppCore {
                                     )
                                     .await
                                 {
-                                    Ok(_) => AsyncMsg::Paid {
-                                        result: "Lightning address payment sent.".to_string(),
-                                        annotation: annotation.map(|mut annotation| {
-                                            annotation.invoice = Some(invoice_text);
-                                            annotation.payment_hash = Some(payment_hash);
-                                            annotation
-                                        }),
-                                    },
+                                    Ok(_) => {
+                                        confirmed_lightning_payment(
+                                            &wallet,
+                                            hash,
+                                            "Lightning payment",
+                                            AsyncMsg::Paid {
+                                                result: "Lightning address payment sent."
+                                                    .to_string(),
+                                                annotation: annotation.map(|mut annotation| {
+                                                    annotation.invoice = Some(invoice_text);
+                                                    annotation.payment_hash = Some(payment_hash);
+                                                    annotation
+                                                }),
+                                            },
+                                        )
+                                        .await
+                                    }
                                     Err(e) => {
                                         AsyncMsg::Error(format!("Lightning payment failed: {e:#}"))
                                     }
@@ -666,6 +696,7 @@ impl AppCore {
                             Some(requested_msat) => match invoice.amount_milli_satoshis() {
                                 Some(invoice_msat) if invoice_msat == requested_msat => {
                                     let invoice_text = invoice.to_string();
+                                    let hash = PaymentHash::from(*invoice.payment_hash());
                                     let payment_hash = invoice.payment_hash().to_string();
                                     match wallet
                                         .pay_lightning_invoice(
@@ -675,14 +706,23 @@ impl AppCore {
                                         )
                                         .await
                                     {
-                                        Ok(_) => AsyncMsg::Paid {
-                                            result: "Zap sent.".to_string(),
-                                            annotation: annotation.map(|mut annotation| {
-                                                annotation.invoice = Some(invoice_text);
-                                                annotation.payment_hash = Some(payment_hash);
-                                                annotation
-                                            }),
-                                        },
+                                        Ok(_) => {
+                                            confirmed_lightning_payment(
+                                                &wallet,
+                                                hash,
+                                                "Zap",
+                                                AsyncMsg::Paid {
+                                                    result: "Zap sent.".to_string(),
+                                                    annotation: annotation.map(|mut annotation| {
+                                                        annotation.invoice = Some(invoice_text);
+                                                        annotation.payment_hash =
+                                                            Some(payment_hash);
+                                                        annotation
+                                                    }),
+                                                },
+                                            )
+                                            .await
+                                        }
                                         Err(e) => {
                                             AsyncMsg::Error(format!("Zap payment failed: {e:#}"))
                                         }
@@ -793,6 +833,28 @@ impl AppCore {
             };
             let _ = tx.send(CoreMsg::Async(msg));
         });
+    }
+}
+
+/// bark's Lightning pay calls return `Ok` once the send has finished,
+/// including when the payment failed and its HTLCs were revoked back to us.
+/// Only an invoice bark recorded as paid means the payment went through, so
+/// report anything else as a failure instead of a success screen.
+async fn confirmed_lightning_payment(
+    wallet: &Wallet,
+    payment_hash: PaymentHash,
+    label: &str,
+    paid: AsyncMsg,
+) -> AsyncMsg {
+    match wallet.lightning_send_state(payment_hash).await {
+        Ok(LightningSendState::Paid(_)) => paid,
+        Ok(LightningSendState::InProgress(_)) => AsyncMsg::Error(format!(
+            "{label} is still pending. Check your activity for the result."
+        )),
+        Ok(LightningSendState::Unknown) => AsyncMsg::Error(format!(
+            "{label} failed. The funds were returned to your wallet."
+        )),
+        Err(e) => AsyncMsg::Error(format!("Could not confirm the payment: {e:#}")),
     }
 }
 
