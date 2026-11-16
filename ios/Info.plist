@@ -30,7 +30,7 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>UIRequiresFullScreen</key>
+	<key>UIRequiresFullScreen~ipad</key>
 	<true/>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>

@@ -47,6 +47,7 @@ struct SetupView: View {
             Spacer()
         }
         .padding(22)
+        .readableColumn(maxWidth: 480)
         .foregroundStyle(primaryText)
         .background(pageBackground.ignoresSafeArea())
     }

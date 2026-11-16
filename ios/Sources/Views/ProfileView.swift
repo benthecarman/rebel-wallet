@@ -23,6 +23,7 @@ struct ProfileView: View {
                 }
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle(mode.title)
         .toolbar {
@@ -372,7 +373,7 @@ struct NostrKeysPanel: View {
         })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
-        if UIDevice.current.userInterfaceIdiom == .pad, let popover = sheet.popoverPresentationController {
+        if let popover = sheet.popoverPresentationController {
             popover.sourceView = presenter.view
             popover.sourceRect = CGRect(
                 x: presenter.view.bounds.midX,

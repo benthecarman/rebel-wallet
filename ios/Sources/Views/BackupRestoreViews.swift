@@ -59,6 +59,7 @@ struct BackupView: View {
                 .disabled(!(revealed && checkedSecure && checkedResponsibility && checkedPrivate))
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Backup")
         .scrollContentBackground(.hidden)
@@ -160,6 +161,7 @@ struct RestoreWalletView: View {
                 }
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Restore")
         .scrollContentBackground(.hidden)

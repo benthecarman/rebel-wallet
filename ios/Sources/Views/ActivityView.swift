@@ -30,6 +30,7 @@ struct ActivityView: View {
                 }
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Activity")
         .background(pageBackground)
@@ -154,6 +155,7 @@ struct ActivityPreviewSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
             }
             .padding(16)
+            .readableColumn()
         }
         .background(pageBackground)
         .foregroundStyle(primaryText)

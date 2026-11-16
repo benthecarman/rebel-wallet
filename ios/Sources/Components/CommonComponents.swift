@@ -385,3 +385,13 @@ struct ToastView: View {
         }
     }
 }
+
+extension View {
+    /// Caps content at a comfortable reading width and centers it, so
+    /// phone-sized layouts don't stretch across wide displays such as the
+    /// unfolded iPhone Duo or iPad. No effect on regular iPhone widths.
+    func readableColumn(maxWidth: CGFloat = 640) -> some View {
+        frame(maxWidth: maxWidth)
+            .frame(maxWidth: .infinity)
+    }
+}

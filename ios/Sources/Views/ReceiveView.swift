@@ -94,6 +94,7 @@ struct ReceiveView: View {
                 }
             }
             .padding(16)
+            .readableColumn()
             .frame(maxWidth: .infinity)
         }
         .navigationTitle("Receive")

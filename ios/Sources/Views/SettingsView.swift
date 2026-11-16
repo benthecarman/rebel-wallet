@@ -59,6 +59,7 @@ struct SettingsView: View {
 
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Settings")
         .background(pageBackground)
@@ -80,7 +81,7 @@ struct SettingsView: View {
         })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
-        if UIDevice.current.userInterfaceIdiom == .pad, let popover = sheet.popoverPresentationController {
+        if let popover = sheet.popoverPresentationController {
             popover.sourceView = presenter.view
             popover.sourceRect = CGRect(
                 x: presenter.view.bounds.midX,
@@ -228,6 +229,7 @@ struct CurrencyView: View {
                 .disabled(!hasChanges)
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Currency")
         .scrollContentBackground(.hidden)
@@ -310,6 +312,7 @@ struct NetworkView: View {
                 .disabled(!hasChanges || manager.state.busy.openingWallet)
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Network")
         .scrollContentBackground(.hidden)

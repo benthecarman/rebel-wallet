@@ -59,6 +59,7 @@ struct LightningAddressView: View {
                 }
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Lightning Address")
         .background(pageBackground)

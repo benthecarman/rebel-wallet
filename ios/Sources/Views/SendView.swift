@@ -126,6 +126,7 @@ struct SendView: View {
                     }
                 }
                 .padding(16)
+                .readableColumn()
             }
             .frame(maxWidth: .infinity, minHeight: 1, alignment: .topLeading)
         }

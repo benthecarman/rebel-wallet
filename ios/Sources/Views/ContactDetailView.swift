@@ -21,6 +21,7 @@ struct ContactDetailView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                     .padding(.bottom, 10)
+                    .readableColumn()
                     .background(pageBackground.opacity(0.92))
 
                 ScrollView {
@@ -48,6 +49,7 @@ struct ContactDetailView: View {
                         }
                     }
                     .padding(16)
+                    .readableColumn()
                 }
 
                 HStack(spacing: 10) {
@@ -80,6 +82,7 @@ struct ContactDetailView: View {
                     .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(12)
+                .readableColumn()
                 .background(pageBackground.opacity(0.94))
             } else {
                 EmptyState(text: "Contact not found")

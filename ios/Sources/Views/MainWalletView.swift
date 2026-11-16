@@ -104,6 +104,7 @@ struct HomeView: View {
             )
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
+                .readableColumn()
 
             ScrollView {
                 Color.clear
@@ -130,6 +131,7 @@ struct HomeView: View {
                 }
                 .padding(.bottom, 88)
                 .padding(.horizontal, 16)
+                .readableColumn()
             }
             .scrollBounceBehavior(.always, axes: .vertical)
             .overlay(alignment: .top) {

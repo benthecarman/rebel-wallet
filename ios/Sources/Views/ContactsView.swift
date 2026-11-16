@@ -132,6 +132,7 @@ struct ContactsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
             }
             .padding(16)
+            .readableColumn()
         }
         .navigationTitle("Social")
         .background(pageBackground)
