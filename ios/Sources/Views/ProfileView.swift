@@ -59,6 +59,7 @@ struct ProfileSummaryPanel: View {
     @Bindable var manager: AppManager
     @Binding var mode: ProfileMode
     @Environment(\.walletAccent) private var walletAccent
+    @Environment(\.walletSidebarVisible) private var sidebarVisible
 
     private var lightningAddress: String {
         manager.state.nostr.lud16.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -118,7 +119,10 @@ struct ProfileSummaryPanel: View {
                 }
             }
 
-            BalancePanel(wallet: manager.state.wallet)
+            // The wide layout already shows the balance in the sidebar.
+            if !sidebarVisible {
+                BalancePanel(wallet: manager.state.wallet)
+            }
         }
     }
 }

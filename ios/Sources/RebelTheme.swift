@@ -19,6 +19,10 @@ private struct WalletUsesDellLogoKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct WalletSidebarVisibleKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var walletAccent: Color {
         get { self[WalletAccentKey.self] }
@@ -28,5 +32,12 @@ extension EnvironmentValues {
     var walletUsesDellLogo: Bool {
         get { self[WalletUsesDellLogoKey.self] }
         set { self[WalletUsesDellLogoKey.self] = newValue }
+    }
+
+    /// True when the wide layout shows the persistent wallet sidebar, so
+    /// views in the content pane can drop their own balance and actions.
+    var walletSidebarVisible: Bool {
+        get { self[WalletSidebarVisibleKey.self] }
+        set { self[WalletSidebarVisibleKey.self] = newValue }
     }
 }

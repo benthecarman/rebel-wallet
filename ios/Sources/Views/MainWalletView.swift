@@ -2,8 +2,15 @@ import SwiftUI
 
 struct MainWalletView: View {
     @Bindable var manager: AppManager
+    @Binding var balanceDisplayMode: BalanceDisplayMode
     @State private var displayedPanel: WalletPanel = .tab(.home)
     @State private var panelMovesForward = true
+    @Environment(\.walletSidebarVisible) private var sidebarVisible
+
+    private var showsFab: Bool {
+        // The sidebar has send/receive/scan, so the FAB would duplicate it.
+        displayedPanel.showsFab && !sidebarVisible
+    }
 
     private var selectedTab: MainTab {
         manager.state.router.selectedTab
@@ -23,7 +30,7 @@ struct MainWalletView: View {
                 case .tab(let tab):
                     switch tab {
                     case .home:
-                        HomeView(manager: manager, openProfile: openProfile)
+                        HomeView(manager: manager, balanceDisplayMode: $balanceDisplayMode, openProfile: openProfile)
                     case .activity:
                         ActivityView(manager: manager)
                     case .contacts:
@@ -38,7 +45,7 @@ struct MainWalletView: View {
             .id(displayedPanel)
             .transition(panelTransition)
 
-            if displayedPanel.showsFab {
+            if showsFab {
                 MutinyFab(manager: manager)
             }
         }
@@ -74,9 +81,9 @@ struct MainWalletView: View {
 
 struct HomeView: View {
     @Bindable var manager: AppManager
+    @Binding var balanceDisplayMode: BalanceDisplayMode
     let openProfile: () -> Void
     @State private var selectedActivityId: String?
-    @State private var balanceDisplayMode: BalanceDisplayMode = .sats
     @State private var pullDistance: CGFloat = 0
     @State private var refreshingActivity = false
     @State private var crossedRefreshThreshold = false
@@ -95,7 +102,22 @@ struct HomeView: View {
         refreshingActivity ? 54 : min(54, pullDistance * 0.72)
     }
 
+    @Environment(\.walletSidebarVisible) private var sidebarVisible
+
     var body: some View {
+        Group {
+            if sidebarVisible {
+                activityPane
+            } else {
+                stackedLayout
+            }
+        }
+        .foregroundStyle(primaryText)
+        .background(pageBackground)
+        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId, manager: manager)
+    }
+
+    private var stackedLayout: some View {
         VStack(spacing: 16) {
             WalletHeader(
                 manager: manager,
@@ -106,77 +128,96 @@ struct HomeView: View {
                 .padding(.top, 14)
                 .readableColumn()
 
-            ScrollView {
-                Color.clear
-                    .frame(height: refreshIndicatorHeight)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    if manager.state.activity.isEmpty {
-                        MutinyEmptyHome()
-                    } else {
-                        ForEach(manager.state.activity, id: \.id) { item in
-                            Button {
-                                selectedActivityId = item.id
-                            } label: {
-                                ActivityRow(
-                                    item: item,
-                                    balanceDisplayMode: balanceDisplayMode,
-                                    imageNormalizer: manager.rust
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            Divider().overlay(borderColor)
-                        }
-                    }
-                }
-                .padding(.bottom, 88)
-                .padding(.horizontal, 16)
-                .readableColumn()
-            }
-            .scrollBounceBehavior(.always, axes: .vertical)
-            .overlay(alignment: .top) {
-                HomeActivityRefreshIndicator(
-                    progress: refreshProgress,
-                    refreshing: refreshingActivity
-                )
-                .frame(height: refreshIndicatorHeight)
-                .opacity(refreshingActivity || refreshProgress > 0.04 ? 1 : 0)
-                .allowsHitTesting(false)
-            }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { value in
-                        guard !refreshingActivity else { return }
-                        pullDistance = max(0, value.translation.height)
-                        if !crossedRefreshThreshold && pullDistance >= refreshThreshold {
-                            crossedRefreshThreshold = true
-                            manager.requestHaptic(.impactMedium)
-                        } else if crossedRefreshThreshold && pullDistance < refreshThreshold * 0.72 {
-                            crossedRefreshThreshold = false
-                        }
-                    }
-                    .onEnded { value in
-                        guard !refreshingActivity else { return }
-                        let distance = max(0, value.translation.height)
-                        if distance >= refreshThreshold {
-                            startActivityRefresh()
-                        } else {
-                            crossedRefreshThreshold = false
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                                pullDistance = 0
-                            }
-                        }
-                    }
+            activityList(
+                bottomPadding: 88,
+                emptyHint: "Use the plus button to send, receive, or scan."
             )
-            .onChange(of: manager.state.router.selectedTab) { _, _ in
-                if !refreshingActivity {
-                    pullDistance = 0
+        }
+    }
+
+    /// Content pane beside the wallet sidebar on wide displays.
+    private var activityPane: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Activity")
+                .font(.title2.bold())
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+            activityList(
+                bottomPadding: 24,
+                emptyHint: "Send, receive, or scan to get started."
+            )
+        }
+    }
+
+    private func activityList(bottomPadding: CGFloat, emptyHint: String) -> some View {
+        ScrollView {
+            Color.clear
+                .frame(height: refreshIndicatorHeight)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if manager.state.activity.isEmpty {
+                    MutinyEmptyHome(hint: emptyHint)
+                } else {
+                    ForEach(manager.state.activity, id: \.id) { item in
+                        Button {
+                            selectedActivityId = item.id
+                        } label: {
+                            ActivityRow(
+                                item: item,
+                                balanceDisplayMode: balanceDisplayMode,
+                                imageNormalizer: manager.rust
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(borderColor)
+                    }
                 }
+            }
+            .padding(.bottom, bottomPadding)
+            .padding(.horizontal, 16)
+            .readableColumn()
+        }
+        .scrollBounceBehavior(.always, axes: .vertical)
+        .overlay(alignment: .top) {
+            HomeActivityRefreshIndicator(
+                progress: refreshProgress,
+                refreshing: refreshingActivity
+            )
+            .frame(height: refreshIndicatorHeight)
+            .opacity(refreshingActivity || refreshProgress > 0.04 ? 1 : 0)
+            .allowsHitTesting(false)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    guard !refreshingActivity else { return }
+                    pullDistance = max(0, value.translation.height)
+                    if !crossedRefreshThreshold && pullDistance >= refreshThreshold {
+                        crossedRefreshThreshold = true
+                        manager.requestHaptic(.impactMedium)
+                    } else if crossedRefreshThreshold && pullDistance < refreshThreshold * 0.72 {
+                        crossedRefreshThreshold = false
+                    }
+                }
+                .onEnded { value in
+                    guard !refreshingActivity else { return }
+                    let distance = max(0, value.translation.height)
+                    if distance >= refreshThreshold {
+                        startActivityRefresh()
+                    } else {
+                        crossedRefreshThreshold = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                            pullDistance = 0
+                        }
+                    }
+                }
+        )
+        .onChange(of: manager.state.router.selectedTab) { _, _ in
+            if !refreshingActivity {
+                pullDistance = 0
             }
         }
-        .foregroundStyle(primaryText)
-        .background(pageBackground)
-        .activityPreviewSheet(item: selectedActivity, selectedActivityId: $selectedActivityId, manager: manager)
     }
 
     private func startActivityRefresh() {
@@ -412,6 +453,8 @@ enum BalanceDisplayMode {
 }
 
 struct MutinyEmptyHome: View {
+    var hint = "Use the plus button to send, receive, or scan."
+
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "bolt.circle")
@@ -419,7 +462,7 @@ struct MutinyEmptyHome: View {
                 .foregroundStyle(mutedText)
             Text("No payments yet")
                 .font(.headline)
-            Text("Use the plus button to send, receive, or scan.")
+            Text(hint)
                 .font(.subheadline)
                 .foregroundStyle(mutedText)
                 .multilineTextAlignment(.center)
@@ -513,6 +556,21 @@ struct BalancePanel: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(mutedText)
             }
+            WalletStatusDetails(wallet: wallet)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .foregroundStyle(primaryText)
+        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+struct WalletStatusDetails: View {
+    let wallet: WalletState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 StatPill(title: "Claimable", value: wallet.pendingReceiveDisplay, caption: wallet.pendingReceiveFiatDisplay)
                 StatPill(title: "Sending", value: wallet.pendingSendDisplay, caption: wallet.pendingSendFiatDisplay)
@@ -537,10 +595,145 @@ struct BalancePanel: View {
                     .foregroundStyle(mutedText)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .foregroundStyle(primaryText)
-        .background(surfaceBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor))
+    }
+}
+
+/// Persistent left pane of the wide layout: profile, balance, wallet status
+/// and payment actions. Its buttons swap what the content pane shows rather
+/// than stacking screens.
+struct HomeSidebar: View {
+    @Bindable var manager: AppManager
+    @Binding var balanceDisplayMode: BalanceDisplayMode
+
+    private var name: String {
+        manager.state.nostr.name.isEmpty ? "Rebel" : manager.state.nostr.name
+    }
+
+    private var lightningAddress: String {
+        manager.state.nostr.lud16.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var pendingRefreshText: String {
+        switch balanceDisplayMode {
+        case .sats:
+            return manager.state.wallet.pendingRefreshDisplay
+        case .currency:
+            return manager.state.wallet.pendingRefreshFiatDisplay
+                ?? manager.state.wallet.pendingRefreshDisplay
+        case .privacy:
+            return "****"
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 12) {
+                    Button {
+                        show(.profile)
+                    } label: {
+                        HStack(spacing: 12) {
+                            ProfileAvatar(
+                                url: manager.state.nostr.pictureDisplayUrl,
+                                size: 56,
+                                imageNormalizer: manager.rust
+                            )
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(name)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Text(lightningAddress.isEmpty
+                                     ? "View profile"
+                                     : truncateMiddle(lightningAddress, maxLength: 26, prefixCount: 12))
+                                    .font(.caption)
+                                    .foregroundStyle(lightningAddress.isEmpty ? mutedText : rebelGreen)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open profile")
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        manager.dispatch(.updateScreenStack(stack: []))
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            manager.dispatch(.selectTab(tab: .settings))
+                        }
+                    } label: {
+                        MutinyCircle(size: 44) {
+                            RebelMark(size: 26)
+                        }
+                    }
+                    .accessibilityLabel("Settings")
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    MutinyBalanceButton(wallet: manager.state.wallet, displayMode: $balanceDisplayMode) {
+                        manager.requestHaptic(.selection)
+                    }
+                    if manager.state.wallet.pendingRefreshSat > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text("\(pendingRefreshText) refreshing")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(mutedText)
+                    }
+                    WalletStatusDetails(wallet: manager.state.wallet)
+                }
+
+                HStack(spacing: 10) {
+                    HomeActionButton(title: "Send", icon: "arrow.up.right") {
+                        manager.requestHaptic(.impactLight)
+                        show(.send)
+                    }
+                    HomeActionButton(title: "Receive", icon: "arrow.down.left") {
+                        manager.requestHaptic(.impactLight)
+                        show(.receive)
+                    }
+                    HomeActionButton(title: "Scan", icon: "qrcode.viewfinder") {
+                        manager.dispatch(.requestQrScan)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    /// Replaces whatever the content pane shows with `screen`.
+    private func show(_ screen: Screen) {
+        guard manager.state.router.screenStack != [screen] else { return }
+        manager.dispatch(.updateScreenStack(stack: []))
+        manager.dispatch(.pushScreen(screen: screen))
+    }
+}
+
+struct HomeActionButton: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+    @Environment(\.walletAccent) private var walletAccent
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(walletAccent)
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+            }
+            .foregroundStyle(primaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(raisedSurface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
