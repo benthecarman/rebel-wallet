@@ -47,6 +47,12 @@ struct SettingsView: View {
                     }
                 }
 
+                SettingsCard(title: "About") {
+                    SettingsRow(title: "Terms of Service", caption: "Second provides the servers this wallet connects to", accent: walletAccent) {
+                        openTerms()
+                    }
+                }
+
                 SettingsCard(title: "Danger Zone") {
                     SettingsRow(
                         title: "Delete Wallet",
@@ -64,6 +70,11 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .background(pageBackground)
         .foregroundStyle(primaryText)
+    }
+
+    private func openTerms() {
+        guard let url = URL(string: "https://second.tech/terms") else { return }
+        UIApplication.shared.open(url)
     }
 
     private func presentDeleteWalletConfirmation() {
