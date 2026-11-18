@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		031CA10D0913601225E060CD /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E5E1121C48A2C550F94906 /* ActivityView.swift */; };
+		0729CFD0FC5E4AE3497F6AC7 /* VerticalBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F539B2DAB99C6DD4BEE9BA99 /* VerticalBar.swift */; };
 		09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936FB1B08FF781A9F9997609 /* SettingsView.swift */; };
 		10D82D8BEDF6F8B87C9D3393 /* RebelWalletCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 91954F33C35E52090B74C11A /* RebelWalletCore.xcframework */; };
 		11A29977382725FC272B253A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08790D56E6532CF87DC5EAF5 /* ContentView.swift */; };
@@ -71,6 +72,7 @@
 		EA0C4BD0B40C39BFEC75E99F /* ProfileImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileImageLoader.swift; sourceTree = "<group>"; };
 		EC33CB686ACF317A895B9BB7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F0F0724D7DE35C122B119C79 /* DisplayText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayText.swift; sourceTree = "<group>"; };
+		F539B2DAB99C6DD4BEE9BA99 /* VerticalBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerticalBar.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +192,7 @@
 				1D45F236CEBCEB5E130D6D65 /* ButtonStyles.swift */,
 				747F6D6E419A7475169ACED6 /* CommonComponents.swift */,
 				D76402BBB1CEAF24094C36E2 /* QRCodeView.swift */,
+				F539B2DAB99C6DD4BEE9BA99 /* VerticalBar.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -291,6 +294,7 @@
 				09A525B52C7C1F5F8D67B32A /* SettingsView.swift in Sources */,
 				E621BAA395FB93293F83B59E /* SetupView.swift in Sources */,
 				CE9095245DC4CDF7215A797E /* UIKitPresentation.swift in Sources */,
+				0729CFD0FC5E4AE3497F6AC7 /* VerticalBar.swift in Sources */,
 				2E3FDAA9662F0D04DEC86F30 /* WalletEasterEgg.swift in Sources */,
 				7801AFFCB110A843BF6B1C82 /* rebel_wallet_core.swift in Sources */,
 			);

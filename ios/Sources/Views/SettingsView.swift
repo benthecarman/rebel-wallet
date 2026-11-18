@@ -4,20 +4,24 @@ import UIKit
 struct SettingsView: View {
     @Bindable var manager: AppManager
     @Environment(\.walletAccent) private var walletAccent
+    @Environment(\.walletHasVerticalBar) private var hasVerticalBar
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Button {
-                    manager.dispatch(.selectTab(tab: .home))
-                } label: {
-                    MutinyCircle(size: 44) {
-                        Image(systemName: "chevron.left")
-                            .font(.headline.weight(.semibold))
+                // The vertical bar hosts its own back button.
+                if !hasVerticalBar {
+                    Button {
+                        manager.dispatch(.selectTab(tab: .home))
+                    } label: {
+                        MutinyCircle(size: 44) {
+                            Image(systemName: "chevron.left")
+                                .font(.headline.weight(.semibold))
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back to wallet")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back to wallet")
 
                 SettingsCard(title: "General") {
                     SettingsRow(title: "Backup", caption: "Show recovery phrase", accent: rebelGreen) {

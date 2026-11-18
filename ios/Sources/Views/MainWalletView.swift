@@ -6,10 +6,12 @@ struct MainWalletView: View {
     @State private var displayedPanel: WalletPanel = .tab(.home)
     @State private var panelMovesForward = true
     @Environment(\.walletSidebarVisible) private var sidebarVisible
+    @Environment(\.walletHasVerticalBar) private var hasVerticalBar
 
     private var showsFab: Bool {
-        // The sidebar has send/receive/scan, so the FAB would duplicate it.
-        displayedPanel.showsFab && !sidebarVisible
+        // The sidebar has send/receive/scan, so the FAB would duplicate it,
+        // and the vertical bar hosts it as a toolbar item instead.
+        displayedPanel.showsFab && !sidebarVisible && !hasVerticalBar
     }
 
     private var selectedTab: MainTab {
@@ -50,6 +52,16 @@ struct MainWalletView: View {
             }
         }
         .background(pageBackground.ignoresSafeArea())
+        .toolbar {
+            if hasVerticalBar {
+                WalletRailToolbar(
+                    manager: manager,
+                    showsSettings: displayedPanel == .tab(.home),
+                    showsBackToWallet: displayedPanel == .tab(.settings),
+                    showsPayments: sidebarVisible || displayedPanel.showsFab
+                )
+            }
+        }
         .onAppear {
             displayedPanel = .tab(selectedTab)
         }
@@ -284,6 +296,7 @@ struct WalletHeader: View {
     @Bindable var manager: AppManager
     @Binding var balanceDisplayMode: BalanceDisplayMode
     let openProfile: () -> Void
+    @Environment(\.walletHasVerticalBar) private var hasVerticalBar
 
     private var pendingRefreshText: String {
         switch balanceDisplayMode {
@@ -311,13 +324,19 @@ struct WalletHeader: View {
                     manager.requestHaptic(.selection)
                 }
                     .frame(maxWidth: .infinity)
-                Button {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-                        manager.dispatch(.selectTab(tab: .settings))
-                    }
-                } label: {
-                    MutinyCircle(size: 48) {
-                        RebelMark(size: 28)
+                if hasVerticalBar {
+                    // Settings lives in the vertical bar; keep the balance
+                    // centered against the avatar.
+                    Color.clear.frame(width: 48, height: 48)
+                } else {
+                    Button {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            manager.dispatch(.selectTab(tab: .settings))
+                        }
+                    } label: {
+                        MutinyCircle(size: 48) {
+                            RebelMark(size: 28)
+                        }
                     }
                 }
             }
@@ -604,6 +623,7 @@ struct WalletStatusDetails: View {
 struct HomeSidebar: View {
     @Bindable var manager: AppManager
     @Binding var balanceDisplayMode: BalanceDisplayMode
+    @Environment(\.walletHasVerticalBar) private var hasVerticalBar
 
     private var name: String {
         manager.state.nostr.name.isEmpty ? "Rebel" : manager.state.nostr.name
@@ -657,17 +677,21 @@ struct HomeSidebar: View {
 
                     Spacer(minLength: 8)
 
-                    Button {
-                        manager.dispatch(.updateScreenStack(stack: []))
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-                            manager.dispatch(.selectTab(tab: .settings))
+                    // With a vertical bar, settings and the payment actions
+                    // live there instead.
+                    if !hasVerticalBar {
+                        Button {
+                            manager.dispatch(.updateScreenStack(stack: []))
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                manager.dispatch(.selectTab(tab: .settings))
+                            }
+                        } label: {
+                            MutinyCircle(size: 44) {
+                                RebelMark(size: 26)
+                            }
                         }
-                    } label: {
-                        MutinyCircle(size: 44) {
-                            RebelMark(size: 26)
-                        }
+                        .accessibilityLabel("Settings")
                     }
-                    .accessibilityLabel("Settings")
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -685,17 +709,19 @@ struct HomeSidebar: View {
                     WalletStatusDetails(wallet: manager.state.wallet)
                 }
 
-                HStack(spacing: 10) {
-                    HomeActionButton(title: "Send", icon: "arrow.up.right") {
-                        manager.requestHaptic(.impactLight)
-                        show(.send)
-                    }
-                    HomeActionButton(title: "Receive", icon: "arrow.down.left") {
-                        manager.requestHaptic(.impactLight)
-                        show(.receive)
-                    }
-                    HomeActionButton(title: "Scan", icon: "qrcode.viewfinder") {
-                        manager.dispatch(.requestQrScan)
+                if !hasVerticalBar {
+                    HStack(spacing: 10) {
+                        HomeActionButton(title: "Send", icon: "arrow.up.right") {
+                            manager.requestHaptic(.impactLight)
+                            show(.send)
+                        }
+                        HomeActionButton(title: "Receive", icon: "arrow.down.left") {
+                            manager.requestHaptic(.impactLight)
+                            show(.receive)
+                        }
+                        HomeActionButton(title: "Scan", icon: "qrcode.viewfinder") {
+                            manager.dispatch(.requestQrScan)
+                        }
                     }
                 }
             }

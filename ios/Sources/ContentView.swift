@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var navPath: [Screen] = []
     @State private var selectedCapabilityPhoto: PhotosPickerItem?
     @State private var balanceDisplayMode: BalanceDisplayMode = .sats
+    @State private var hasVerticalBar = false
     @Environment(\.walletAccent) private var walletAccent
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -33,11 +34,20 @@ struct ContentView: View {
                     root
                         .navigationDestination(for: Screen.self) { screen in
                             screenView(for: screen)
+                                .toolbar {
+                                    // Beside the sidebar every pane screen
+                                    // keeps the wallet controls in the rail.
+                                    if showsSidebar && hasVerticalBar {
+                                        WalletRailToolbar(manager: manager)
+                                    }
+                                }
                         }
                 }
             }
         }
+        .background(VerticalBarReader { hasVerticalBar = $0 })
         .environment(\.walletSidebarVisible, showsSidebar)
+        .environment(\.walletHasVerticalBar, hasVerticalBar)
         .tint(walletAccent)
         .foregroundStyle(primaryText)
         .background(pageBackground.ignoresSafeArea())

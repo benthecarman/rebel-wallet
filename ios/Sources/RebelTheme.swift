@@ -40,4 +40,15 @@ extension EnvironmentValues {
         get { self[WalletSidebarVisibleKey.self] }
         set { self[WalletSidebarVisibleKey.self] = newValue }
     }
+
+    /// True when the system shows a vertical bar (the side rail on iPhone
+    /// Duo), so floating controls move into the rail as toolbar items.
+    var walletHasVerticalBar: Bool {
+        get { self[WalletHasVerticalBarKey.self] }
+        set { self[WalletHasVerticalBarKey.self] = newValue }
+    }
+}
+
+private struct WalletHasVerticalBarKey: EnvironmentKey {
+    static let defaultValue = false
 }
