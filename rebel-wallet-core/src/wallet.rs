@@ -139,10 +139,17 @@ pub(crate) async fn open_bark_wallet(
     if matches!(mode, WalletOpenMode::Replace) {
         remove_wallet_database_files(&db_path)?;
     }
+    let seed = WalletSeed::new_from_mnemonic(network, mnemonic);
+    // Create and Restore only run during onboarding, when the Keychain holds
+    // no seed. A database left behind for a different seed (a create that
+    // failed before its seed was saved, or app data restored onto a device
+    // without the Keychain item) would block setup forever, so set it aside.
+    if matches!(mode, WalletOpenMode::Create | WalletOpenMode::Restore) {
+        set_aside_orphaned_wallet_database(&db_path, &seed).await?;
+    }
     let db: Arc<dyn BarkPersister> = Arc::new(SqliteClient::open(&db_path)?);
     let config = bark_config(server_config);
     let lock_manager = Box::new(MemoryLockManager::new());
-    let seed = WalletSeed::new_from_mnemonic(network, mnemonic);
 
     // A newly created wallet should not scan the seed mailbox. Replacement
     // wallets must be created by Wallet::open so Bark knows to run recovery.
@@ -165,7 +172,18 @@ pub(crate) async fn open_bark_wallet(
         })),
         ..Default::default()
     };
-    let wallet = Wallet::open(network, seed, config, args).await?;
+    let wallet = match Wallet::open(network, seed, config, args).await {
+        Ok(wallet) => wallet,
+        Err(e) => {
+            // The seed of a wallet created above is never saved when opening
+            // fails, so its database is unusable. Remove it so a retry starts
+            // clean.
+            if matches!(mode, WalletOpenMode::Create) {
+                let _ = remove_wallet_database_files(&db_path);
+            }
+            return Err(e);
+        }
+    };
     // Bark calls the callback exactly once per successful open. If it somehow
     // did not and we expected a scan, treat that like a failed scan.
     let recovery_notice = match recovery_rx.try_recv() {
@@ -202,14 +220,117 @@ pub(crate) fn remove_wallet_database_files(db_path: &Path) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Moves the wallet database aside when it belongs to a different seed.
+/// Returns whether it did.
+async fn set_aside_orphaned_wallet_database(
+    db_path: &Path,
+    seed: &WalletSeed,
+) -> anyhow::Result<bool> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let properties = SqliteClient::open(db_path)?.read_properties().await?;
+    let orphaned = properties.is_some_and(|p| p.fingerprint != seed.fingerprint());
+    if orphaned {
+        set_aside_wallet_database_files(db_path)?;
+    }
+    Ok(orphaned)
+}
+
+/// Renames the wallet database files out of the way instead of deleting them,
+/// so a wallet whose seed is still written down somewhere is not destroyed.
+fn set_aside_wallet_database_files(db_path: &Path) -> anyhow::Result<()> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    for suffix in ["", "-wal", "-shm"] {
+        let path = PathBuf::from(format!("{}{}", db_path.display(), suffix));
+        let target = PathBuf::from(format!(
+            "{}.orphaned-{timestamp}{}",
+            db_path.display(),
+            suffix
+        ));
+        match std::fs::rename(&path, &target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| format!("failed to move aside {}", path.display()))
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        bark_config, failed_recovery_notice, recovery_status_notice, WalletRecoverySummary,
+        bark_config, failed_recovery_notice, recovery_status_notice,
+        set_aside_orphaned_wallet_database, WalletRecoverySummary,
     };
     use crate::persistence::ServerConfig;
     use crate::WalletNetwork;
-    use bark::RecoveryStatus;
+    use bark::persist::{sqlite::SqliteClient, BarkPersister};
+    use bark::{RecoveryStatus, WalletProperties, WalletSeed};
+    use bip39::Mnemonic;
+
+    fn test_seed() -> WalletSeed {
+        let mnemonic = Mnemonic::generate(12).expect("mnemonic");
+        WalletSeed::new_from_mnemonic(bitcoin::Network::Signet, &mnemonic)
+    }
+
+    async fn init_test_wallet_db(db_path: &std::path::Path, seed: &WalletSeed) {
+        SqliteClient::open(db_path)
+            .expect("open db")
+            .init_wallet(&WalletProperties {
+                network: bitcoin::Network::Signet,
+                fingerprint: seed.fingerprint(),
+                server_pubkey: None,
+                server_mailbox_pubkey: None,
+            })
+            .await
+            .expect("init wallet");
+    }
+
+    #[test]
+    fn database_for_another_seed_is_set_aside() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let db_path = dir.path().join("wallet.sqlite");
+            init_test_wallet_db(&db_path, &test_seed()).await;
+
+            assert!(set_aside_orphaned_wallet_database(&db_path, &test_seed())
+                .await
+                .expect("set aside"));
+            assert!(!db_path.exists());
+            let moved = std::fs::read_dir(dir.path())
+                .expect("read dir")
+                .filter_map(Result::ok)
+                .any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("wallet.sqlite.orphaned-")
+                });
+            assert!(moved);
+        });
+    }
+
+    #[test]
+    fn database_for_same_seed_is_kept() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let db_path = dir.path().join("wallet.sqlite");
+            let seed = test_seed();
+            init_test_wallet_db(&db_path, &seed).await;
+
+            assert!(!set_aside_orphaned_wallet_database(&db_path, &seed)
+                .await
+                .expect("check db"));
+            assert!(db_path.exists());
+        });
+    }
 
     #[test]
     fn refresh_threshold_uses_bark_network_defaults() {
